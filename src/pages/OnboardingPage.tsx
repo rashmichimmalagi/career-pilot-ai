@@ -103,7 +103,7 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
     setFormError(null);
 
     if (!user) {
-      setFormError('Authentication required. Please sign in with Google or GitHub first.');
+      setFormError('Authentication required. Please sign in with GitHub or Email first.');
       return;
     }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Compass, Sparkles, ShieldAlert, Key, Loader2, ArrowLeft, CheckCircle2, AlertCircle, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Compass, ShieldAlert, Key, Loader2, ArrowLeft, CheckCircle2, AlertCircle, Mail, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface AuthPageProps {
@@ -18,19 +18,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     error,
     isConfigured,
     isEmailVerified,
-    signInWithGoogle,
     signInWithGitHub,
     signUpWithEmail,
     signInWithEmail,
     sendPasswordResetEmail,
-    resendVerificationEmail,
     clearError
   } = useAuth();
 
-  const [authView, setAuthView] = useState<AuthViewMode>('main');
-  const [emailMode, setEmailMode] = useState<EmailFormMode>('signin');
+  const getInitialMode = (): EmailFormMode => {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    return mode === 'signup' ? 'signup' : 'signin';
+  };
 
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authView, setAuthView] = useState<AuthViewMode>('main');
+  const [emailMode, setEmailMode] = useState<EmailFormMode>(getInitialMode);
+
   const [isGitHubAuthenticating, setIsGitHubAuthenticating] = useState(false);
   const [isEmailLoading, setIsEmailLoading] = useState(false);
 
@@ -45,8 +48,30 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
   const [unverifiedEmailToResend, setUnverifiedEmailToResend] = useState<string | null>(null);
   const [duplicateAccountInfo, setDuplicateAccountInfo] = useState<{
     email: string;
-    provider: 'google' | 'github' | 'email' | 'existing';
+    provider: 'github' | 'email' | 'existing';
   } | null>(null);
+
+  const switchMode = (newMode: 'signup' | 'signin') => {
+    clearError();
+    setLocalError(null);
+    setSuccessMessage(null);
+    setUnverifiedEmailToResend(null);
+    setDuplicateAccountInfo(null);
+    setPassword('');
+    setConfirmPassword('');
+    setShowPassword(false);
+    setEmailMode(newMode);
+    const params = new URLSearchParams(window.location.search);
+    params.set('mode', newMode);
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState({}, '', newUrl);
+  };
+
+  // Sync mode with URL search params
+  useEffect(() => {
+    const mode = getInitialMode();
+    setEmailMode(mode);
+  }, [window.location.search]);
 
   // Clear any leftover auth errors when AuthPage mounts
   useEffect(() => {
@@ -79,39 +104,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     setPassword('');
     setConfirmPassword('');
     setShowPassword(false);
-  };
-
-  const handleGoogleSignIn = async () => {
-    clearError();
-    setLocalError(null);
-    setSuccessMessage(null);
-    setDuplicateAccountInfo(null);
-
-    if (user) {
-      if (!isEmailVerified) {
-        onNavigate('verify-email');
-      } else if (profile) {
-        onNavigate('dashboard');
-      } else {
-        onNavigate('onboarding');
-      }
-      return;
-    }
-
-    if (!isConfigured) {
-      setLocalError(
-        'Supabase Anon Key is missing. Please click "Setup Guide" above to configure your VITE_SUPABASE_ANON_KEY.'
-      );
-      return;
-    }
-
-    try {
-      setIsAuthenticating(true);
-      await signInWithGoogle();
-    } catch (err: any) {
-      setIsAuthenticating(false);
-      setLocalError("We couldn't complete sign-in. Please try again.");
-    }
   };
 
   const handleGitHubSignIn = async () => {
@@ -157,9 +149,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     ) {
       if (lower.includes('github')) {
         return 'This email is already associated with a GitHub account. Please continue with GitHub.';
-      }
-      if (lower.includes('google')) {
-        return 'This email is already associated with a Google account. Please continue with Google.';
       }
       return 'An account already exists with this email. Please sign in using your existing authentication method.';
     }
@@ -237,11 +226,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
       if (emailMode === 'signup') {
         const res = await signUpWithEmail(trimmedEmail, password);
 
-        // Check if Supabase returned an existing user (indicated by empty identities [] or existing identities)
+        // Check if Supabase returned an existing user
         if (res?.user) {
           const identities = res.user.identities || [];
           if (identities.length === 0) {
-            // User already exists in auth.users
             setDuplicateAccountInfo({
               email: trimmedEmail,
               provider: 'existing',
@@ -252,15 +240,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
             return;
           }
 
-          const googleId = identities.find((id: any) => id.provider === 'google');
           const githubId = identities.find((id: any) => id.provider === 'github');
           const emailId = identities.find((id: any) => id.provider === 'email');
 
-          if (googleId) {
-            setDuplicateAccountInfo({ email: trimmedEmail, provider: 'google' });
-            setLocalError('This email is already associated with a Google account. Please continue with Google.');
-            return;
-          }
           if (githubId) {
             setDuplicateAccountInfo({ email: trimmedEmail, provider: 'github' });
             setLocalError('This email is already associated with a GitHub account. Please continue with GitHub.');
@@ -299,16 +281,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
         lower.includes('already exists') ||
         lower.includes('identity_already_exists')
       ) {
-        let provider: 'google' | 'github' | 'email' | 'existing' = 'existing';
-        if (lower.includes('google')) provider = 'google';
-        else if (lower.includes('github')) provider = 'github';
+        let provider: 'github' | 'email' | 'existing' = 'existing';
+        if (lower.includes('github')) provider = 'github';
         else if (lower.includes('email')) provider = 'email';
 
         setDuplicateAccountInfo({ email: trimmedEmail, provider });
 
-        if (provider === 'google') {
-          setLocalError('This email is already associated with a Google account. Please continue with Google.');
-        } else if (provider === 'github') {
+        if (provider === 'github') {
           setLocalError('This email is already associated with a GitHub account. Please continue with GitHub.');
         } else if (provider === 'email') {
           setLocalError('An account with this email already exists. Please sign in instead.');
@@ -328,6 +307,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     }
   };
 
+  // Guard: if loading or already authenticated, do NOT render the sign-in form
+  if (loading || user) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] bg-slate-50 dark:bg-slate-950 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans">
+        <div className="w-full max-w-md bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 shadow-xl dark:shadow-2xl backdrop-blur-xl relative z-10 text-center space-y-4">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 dark:text-indigo-400 mx-auto" />
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            {user ? 'Signed in! Redirecting to dashboard...' : 'Checking authentication...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans transition-colors duration-300">
       
@@ -341,13 +334,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
             setAuthView('main');
             resetFormState();
           } else {
-            onNavigate('home');
+            if (window.history.length > 2) {
+              window.history.back();
+            } else {
+              onNavigate('welcome');
+            }
           }
         }}
-        className="absolute top-6 left-6 flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors bg-white/90 dark:bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm"
+        className="absolute top-6 left-6 flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors bg-white/90 dark:bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm cursor-pointer"
       >
         <ArrowLeft className="w-4 h-4" />
-        <span>{authView === 'email' ? 'All Sign In Options' : 'Back to Home'}</span>
+        <span>{authView === 'email' ? 'All Sign In Options' : 'Back'}</span>
       </button>
 
       {/* Main Auth Card */}
@@ -362,18 +359,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
           </div>
 
           <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-100 pt-2">
-            {authView === 'main' && (
-              <>Welcome to <span className="text-indigo-600 dark:text-indigo-400">CareerPilot AI</span></>
-            )}
-            {authView === 'email' && emailMode === 'signin' && 'Welcome back'}
-            {authView === 'email' && emailMode === 'signup' && 'Create your CareerPilot account'}
-            {authView === 'email' && emailMode === 'forgot' && 'Reset your password'}
+            {emailMode === 'signup' && 'Create your CareerPilot account'}
+            {emailMode === 'signin' && 'Welcome back'}
+            {emailMode === 'forgot' && 'Reset your password'}
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-            {authView === 'main' && 'Sign in to continue your placement journey'}
-            {authView === 'email' && emailMode === 'signin' && 'Sign in to your CareerPilot account'}
-            {authView === 'email' && emailMode === 'signup' && 'Start your career and placement journey'}
-            {authView === 'email' && emailMode === 'forgot' && 'Enter your email address to receive a reset link'}
+            {emailMode === 'signup' && 'Start your placement and career journey'}
+            {emailMode === 'signin' && 'Sign in to your CareerPilot account'}
+            {emailMode === 'forgot' && 'Enter your email address to receive a reset link'}
           </p>
         </div>
 
@@ -412,16 +405,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                   >
                     Sign In
                   </button>
-
-                  {(!duplicateAccountInfo || duplicateAccountInfo.provider === 'google' || duplicateAccountInfo.provider === 'existing') && (
-                    <button
-                      type="button"
-                      onClick={handleGoogleSignIn}
-                      className="px-3 py-1.5 rounded-xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:opacity-90 font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
-                    >
-                      Continue with Google
-                    </button>
-                  )}
 
                   {(!duplicateAccountInfo || duplicateAccountInfo.provider === 'github' || duplicateAccountInfo.provider === 'existing') && (
                     <button
@@ -480,50 +463,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
           </div>
         )}
 
-        {/* Main View Buttons */}
+        {/* Main View Buttons: ONLY GitHub + Email */}
         {authView === 'main' && (
           <div className="space-y-3 pt-2">
             
-            {/* Google OAuth */}
-            <button
-              onClick={handleGoogleSignIn}
-              disabled={isAuthenticating}
-              className="w-full py-3.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 font-bold text-sm shadow-md transition-all flex items-center justify-center gap-3 disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
-            >
-              {isAuthenticating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white dark:text-slate-800" />
-                  <span>Redirecting to Google OAuth...</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    />
-                  </svg>
-                  <span>Continue with Google</span>
-                </>
-              )}
-            </button>
-
             {/* GitHub OAuth */}
             <button
               onClick={handleGitHubSignIn}
-              disabled={isGitHubAuthenticating || isAuthenticating}
+              disabled={isGitHubAuthenticating}
               className="w-full py-3.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 font-bold text-sm shadow-md transition-all flex items-center justify-center gap-3 disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] cursor-pointer focus:outline-none focus:ring-2 focus:ring-slate-400 border border-slate-800 dark:border-slate-700"
             >
               {isGitHubAuthenticating ? (
@@ -541,12 +488,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
               )}
             </button>
 
-            {/* Email Login Option */}
+            {/* Email Option */}
             <button
               onClick={() => {
-                resetFormState();
+                clearError();
+                setLocalError(null);
+                setSuccessMessage(null);
                 setAuthView('email');
-                setEmailMode('signin');
               }}
               className="w-full py-3.5 px-4 rounded-2xl bg-indigo-50 hover:bg-indigo-100 dark:bg-slate-800/90 dark:hover:bg-slate-800 border border-indigo-200 dark:border-slate-700 text-indigo-900 dark:text-indigo-200 font-bold text-sm shadow-sm transition-all flex items-center justify-between hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
             >
@@ -556,6 +504,33 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
               </div>
               <ArrowRight className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
             </button>
+
+            {/* Mode Switcher Link */}
+            <div className="text-center pt-2">
+              {emailMode === 'signin' ? (
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Don't have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => switchMode('signup')}
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold cursor-pointer"
+                  >
+                    Create one
+                  </button>
+                </p>
+              ) : (
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => switchMode('signin')}
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold cursor-pointer"
+                  >
+                    Sign In
+                  </button>
+                </p>
+              )}
+            </div>
 
           </div>
         )}
@@ -577,15 +552,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                   onChange={(e) => {
                     setEmail(e.target.value);
                     if (localError) setLocalError(null);
-                    if (error) clearError();
                   }}
-                  placeholder="Enter your email / Gmail"
+                  placeholder="Enter your email address"
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
                 />
               </div>
             </div>
 
-            {/* Password Field (for signin and signup) */}
+            {/* Password Field */}
             {emailMode !== 'forgot' && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -613,7 +587,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                     onChange={(e) => {
                       setPassword(e.target.value);
                       if (localError) setLocalError(null);
-                      if (error) clearError();
                     }}
                     placeholder="Enter your password"
                     className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors pr-10"
@@ -629,7 +602,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
               </div>
             )}
 
-            {/* Confirm Password Field (only for signup) */}
+            {/* Confirm Password Field */}
             {emailMode === 'signup' && (
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -642,7 +615,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                   onChange={(e) => {
                     setConfirmPassword(e.target.value);
                     if (localError) setLocalError(null);
-                    if (error) clearError();
                   }}
                   placeholder="Confirm your password"
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
@@ -677,11 +649,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                   Don't have an account?{' '}
                   <button
                     type="button"
-                    onClick={() => {
-                      resetFormState();
-                      setEmailMode('signup');
-                    }}
-                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold"
+                    onClick={() => switchMode('signup')}
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold cursor-pointer"
                   >
                     Create one
                   </button>
@@ -693,11 +662,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                   Already have an account?{' '}
                   <button
                     type="button"
-                    onClick={() => {
-                      resetFormState();
-                      setEmailMode('signin');
-                    }}
-                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold"
+                    onClick={() => switchMode('signin')}
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold cursor-pointer"
                   >
                     Sign In
                   </button>
@@ -709,11 +675,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                   Remembered your password?{' '}
                   <button
                     type="button"
-                    onClick={() => {
-                      resetFormState();
-                      setEmailMode('signin');
-                    }}
-                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold"
+                    onClick={() => switchMode('signin')}
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold cursor-pointer"
                   >
                     Back to Sign In
                   </button>
@@ -733,4 +696,3 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     </div>
   );
 };
-

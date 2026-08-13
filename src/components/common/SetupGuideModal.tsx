@@ -42,7 +42,7 @@ export const SetupGuideModal: React.FC<SetupGuideModalProps> = ({ isOpen, onClos
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">CareerPilot AI - Setup & Integration Guide</h2>
-              <p className="text-xs text-slate-600 dark:text-slate-400">Step-by-step instructions for Supabase & Google OAuth setup</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400">Step-by-step instructions for Supabase & GitHub OAuth setup</p>
             </div>
           </div>
           <button
@@ -75,7 +75,7 @@ export const SetupGuideModal: React.FC<SetupGuideModalProps> = ({ isOpen, onClos
             }`}
           >
             <Globe className="w-4 h-4" />
-            <span>2. Google OAuth Configuration</span>
+            <span>2. GitHub OAuth Configuration</span>
           </button>
           <button
             onClick={() => setActiveTab('env')}
@@ -143,13 +143,13 @@ export const SetupGuideModal: React.FC<SetupGuideModalProps> = ({ isOpen, onClos
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                 <h3 className="font-semibold text-slate-100 flex items-center gap-2">
                   <Globe className="w-4 h-4 text-emerald-400" />
-                  Step 1: Configure Google Cloud OAuth Client
+                  Step 1: Create a GitHub OAuth App
                 </h3>
                 <ol className="list-decimal list-inside space-y-2 text-slate-300">
-                  <li>Go to Google Cloud Console Credentials page: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-indigo-400 underline">Google Console</a></li>
-                  <li>Create or select an <strong>OAuth 2.0 Client ID</strong> (Web Application).</li>
+                  <li>Go to GitHub Developer Settings: <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer" className="text-indigo-400 underline">GitHub Developer Settings</a></li>
+                  <li>Click <strong>New OAuth App</strong>.</li>
                   <li>
-                    In <strong>Authorized redirect URIs</strong>, add this exact Supabase callback URL:
+                    In <strong>Authorization callback URL</strong>, add this exact Supabase callback URL:
                     <div className="flex items-center gap-2 mt-1.5 font-mono bg-slate-900 border border-slate-800 p-2 rounded-lg text-xs text-indigo-300">
                       <span className="truncate flex-1">{supabaseCallbackUrl}</span>
                       <button
@@ -166,12 +166,12 @@ export const SetupGuideModal: React.FC<SetupGuideModalProps> = ({ isOpen, onClos
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                 <h3 className="font-semibold text-slate-100 flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                  Step 2: Enable Google Provider in Supabase Auth
+                  Step 2: Enable GitHub Provider in Supabase Auth
                 </h3>
                 <ol className="list-decimal list-inside space-y-2 text-slate-300">
                   <li>Open Supabase Auth Providers setting: <a href={`${supabaseProjectUrl}/settings/auth/providers`} target="_blank" rel="noreferrer" className="text-indigo-400 underline">Supabase Auth Providers</a></li>
-                  <li>Enable <strong>Google</strong> provider.</li>
-                  <li>Paste your Google Client ID & Client Secret from Google Cloud Console.</li>
+                  <li>Enable <strong>GitHub</strong> provider.</li>
+                  <li>Paste your GitHub Client ID & Client Secret from GitHub.</li>
                   <li>
                     In <strong>URL Configuration & Redirect URLs</strong>, ensure this Application URL is whitelisted:
                     <div className="flex items-center gap-2 mt-1.5 font-mono bg-slate-900 border border-slate-800 p-2 rounded-lg text-xs text-emerald-300">

@@ -15,6 +15,7 @@ import {
 } from '../lib/supabase';
 import { profileService } from '../services/profileService';
 import { Profile } from '../types/database';
+import { Toast, ToastData } from '../components/common/Toast';
 
 interface AuthContextType {
   user: User | null;
@@ -25,6 +26,9 @@ interface AuthContextType {
   error: string | null;
   isConfigured: boolean;
   isEmailVerified: boolean;
+  toast: ToastData | null;
+  showToast: (title: string, subtitle?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  dismissToast: () => void;
   signInWithGoogle: () => Promise<void>;
   signInWithGitHub: () => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<any>;
@@ -47,7 +51,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [profileLoading, setProfileLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastData | null>(null);
+
   const configured = isSupabaseConfigured();
+
+  const showToast = useCallback((title: string, subtitle?: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
+    setToast({
+      id: Date.now().toString(),
+      title,
+      subtitle,
+      type
+    });
+  }, []);
+
+  const dismissToast = useCallback(() => {
+    setToast(null);
+  }, []);
+
+  // Auto-dismiss toast after 3.5 seconds
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => {
+      setToast(null);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const fetchProfileForUser = useCallback(async (userId: string) => {
     setProfileLoading(true);
@@ -78,7 +106,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (oauthError) {
       const formattedError = decodeURIComponent(oauthError).replace(/\+/g, ' ');
       setError(`Authentication error: ${formattedError}`);
-      // Clean up error params from URL without reloading
       const cleanUrl = window.location.origin + window.location.pathname;
       window.history.replaceState({}, '', cleanUrl);
     }
@@ -105,6 +132,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (currentSession?.user) {
+          if (currentSession.access_token) {
+            sessionStorage.setItem('notified_session_token', currentSession.access_token);
+          }
           const p = await fetchProfileForUser(currentSession.user.id);
           if (isMounted) setProfile(p);
         }
@@ -126,22 +156,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(newSession);
       setUser(newSession?.user ?? null);
 
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      if (event === 'INITIAL_SESSION') {
+        if (newSession?.access_token) {
+          sessionStorage.setItem('notified_session_token', newSession.access_token);
+        }
         if (newSession?.user) {
           await fetchProfileForUser(newSession.user.id);
+        } else {
+          setProfile(null);
+        }
+      } else if (event === 'SIGNED_IN' && newSession?.user && newSession.access_token) {
+        const prevToken = sessionStorage.getItem('notified_session_token');
+        const userProfile = await fetchProfileForUser(newSession.user.id);
+
+        if (prevToken !== newSession.access_token) {
+          sessionStorage.setItem('notified_session_token', newSession.access_token);
+
+          const rawName =
+            userProfile?.full_name ||
+            newSession.user.user_metadata?.full_name ||
+            newSession.user.user_metadata?.name ||
+            newSession.user.user_metadata?.user_name ||
+            '';
+
+          const studentName = typeof rawName === 'string' && rawName.trim() ? rawName.trim().split(' ')[0] : '';
+
+          if (userProfile) {
+            const title = studentName ? `Welcome back, ${studentName}! 👋` : 'Welcome back! 👋';
+            showToast(title, "You're successfully signed in.", 'success');
+          } else {
+            showToast('Welcome to CareerPilot AI! 👋', "Let's set up your career profile.", 'success');
+          }
         }
       } else if (event === 'SIGNED_OUT') {
+        sessionStorage.removeItem('notified_session_token');
+        setProfile(null);
+      } else if (newSession?.user) {
+        await fetchProfileForUser(newSession.user.id);
+      } else {
         setProfile(null);
       }
 
-      setLoading(false);
+      if (isMounted) {
+        setLoading(false);
+      }
     });
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [configured, fetchProfileForUser]);
+  }, [configured, fetchProfileForUser, showToast]);
 
   const handleSignInWithGoogle = async () => {
     setError(null);
@@ -233,10 +298,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleSignOut = async () => {
     setError(null);
     try {
+      sessionStorage.removeItem('notified_session_token');
       await signOutUser();
       setUser(null);
       setSession(null);
       setProfile(null);
+      showToast('Signed out successfully 👋', 'See you next time!', 'info');
     } catch (err: any) {
       console.error('Sign Out Error:', err);
       setError(err.message || 'Failed to sign out.');
@@ -263,6 +330,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error,
         isConfigured: configured,
         isEmailVerified,
+        toast,
+        showToast,
+        dismissToast,
         signInWithGoogle: handleSignInWithGoogle,
         signInWithGitHub: handleSignInWithGitHub,
         signUpWithEmail: handleSignUpWithEmail,
@@ -277,6 +347,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }}
     >
       {children}
+      <Toast toast={toast} onClose={dismissToast} />
     </AuthContext.Provider>
   );
 };

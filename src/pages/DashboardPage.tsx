@@ -14,7 +14,6 @@ import {
   Building2,
   Bot,
   BarChart3,
-  LogOut,
   Sparkles,
   Lock,
   CheckCircle2,
@@ -32,7 +31,7 @@ interface DashboardPageProps {
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile } = useAuth();
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
 
   const meta = user?.user_metadata || {};
@@ -75,16 +74,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-xl">
               {profile?.college_name ? `${profile.college_name} • ${profile.department}` : 'Engineering Student Placement Portal'}
             </p>
-          </div>
-
-          <div className="flex items-center gap-3 relative z-10 shrink-0">
-            <button
-              onClick={signOut}
-              className="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 border border-rose-500/20 text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Sign Out</span>
-            </button>
           </div>
 
         </div>

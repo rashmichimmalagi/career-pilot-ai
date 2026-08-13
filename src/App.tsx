@@ -6,6 +6,7 @@ import { Footer } from './components/layout/Footer';
 import { ConfigMissingBanner } from './components/common/ConfigMissingBanner';
 import { SetupGuideModal } from './components/common/SetupGuideModal';
 import { LandingPage } from './pages/LandingPage';
+import { WelcomePage } from './pages/WelcomePage';
 import { AuthPage } from './pages/AuthPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -25,8 +26,12 @@ function AppContent() {
     if (cleanPath === 'verify-email') {
       return 'verify-email';
     }
+    if (cleanPath === 'welcome') {
+      return 'welcome';
+    }
     if (
       [
+        'home',
         'auth',
         'onboarding',
         'dashboard',
@@ -48,11 +53,18 @@ function AppContent() {
 
   const [setupGuideOpen, setSetupGuideOpen] = useState(false);
 
-  // Sync route with window pathname
-  const navigateTo = (page: string) => {
-    setCurrentPage(page);
-    const targetPath = page === 'home' ? '/' : `/${page}`;
-    if (window.location.pathname !== targetPath) {
+  // Sync route with window pathname and query params
+  const navigateTo = (target: string) => {
+    const [page, query] = target.split('?');
+    const cleanPage = page.toLowerCase();
+    setCurrentPage(cleanPage);
+
+    let targetPath = cleanPage === 'home' ? '/' : `/${cleanPage}`;
+    if (query) {
+      targetPath += `?${query}`;
+    }
+
+    if (window.location.pathname + window.location.search !== targetPath) {
       window.history.pushState({}, '', targetPath);
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -121,7 +133,7 @@ function AppContent() {
         window.history.replaceState({}, '', window.location.pathname);
       }
 
-      if (currentPage === 'auth' || (currentPage === 'home' && hasOAuthParams)) {
+      if (currentPage === 'auth' || ((currentPage === 'home' || currentPage === 'welcome') && hasOAuthParams)) {
         if (profile) {
           navigateTo('dashboard');
         } else {
@@ -165,6 +177,13 @@ function AppContent() {
 
       {/* View Page Routing */}
       <main className="flex-1">
+        {currentPage === 'welcome' && (
+          <WelcomePage
+            onNavigate={navigateTo}
+            onOpenSetupGuide={() => setSetupGuideOpen(true)}
+          />
+        )}
+
         {currentPage === 'home' && (
           <LandingPage
             onNavigate={navigateTo}
