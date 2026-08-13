@@ -65,6 +65,32 @@ export const signInWithGoogle = async () => {
 };
 
 /**
+ * Sign in with GitHub OAuth using Supabase Auth
+ */
+export const signInWithGitHub = async () => {
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      'Supabase environment variables (VITE_SUPABASE_ANON_KEY) are not configured yet. Please configure your key in environment secrets.'
+    );
+  }
+
+  const redirectTo = window.location.origin;
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'github',
+    options: {
+      redirectTo,
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+/**
  * Sign out current user
  */
 export const signOutUser = async () => {

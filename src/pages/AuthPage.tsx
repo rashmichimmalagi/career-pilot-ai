@@ -8,8 +8,9 @@ interface AuthPageProps {
 }
 
 export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide }) => {
-  const { user, profile, loading, error, isConfigured, signInWithGoogle, clearError } = useAuth();
+  const { user, profile, loading, error, isConfigured, signInWithGoogle, signInWithGitHub, clearError } = useAuth();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isGitHubAuthenticating, setIsGitHubAuthenticating] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   // Auto-redirect if user is already logged in
@@ -41,6 +42,27 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     } catch (err: any) {
       setIsAuthenticating(false);
       setLocalError(err.message || 'Failed to initialize Google Authentication. Please check popup blockers or credentials.');
+    }
+  };
+
+  const handleGitHubSignIn = async () => {
+    clearError();
+    setLocalError(null);
+
+    if (!isConfigured) {
+      setLocalError(
+        'Supabase Anon Key is missing. Please click "Setup Guide" above to configure your VITE_SUPABASE_ANON_KEY.'
+      );
+      return;
+    }
+
+    try {
+      setIsGitHubAuthenticating(true);
+      await signInWithGitHub();
+      // Supabase OAuth redirects to GitHub login page...
+    } catch (err: any) {
+      setIsGitHubAuthenticating(false);
+      setLocalError(err.message || 'Failed to initialize GitHub Authentication. Please check popup blockers or credentials.');
     }
   };
 
@@ -149,23 +171,26 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
             )}
           </button>
 
-          {/* GitHub OAuth (Prepared Architecture) */}
-          <div className="relative">
-            <button
-              disabled
-              className="w-full py-3.5 px-4 rounded-2xl bg-slate-100/80 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 font-semibold text-sm cursor-not-allowed flex items-center justify-between opacity-70"
-            >
-              <div className="flex items-center gap-3">
-                <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+          {/* GitHub OAuth (REAL AUTHENTICATION) */}
+          <button
+            onClick={handleGitHubSignIn}
+            disabled={isGitHubAuthenticating || isAuthenticating}
+            className="w-full py-3.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 font-bold text-sm shadow-md transition-all flex items-center justify-center gap-3 disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] cursor-pointer focus:outline-none focus:ring-2 focus:ring-slate-400 border border-slate-800 dark:border-slate-700"
+          >
+            {isGitHubAuthenticating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-white" />
+                <span>Redirecting to GitHub OAuth...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5 fill-current text-white shrink-0" viewBox="0 0 24 24">
                   <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
                 </svg>
                 <span>Continue with GitHub</span>
-              </div>
-              <span className="text-[10px] uppercase font-bold text-slate-500 bg-slate-200 dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-800">
-                Configurable
-              </span>
-            </button>
-          </div>
+              </>
+            )}
+          </button>
 
           {/* Email Login (Prepared Architecture) */}
           <div className="relative">

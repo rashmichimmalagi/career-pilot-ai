@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured, signInWithGoogle, signOutUser } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, signInWithGoogle, signInWithGitHub, signOutUser } from '../lib/supabase';
 import { profileService } from '../services/profileService';
 import { Profile } from '../types/database';
 
@@ -13,6 +13,7 @@ interface AuthContextType {
   error: string | null;
   isConfigured: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithGitHub: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<Profile | null>;
   clearError: () => void;
@@ -47,6 +48,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Initialize session and set up auth state change listener
   useEffect(() => {
+    // Check for OAuth errors returned in URL query parameters or hash fragment
+    const urlParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const oauthError =
+      urlParams.get('error_description') ||
+      urlParams.get('error') ||
+      hashParams.get('error_description') ||
+      hashParams.get('error');
+
+    if (oauthError) {
+      const formattedError = decodeURIComponent(oauthError).replace(/\+/g, ' ');
+      setError(`Authentication error: ${formattedError}`);
+      // Clean up error params from URL without reloading
+      const cleanUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, '', cleanUrl);
+    }
+
     if (!configured) {
       setLoading(false);
       return;
@@ -118,6 +136,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const handleSignInWithGitHub = async () => {
+    setError(null);
+    try {
+      await signInWithGitHub();
+    } catch (err: any) {
+      console.error('GitHub Sign-In Error:', err);
+      setError(err.message || 'Failed to initiate GitHub Authentication. Please try again.');
+      throw err;
+    }
+  };
+
   const handleSignOut = async () => {
     setError(null);
     try {
@@ -149,6 +178,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error,
         isConfigured: configured,
         signInWithGoogle: handleSignInWithGoogle,
+        signInWithGitHub: handleSignInWithGitHub,
         signOut: handleSignOut,
         refreshProfile,
         clearError,

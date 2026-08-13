@@ -60,8 +60,16 @@ function AppContent() {
         navigateTo('auth');
       }
     } else {
-      // Authenticated user checks
-      if (currentPage === 'auth') {
+      // Handle OAuth return redirect when landing on home or auth
+      const hasOAuthParams =
+        window.location.search.includes('code=') ||
+        window.location.hash.includes('access_token=');
+
+      if (hasOAuthParams) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+
+      if (currentPage === 'auth' || (currentPage === 'home' && hasOAuthParams)) {
         if (profile) {
           navigateTo('dashboard');
         } else {
