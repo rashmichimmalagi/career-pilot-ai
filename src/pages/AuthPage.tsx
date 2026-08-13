@@ -87,6 +87,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     setSuccessMessage(null);
     setDuplicateAccountInfo(null);
 
+    if (user) {
+      if (!isEmailVerified) {
+        onNavigate('verify-email');
+      } else if (profile) {
+        onNavigate('dashboard');
+      } else {
+        onNavigate('onboarding');
+      }
+      return;
+    }
+
     if (!isConfigured) {
       setLocalError(
         'Supabase Anon Key is missing. Please click "Setup Guide" above to configure your VITE_SUPABASE_ANON_KEY.'
@@ -108,6 +119,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     setLocalError(null);
     setSuccessMessage(null);
     setDuplicateAccountInfo(null);
+
+    if (user) {
+      if (!isEmailVerified) {
+        onNavigate('verify-email');
+      } else if (profile) {
+        onNavigate('dashboard');
+      } else {
+        onNavigate('onboarding');
+      }
+      return;
+    }
 
     if (!isConfigured) {
       setLocalError(

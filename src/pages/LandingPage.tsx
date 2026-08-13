@@ -23,6 +23,7 @@ import {
   Lock
 } from 'lucide-react';
 import { BackgroundBubbles } from '../components/common/BackgroundBubbles';
+import { useAuth } from '../context/AuthContext';
 
 interface LandingPageProps {
   onNavigate: (page: string) => void;
@@ -137,6 +138,20 @@ const CAREER_CATEGORIES = [
 ];
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
+  const { user, profile } = useAuth();
+
+  const handlePrimaryCTA = () => {
+    if (user) {
+      if (profile) {
+        onNavigate('dashboard');
+      } else {
+        onNavigate('onboarding');
+      }
+    } else {
+      onNavigate('auth');
+    }
+  };
+
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
@@ -179,10 +194,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               {/* CTA Buttons */}
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
                 <button
-                  onClick={() => onNavigate('auth')}
+                  onClick={handlePrimaryCTA}
                   className="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-bold text-base shadow-xl shadow-indigo-600/30 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 group cursor-pointer"
                 >
-                  <span>Start Your Placement Journey</span>
+                  <span>{user ? 'Go to Student Dashboard' : 'Start Your Placement Journey'}</span>
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
 
@@ -1156,10 +1171,10 @@ function processTargetLogic(dataInput) {
 
                 <div className="pt-4">
                   <button
-                    onClick={() => onNavigate('auth')}
+                    onClick={handlePrimaryCTA}
                     className="px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all inline-flex items-center gap-2 cursor-pointer"
                   >
-                    <span>Connect with Mentor</span>
+                    <span>{user ? 'Go to Dashboard' : 'Connect with Mentor'}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -1347,11 +1362,11 @@ function processTargetLogic(dataInput) {
 
               <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-4">
                 <button
-                  onClick={() => onNavigate('auth')}
+                  onClick={handlePrimaryCTA}
                   className="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-bold text-base shadow-xl shadow-indigo-600/30 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Sparkles className="w-5 h-5 text-cyan-200" />
-                  <span>Start Your Placement Journey</span>
+                  <span>{user ? 'Go to Student Dashboard' : 'Start Your Placement Journey'}</span>
                 </button>
 
                 <button

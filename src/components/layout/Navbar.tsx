@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Compass, Sparkles, Menu, X, Sun, Moon } from 'lucide-react';
+import { Compass, Sparkles, Menu, X, Sun, Moon, LogOut, User as UserIcon, LayoutDashboard } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 
 interface NavbarProps {
   onNavigate: (page: string) => void;
@@ -10,6 +11,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
   const { theme, toggleTheme } = useTheme();
+  const { user, profile, loading, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
 
@@ -38,6 +40,29 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
       if (el) el.scrollIntoView({ behavior: 'smooth' });
     }
   };
+
+  const handleSignOut = async () => {
+    setMobileMenuOpen(false);
+    try {
+      await signOut();
+      onNavigate('home');
+    } catch (err) {
+      console.error('Sign out error in Navbar:', err);
+    }
+  };
+
+  const meta = user?.user_metadata || {};
+  const rawName =
+    profile?.full_name ||
+    meta.full_name ||
+    meta.name ||
+    meta.user_name ||
+    meta.preferred_username ||
+    user?.email ||
+    'Student';
+
+  const studentName = typeof rawName === 'string' && rawName.trim() ? rawName.trim().split(' ')[0] : 'Student';
+  const avatarUrl = profile?.avatar_url || meta.avatar_url || meta.picture || '';
 
   return (
     <header
@@ -85,7 +110,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
               onNavigate('home');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-slate-900 dark:text-slate-200 font-semibold cursor-pointer"
+            className={`hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer ${
+              currentPage === 'home' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : ''
+            }`}
           >
             Home
           </button>
@@ -107,6 +134,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
           >
             About
           </button>
+
+          {/* Authenticated Dashboard Link */}
+          {user && (
+            <button
+              onClick={() => onNavigate('dashboard')}
+              className={`hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                currentPage === 'dashboard' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'font-semibold'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              <span>Dashboard</span>
+            </button>
+          )}
         </nav>
 
         {/* Desktop Auth UI Navigation & Theme Toggle */}
@@ -126,22 +166,53 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
             )}
           </button>
 
-          <button
-            onClick={() => onNavigate('auth')}
-            className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
-          >
-            Sign In
-          </button>
-          <button
-            onClick={() => onNavigate('auth')}
-            className="relative group overflow-hidden rounded-xl p-[1px] font-semibold text-xs sm:text-sm cursor-pointer shadow-lg shadow-indigo-600/20 active:scale-95 transition-all"
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-xl group-hover:opacity-100 transition-opacity" />
-            <div className="relative px-4 py-2 rounded-[11px] bg-white dark:bg-slate-950 group-hover:bg-slate-50 dark:group-hover:bg-slate-900 transition-colors flex items-center gap-1.5 text-slate-900 dark:text-white font-bold">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 group-hover:animate-pulse" />
-              <span>Get Started</span>
+          {/* Loading Skeleton during session check */}
+          {loading ? (
+            <div className="w-32 h-9 rounded-xl bg-slate-200/60 dark:bg-slate-800/60 animate-pulse" />
+          ) : user ? (
+            /* Logged-In Controls */
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onNavigate('dashboard')}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 font-semibold text-xs transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+              >
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt={studentName} className="w-5 h-5 rounded-full object-cover border border-indigo-500" />
+                ) : (
+                  <UserIcon className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                )}
+                <span className="max-w-[120px] truncate">{studentName}</span>
+              </button>
+
+              <button
+                onClick={handleSignOut}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 border border-rose-500/20 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
             </div>
-          </button>
+          ) : (
+            /* Logged-Out Controls */
+            <>
+              <button
+                onClick={() => onNavigate('auth')}
+                className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => onNavigate('auth')}
+                className="relative group overflow-hidden rounded-xl p-[1px] font-semibold text-xs sm:text-sm cursor-pointer shadow-lg shadow-indigo-600/20 active:scale-95 transition-all"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-xl group-hover:opacity-100 transition-opacity" />
+                <div className="relative px-4 py-2 rounded-[11px] bg-white dark:bg-slate-950 group-hover:bg-slate-50 dark:group-hover:bg-slate-900 transition-colors flex items-center gap-1.5 text-slate-900 dark:text-white font-bold">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 group-hover:animate-pulse" />
+                  <span>Get Started</span>
+                </div>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Mobile Hamburger & Theme Toggle Button */}
@@ -196,6 +267,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
             >
               About
             </button>
+
+            {user && (
+              <button
+                onClick={() => {
+                  onNavigate('dashboard');
+                  setMobileMenuOpen(false);
+                }}
+                className="text-left py-2 text-indigo-600 dark:text-indigo-400 font-bold border-b border-slate-100 dark:border-slate-900 flex items-center gap-2"
+              >
+                <LayoutDashboard className="w-4 h-4" />
+                <span>Dashboard</span>
+              </button>
+            )}
           </div>
 
           {/* Theme Switcher in Mobile Menu */}
@@ -221,28 +305,59 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
           </div>
 
           <div className="pt-2 flex flex-col gap-2.5">
-            <button
-              onClick={() => {
-                onNavigate('auth');
-                setMobileMenuOpen(false);
-              }}
-              className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 font-medium text-sm text-center"
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => {
-                onNavigate('auth');
-                setMobileMenuOpen(false);
-              }}
-              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 text-white font-semibold text-sm text-center shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>Get Started</span>
-            </button>
+            {loading ? (
+              <div className="w-full h-10 rounded-xl bg-slate-200/60 dark:bg-slate-800/60 animate-pulse" />
+            ) : user ? (
+              <>
+                <div className="px-3 py-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs font-semibold flex items-center gap-2">
+                  <UserIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <span>Logged in as {studentName}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    onNavigate('dashboard');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-sm text-center shadow-md flex items-center justify-center gap-2"
+                >
+                  <LayoutDashboard className="w-4 h-4" />
+                  <span>Go to Dashboard</span>
+                </button>
+                <button
+                  onClick={handleSignOut}
+                  className="w-full py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 border border-rose-500/20 font-semibold text-sm text-center flex items-center justify-center gap-2"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign Out</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    onNavigate('auth');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 font-medium text-sm text-center"
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => {
+                    onNavigate('auth');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 text-white font-semibold text-sm text-center shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Get Started</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
     </header>
   );
 };
+
