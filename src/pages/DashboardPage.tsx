@@ -33,7 +33,17 @@ interface DashboardPageProps {
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpenSetupGuide }) => {
   const { user, profile, signOut } = useAuth();
 
-  const firstName = profile?.full_name?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || 'Student';
+  const meta = user?.user_metadata || {};
+  const rawName =
+    profile?.full_name ||
+    meta.full_name ||
+    meta.name ||
+    meta.user_name ||
+    meta.preferred_username ||
+    '';
+
+  const firstName = rawName.trim() ? rawName.trim().split(' ')[0] : 'Student';
+  const providerName = user?.app_metadata?.provider ? `${user.app_metadata.provider.toUpperCase()} Authenticated` : 'Authenticated Session';
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 p-4 sm:p-6 lg:p-8 font-sans space-y-8 transition-colors duration-300">
@@ -49,7 +59,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold text-[11px] flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                <span>Google OAuth Authenticated</span>
+                <span>{providerName}</span>
               </span>
               <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-semibold text-[11px] uppercase font-mono">
                 Role: {profile?.role || 'student'}

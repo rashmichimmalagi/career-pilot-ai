@@ -16,12 +16,12 @@ const getAuthFullName = (u: any): string => {
   const name =
     meta.full_name ||
     meta.name ||
-    meta.preferred_username ||
     meta.user_name ||
+    meta.preferred_username ||
     identityData.full_name ||
     identityData.name ||
-    identityData.preferred_username ||
     identityData.user_name ||
+    identityData.preferred_username ||
     '';
 
   return typeof name === 'string' ? name.trim() : '';
@@ -192,18 +192,18 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
           {authAvatar ? (
             <img
               src={authAvatar}
-              alt={formData.full_name || authEmail || 'User Avatar'}
+              alt={formData.full_name || 'User Avatar'}
               className="w-12 h-12 rounded-full border-2 border-indigo-500/40 object-cover"
             />
           ) : (
             <div className="w-12 h-12 rounded-full bg-indigo-600/20 border-2 border-indigo-500/40 flex items-center justify-center text-indigo-600 dark:text-indigo-300 font-bold text-base">
-              {(formData.full_name || authEmail || 'U').charAt(0).toUpperCase()}
+              {(formData.full_name ? formData.full_name.charAt(0) : 'U').toUpperCase()}
             </div>
           )}
 
           <div className="flex-1 min-w-0">
             <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Authenticated Account</p>
-            <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{formData.full_name || authEmail || 'Authenticated Account'}</p>
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{formData.full_name || 'Student Account'}</p>
             <p className="text-xs text-indigo-600 dark:text-indigo-400 font-mono truncate">{formData.email}</p>
           </div>
 
