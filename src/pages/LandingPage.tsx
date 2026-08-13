@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Sparkles,
   ArrowRight,
+  ArrowLeft,
   FileCheck,
   Code2,
   Cpu,
@@ -148,7 +149,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
         onNavigate('onboarding');
       }
     } else {
-      onNavigate('auth');
+      onNavigate('auth?mode=signup');
     }
   };
 
@@ -165,8 +166,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
       <BackgroundBubbles />
 
       {/* ================= HERO SECTION ================= */}
-      <section className="relative pt-12 pb-20 md:pt-24 md:pb-32 overflow-hidden">
+      <section className="relative pt-8 pb-16 md:pt-16 md:pb-24 overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+          
+          {/* Top Back Navigation Button */}
+          <div className="mb-6">
+            <button
+              onClick={() => onNavigate('welcome')}
+              className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors bg-white/90 dark:bg-slate-900/90 px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back</span>
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
             
             {/* Hero Left Content */}
@@ -321,6 +334,110 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             </div>
 
           </div>
+        </div>
+      </section>
+
+      {/* ================= COMPACT CAPABILITY CARDS SECTION ================= */}
+      <section className="relative z-10 py-12 bg-slate-100/60 dark:bg-slate-900/50 border-y border-slate-200/80 dark:border-slate-800/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-8">
+          
+          <div className="text-center space-y-2 max-w-2xl mx-auto">
+            <span className="text-xs font-extrabold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+              PLATFORM CAPABILITIES
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
+              Everything you need for placement preparation
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            
+            {/* 01 AI Resume Analyzer */}
+            <div
+              onClick={() => scrollToSection('section-resume-analyzer')}
+              className="p-5 rounded-2xl bg-white/90 dark:bg-slate-950/80 border border-slate-200/90 dark:border-slate-800/90 hover:border-indigo-500/50 transition-all cursor-pointer group space-y-3 shadow-sm hover:shadow-md backdrop-blur-md"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-black text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">01</span>
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-500/20 group-hover:scale-105 transition-transform shadow-sm">
+                  <FileCheck className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors">
+                  AI Resume Analyzer
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 pt-1 leading-relaxed">
+                  ATS optimization and skill-gap analysis
+                </p>
+              </div>
+            </div>
+
+            {/* 02 Coding Practice */}
+            <div
+              onClick={() => scrollToSection('section-coding-practice')}
+              className="p-5 rounded-2xl bg-white/90 dark:bg-slate-950/80 border border-slate-200/90 dark:border-slate-800/90 hover:border-cyan-500/50 transition-all cursor-pointer group space-y-3 shadow-sm hover:shadow-md backdrop-blur-md"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-black text-slate-400 dark:text-slate-500 group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">02</span>
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/20 group-hover:scale-105 transition-transform shadow-sm">
+                  <Code2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors">
+                  Coding Practice
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 pt-1 leading-relaxed">
+                  Role-based coding practice and AI feedback
+                </p>
+              </div>
+            </div>
+
+            {/* 03 Interview Coach */}
+            <div
+              onClick={() => scrollToSection('section-technical-interview')}
+              className="p-5 rounded-2xl bg-white/90 dark:bg-slate-950/80 border border-slate-200/90 dark:border-slate-800/90 hover:border-purple-500/50 transition-all cursor-pointer group space-y-3 shadow-sm hover:shadow-md backdrop-blur-md"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-black text-slate-400 dark:text-slate-500 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">03</span>
+                <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center border border-purple-500/20 group-hover:scale-105 transition-transform shadow-sm">
+                  <Bot className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-300 transition-colors">
+                  Interview Coach
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 pt-1 leading-relaxed">
+                  Technical and HR interview preparation
+                </p>
+              </div>
+            </div>
+
+            {/* 04 AI Career Mentor */}
+            <div
+              onClick={() => scrollToSection('section-ai-career-mentor')}
+              className="p-5 rounded-2xl bg-white/90 dark:bg-slate-950/80 border border-slate-200/90 dark:border-slate-800/90 hover:border-emerald-500/50 transition-all cursor-pointer group space-y-3 shadow-sm hover:shadow-md backdrop-blur-md"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-black text-slate-400 dark:text-slate-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">04</span>
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20 group-hover:scale-105 transition-transform shadow-sm">
+                  <Compass className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-300 transition-colors">
+                  AI Career Mentor
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 pt-1 leading-relaxed">
+                  Personalized preparation and career guidance
+                </p>
+              </div>
+            </div>
+
+          </div>
+
         </div>
       </section>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Compass, ShieldAlert, Key, Loader2, ArrowLeft, CheckCircle2, AlertCircle, Mail, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Compass, ShieldAlert, Key, Loader2, ArrowLeft, Eye, EyeOff, Mail, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isUserEmailVerified } from '../lib/supabase';
 import { profileService } from '../services/profileService';
@@ -24,7 +24,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     signUpWithEmail,
     signInWithEmail,
     sendPasswordResetEmail,
-    clearError
+    clearError,
+    showToast
   } = useAuth();
 
   const getInitialMode = (): EmailFormMode => {
@@ -45,24 +46,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [unverifiedEmailToResend, setUnverifiedEmailToResend] = useState<string | null>(null);
-  const [duplicateAccountInfo, setDuplicateAccountInfo] = useState<{
-    email: string;
-    provider: 'github' | 'email' | 'existing';
-  } | null>(null);
-
   const switchMode = (newMode: 'signup' | 'signin') => {
     clearError();
-    setLocalError(null);
-    setSuccessMessage(null);
-    setUnverifiedEmailToResend(null);
-    setDuplicateAccountInfo(null);
     setPassword('');
     setConfirmPassword('');
     setShowPassword(false);
     setEmailMode(newMode);
+    setAuthView('email');
     const params = new URLSearchParams(window.location.search);
     params.set('mode', newMode);
     const newUrl = `${window.location.pathname}?${params.toString()}`;
@@ -78,10 +68,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
   // Clear any leftover auth errors when AuthPage mounts
   useEffect(() => {
     clearError();
-    setLocalError(null);
-    setSuccessMessage(null);
-    setUnverifiedEmailToResend(null);
-    setDuplicateAccountInfo(null);
   }, []);
 
   // Auto-redirect if user is already logged in
@@ -99,10 +85,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
 
   const resetFormState = () => {
     clearError();
-    setLocalError(null);
-    setSuccessMessage(null);
-    setUnverifiedEmailToResend(null);
-    setDuplicateAccountInfo(null);
     setPassword('');
     setConfirmPassword('');
     setShowPassword(false);
@@ -110,10 +92,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
 
   const handleGitHubSignIn = async () => {
     clearError();
-    setLocalError(null);
-    setSuccessMessage(null);
-    setDuplicateAccountInfo(null);
-
     setIsGitHubAuthenticating(true);
 
     try {
@@ -123,7 +101,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
 
       if (currentUser) {
         // Active session exists -> do NOT open GitHub or request reauthorization
-        // Check public.profiles using currentUser.id
         const userProfile = profile || (await profileService.getProfile(currentUser.id));
         setIsGitHubAuthenticating(false);
 
@@ -139,8 +116,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
 
       if (!isConfigured) {
         setIsGitHubAuthenticating(false);
-        setLocalError(
-          'Supabase Anon Key is missing. Please click "Setup Guide" above to configure your VITE_SUPABASE_ANON_KEY.'
+        showToast(
+          'Setup Required',
+          'Supabase Anon Key is missing. Please configure your VITE_SUPABASE_ANON_KEY.',
+          'warning'
         );
         return;
       }
@@ -148,87 +127,63 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
       await signInWithGitHub();
     } catch (err: any) {
       setIsGitHubAuthenticating(false);
-      setLocalError("We couldn't complete sign-in. Please try again.");
+      showToast(
+        'Authentication Error',
+        'Something went wrong. Please try again.',
+        'error'
+      );
     }
   };
-
-  const formatAuthError = (rawError: string): string => {
-    const lower = rawError.toLowerCase();
-    if (
-      lower.includes('user already registered') ||
-      lower.includes('email already exists') ||
-      lower.includes('identity_already_exists') ||
-      lower.includes('already registered')
-    ) {
-      if (lower.includes('github')) {
-        return 'This email is already associated with a GitHub account. Please continue with GitHub.';
-      }
-      return 'An account already exists with this email. Please sign in using your existing authentication method.';
-    }
-    if (
-      lower.includes('invalid login credentials') ||
-      lower.includes('invalid_grant') ||
-      lower.includes('invalid credentials')
-    ) {
-      return 'Incorrect email or password.';
-    }
-    if (lower.includes('email not confirmed') || lower.includes('email_not_confirmed')) {
-      return 'Please verify your email before continuing.';
-    }
-    if (
-      lower.includes('oauth') ||
-      lower.includes('popup') ||
-      lower.includes('redirect_uri_mismatch') ||
-      lower.includes('access_denied')
-    ) {
-      return "We couldn't complete sign-in. Please try again.";
-    }
-    if (lower.includes('password should be at least')) {
-      return 'Password must be at least 6 characters long.';
-    }
-    if (lower.includes('rate limit')) {
-      return 'Too many requests. Please wait a few minutes before trying again.';
-    }
-    return rawError;
-  };
-
-  const activeError = localError || (error ? formatAuthError(error) : null);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
-    setLocalError(null);
-    setSuccessMessage(null);
-    setUnverifiedEmailToResend(null);
-    setDuplicateAccountInfo(null);
 
     if (!isConfigured) {
-      setLocalError(
-        'Supabase Anon Key is missing. Please configure your VITE_SUPABASE_ANON_KEY.'
+      showToast(
+        'Setup Required',
+        'Supabase Anon Key is missing. Please configure your VITE_SUPABASE_ANON_KEY.',
+        'warning'
       );
       return;
     }
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !/\S+@\S+\.\S+/.test(trimmedEmail)) {
-      setLocalError('Please enter a valid email address.');
+      showToast(
+        'Invalid email address',
+        'Please enter a valid email address.',
+        'warning'
+      );
       return;
     }
 
     if (emailMode !== 'forgot') {
       if (!password) {
-        setLocalError('Please enter your password.');
+        showToast(
+          'Password required',
+          'Please enter your password.',
+          'warning'
+        );
         return;
       }
       if (password.length < 6) {
-        setLocalError('Password must be at least 6 characters long.');
+        showToast(
+          'Password too short',
+          'Password must be at least 6 characters long.',
+          'warning'
+        );
         return;
       }
     }
 
     if (emailMode === 'signup') {
       if (password !== confirmPassword) {
-        setLocalError('Passwords do not match. Please re-enter your password.');
+        showToast(
+          'Passwords do not match',
+          'Please re-enter your password.',
+          'warning'
+        );
         return;
       }
     }
@@ -239,82 +194,108 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
       if (emailMode === 'signup') {
         const res = await signUpWithEmail(trimmedEmail, password);
 
-        // Check if Supabase returned an existing user
-        if (res?.user) {
-          const identities = res.user.identities || [];
-          if (identities.length === 0) {
-            setDuplicateAccountInfo({
-              email: trimmedEmail,
-              provider: 'existing',
-            });
-            setLocalError(
-              'An account already exists with this email. Please sign in using your existing authentication method.'
-            );
-            return;
-          }
-
-          const githubId = identities.find((id: any) => id.provider === 'github');
-          const emailId = identities.find((id: any) => id.provider === 'email');
-
-          if (githubId) {
-            setDuplicateAccountInfo({ email: trimmedEmail, provider: 'github' });
-            setLocalError('This email is already associated with a GitHub account. Please continue with GitHub.');
-            return;
-          }
-          if (emailId) {
-            setDuplicateAccountInfo({ email: trimmedEmail, provider: 'email' });
-            setLocalError('An account with this email already exists. Please sign in instead.');
-            return;
-          }
+        // Check if Supabase returned an existing user (identities array is empty for existing emails)
+        if (res?.user && res.user.identities && res.user.identities.length === 0) {
+          showToast(
+            'Account already exists',
+            'This email is already associated with an existing CareerPilot account. Please sign in using your existing authentication method.',
+            'error',
+            {
+              label: 'Sign In',
+              onClick: () => switchMode('signin')
+            }
+          );
+          return;
         }
 
-        // Newly created user -> navigate to verify email screen
+        showToast(
+          'Account created successfully!',
+          'Please verify your email address to continue.',
+          'success'
+        );
         onNavigate('verify-email');
       } else if (emailMode === 'signin') {
         const res = await signInWithEmail(trimmedEmail, password);
         if (res?.user && !res.user.email_confirmed_at && !res.user.confirmed_at) {
+          showToast(
+            'Email not verified',
+            'Please verify your email before continuing.',
+            'warning',
+            {
+              label: 'Verify Email',
+              onClick: () => onNavigate('verify-email')
+            }
+          );
           onNavigate('verify-email');
-        } else {
-          setSuccessMessage('Sign in successful! Redirecting...');
         }
       } else if (emailMode === 'forgot') {
         await sendPasswordResetEmail(trimmedEmail);
-        setSuccessMessage(
-          'Password reset link sent! Please check your email inbox to reset your password.'
+        showToast(
+          'Reset link sent!',
+          'Please check your email inbox to reset your password.',
+          'success'
         );
       }
     } catch (err: any) {
-      console.error('Email Auth Error:', err);
+      console.warn('Email Auth Notice:', err);
       const rawMsg = err.message || '';
       const lower = rawMsg.toLowerCase();
 
-      if (
-        lower.includes('user already registered') ||
-        lower.includes('email already exists') ||
-        lower.includes('already exists') ||
-        lower.includes('identity_already_exists')
-      ) {
-        let provider: 'github' | 'email' | 'existing' = 'existing';
-        if (lower.includes('github')) provider = 'github';
-        else if (lower.includes('email')) provider = 'email';
-
-        setDuplicateAccountInfo({ email: trimmedEmail, provider });
-
-        if (provider === 'github') {
-          setLocalError('This email is already associated with a GitHub account. Please continue with GitHub.');
-        } else if (provider === 'email') {
-          setLocalError('An account with this email already exists. Please sign in instead.');
-        } else {
-          setLocalError('An account already exists with this email. Please sign in using your existing authentication method.');
+      if (emailMode === 'signup') {
+        if (
+          lower.includes('user already registered') ||
+          lower.includes('email already exists') ||
+          lower.includes('already registered') ||
+          lower.includes('already exists') ||
+          lower.includes('identity_already_exists')
+        ) {
+          showToast(
+            'Account already exists',
+            'This email is already associated with an existing CareerPilot account. Please sign in using your existing authentication method.',
+            'error',
+            {
+              label: 'Sign In',
+              onClick: () => switchMode('signin')
+            }
+          );
+          return;
         }
-        return;
       }
 
-      const formatted = formatAuthError(rawMsg || 'Authentication failed. Please try again.');
-      setLocalError(formatted);
-      if (lower.includes('email not confirmed')) {
-        setUnverifiedEmailToResend(trimmedEmail);
+      if (emailMode === 'signin') {
+        if (
+          lower.includes('invalid login credentials') ||
+          lower.includes('invalid_grant') ||
+          lower.includes('invalid credentials') ||
+          lower.includes('incorrect email or password')
+        ) {
+          showToast(
+            'Invalid login credentials',
+            'Please check your email and password and try again.',
+            'error'
+          );
+          return;
+        }
+
+        if (lower.includes('email not confirmed') || lower.includes('email_not_confirmed')) {
+          showToast(
+            'Email not verified',
+            'Please verify your email before continuing.',
+            'warning',
+            {
+              label: 'Verify Email',
+              onClick: () => onNavigate('verify-email')
+            }
+          );
+          return;
+        }
       }
+
+      showToast(
+        'Authentication Error',
+        rawMsg || 'Something went wrong. Please try again.',
+        'error'
+      );
     } finally {
       setIsEmailLoading(false);
     }
@@ -383,79 +364,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
           </p>
         </div>
 
-        {/* Success Alert Box */}
-        {successMessage && (
-          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-xs flex items-start gap-2.5 leading-relaxed">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="font-semibold text-emerald-900 dark:text-emerald-100">Notice</p>
-              <p>{successMessage}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Error Alert Box */}
-        {activeError && (
-          <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2.5 leading-relaxed">
-            <AlertCircle className="w-4 h-4 text-rose-500 dark:text-rose-400 shrink-0 mt-0.5" />
-            <div className="flex-1 space-y-2">
-              <p className="font-semibold text-rose-800 dark:text-rose-200">Authentication Alert</p>
-              <p>{activeError}</p>
-
-              {/* Action Buttons for Duplicate Account */}
-              {(duplicateAccountInfo || activeError.includes('already associated') || activeError.includes('already exists')) && (
-                <div className="pt-1.5 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const savedEmail = duplicateAccountInfo?.email || email;
-                      resetFormState();
-                      setEmail(savedEmail);
-                      setEmailMode('signin');
-                      setAuthView('email');
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 font-bold text-xs shadow-sm transition-all cursor-pointer"
-                  >
-                    Sign In
-                  </button>
-
-                  {(!duplicateAccountInfo || duplicateAccountInfo.provider === 'github' || duplicateAccountInfo.provider === 'existing') && (
-                    <button
-                      type="button"
-                      onClick={handleGitHubSignIn}
-                      className="px-3 py-1.5 rounded-xl bg-slate-800 text-white hover:bg-slate-700 font-bold text-xs shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
-                    >
-                      Continue with GitHub
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {unverifiedEmailToResend && !duplicateAccountInfo && (
-                <button
-                  type="button"
-                  onClick={() => onNavigate('verify-email')}
-                  className="mt-1 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-800 dark:text-rose-200 font-bold text-xs border border-rose-500/30 transition-all cursor-pointer"
-                >
-                  Go to Verification Screen
-                </button>
-              )}
-              {emailMode === 'signin' && !duplicateAccountInfo && (activeError.includes('Invalid email or password') || activeError.includes('Incorrect email or password')) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetFormState();
-                    setEmailMode('signup');
-                  }}
-                  className="mt-1 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-900 dark:text-indigo-200 font-bold text-xs border border-indigo-500/30 transition-all cursor-pointer block"
-                >
-                  Need an account? Create one here
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Supabase Key Status Indicator */}
         {!isConfigured && (
           <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-200 text-xs space-y-2">
@@ -505,8 +413,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
             <button
               onClick={() => {
                 clearError();
-                setLocalError(null);
-                setSuccessMessage(null);
                 setAuthView('email');
               }}
               className="w-full py-3.5 px-4 rounded-2xl bg-indigo-50 hover:bg-indigo-100 dark:bg-slate-800/90 dark:hover:bg-slate-800 border border-indigo-200 dark:border-slate-700 text-indigo-900 dark:text-indigo-200 font-bold text-sm shadow-sm transition-all flex items-center justify-between hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
@@ -562,10 +468,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                   type="email"
                   required
                   value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    if (localError) setLocalError(null);
-                  }}
+                  onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email address"
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
                 />
@@ -597,10 +500,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      if (localError) setLocalError(null);
-                    }}
+                    onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
                     className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors pr-10"
                   />
@@ -625,10 +525,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
                   type={showPassword ? 'text' : 'password'}
                   required
                   value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value);
-                    if (localError) setLocalError(null);
-                  }}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Confirm your password"
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
                 />

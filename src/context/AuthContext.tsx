@@ -27,7 +27,12 @@ interface AuthContextType {
   isConfigured: boolean;
   isEmailVerified: boolean;
   toast: ToastData | null;
-  showToast: (title: string, subtitle?: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  showToast: (
+    title: string,
+    subtitle?: string,
+    type?: 'success' | 'info' | 'warning' | 'error',
+    action?: { label: string; onClick: () => void }
+  ) => void;
   dismissToast: () => void;
   signInWithGoogle: () => Promise<void>;
   signInWithGitHub: () => Promise<void>;
@@ -55,25 +60,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const configured = isSupabaseConfigured();
 
-  const showToast = useCallback((title: string, subtitle?: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
-    setToast({
-      id: Date.now().toString(),
-      title,
-      subtitle,
-      type
-    });
-  }, []);
+  const showToast = useCallback(
+    (
+      title: string,
+      subtitle?: string,
+      type: 'success' | 'info' | 'warning' | 'error' = 'success',
+      action?: { label: string; onClick: () => void }
+    ) => {
+      setToast({
+        id: Date.now().toString(),
+        title,
+        subtitle,
+        type,
+        action
+      });
+    },
+    []
+  );
 
   const dismissToast = useCallback(() => {
     setToast(null);
   }, []);
 
-  // Auto-dismiss toast after 3.5 seconds
+  // Auto-dismiss toast after 5 seconds
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => {
       setToast(null);
-    }, 3500);
+    }, 5000);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -213,7 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signInWithGoogle();
     } catch (err: any) {
-      console.error('Google Sign-In Error:', err);
+      console.warn('Google Sign-In Notice:', err);
       setError(err.message || 'Failed to initiate Google Authentication. Please try again.');
       throw err;
     }
@@ -228,7 +242,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       await signInWithGitHub();
     } catch (err: any) {
-      console.error('GitHub Sign-In Error:', err);
+      console.warn('GitHub Sign-In Notice:', err);
       setError(err.message || 'Failed to initiate GitHub Authentication. Please try again.');
       throw err;
     }
@@ -240,7 +254,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await signUpWithEmail(email, password);
       return data;
     } catch (err: any) {
-      console.error('Email Sign-Up Error:', err);
+      console.warn('Email Sign-Up Notice:', err);
       const msg = err.message || 'Failed to create account.';
       setError(msg);
       throw err;
@@ -253,7 +267,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await signInWithEmail(email, password);
       return data;
     } catch (err: any) {
-      console.error('Email Sign-In Error:', err);
+      console.warn('Email Sign-In Notice:', err);
       const msg = err.message || 'Failed to sign in with email.';
       setError(msg);
       throw err;
@@ -266,7 +280,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await sendPasswordResetEmail(email);
       return data;
     } catch (err: any) {
-      console.error('Password Reset Error:', err);
+      console.warn('Password Reset Notice:', err);
       const msg = err.message || 'Failed to send password reset email.';
       setError(msg);
       throw err;
@@ -279,7 +293,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await resendVerificationEmail(email);
       return data;
     } catch (err: any) {
-      console.error('Resend Verification Error:', err);
+      console.warn('Resend Verification Notice:', err);
       const msg = err.message || 'Failed to resend verification email.';
       setError(msg);
       throw err;
@@ -292,7 +306,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await updatePassword(newPassword);
       return data;
     } catch (err: any) {
-      console.error('Update Password Error:', err);
+      console.warn('Update Password Notice:', err);
       const msg = err.message || 'Failed to update password.';
       setError(msg);
       throw err;

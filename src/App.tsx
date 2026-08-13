@@ -26,7 +26,7 @@ function AppContent() {
     if (cleanPath === 'verify-email') {
       return 'verify-email';
     }
-    if (cleanPath === 'welcome') {
+    if (cleanPath === 'welcome' || cleanPath === '') {
       return 'welcome';
     }
     if (
@@ -45,7 +45,7 @@ function AppContent() {
     ) {
       return cleanPath;
     }
-    return 'home';
+    return 'welcome';
   };
 
   // Custom router state synchronized with path
@@ -59,7 +59,7 @@ function AppContent() {
     const cleanPage = page.toLowerCase();
     setCurrentPage(cleanPage);
 
-    let targetPath = cleanPage === 'home' ? '/' : `/${cleanPage}`;
+    let targetPath = cleanPage === 'welcome' ? '/' : `/${cleanPage}`;
     if (query) {
       targetPath += `?${query}`;
     }
