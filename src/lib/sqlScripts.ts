@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
   avatar_url TEXT,
-  role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin')),
   usn TEXT NOT NULL,
   college_name TEXT NOT NULL,
   department TEXT NOT NULL,
@@ -19,13 +18,19 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   graduation_year TEXT NOT NULL,
   career_goal TEXT,
   target_role TEXT,
+  role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Ensure columns exist if table was already created
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS college_name TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS career_goal TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS target_role TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'student';
+
+-- Remove legacy column names if present from previous schemas
+ALTER TABLE public.profiles DROP COLUMN IF EXISTS college;
 
 -- 2. Enable Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -67,4 +72,7 @@ CREATE TRIGGER set_profiles_updated_at
 
 -- 5. Optional Index for performance
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
+
+-- 6. Reload Supabase PostgREST schema cache
+NOTIFY pgrst, 'reload schema';
 `;

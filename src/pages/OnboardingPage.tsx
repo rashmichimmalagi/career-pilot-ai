@@ -66,7 +66,7 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Synchronize authenticated user metadata when user state finishes loading or updates
+  // Synchronize authenticated user metadata and profile when user state finishes loading or updates
   useEffect(() => {
     if (user) {
       const currentAuthName = getAuthFullName(user);
@@ -76,11 +76,20 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
       setFormData((prev) => ({
         ...prev,
         email: currentAuthEmail,
-        avatar_url: prev.avatar_url || currentAuthAvatar,
-        full_name: isNameManuallyEdited ? prev.full_name : (prev.full_name || currentAuthName),
+        avatar_url: profile?.avatar_url || prev.avatar_url || currentAuthAvatar,
+        full_name: isNameManuallyEdited
+          ? prev.full_name
+          : profile?.full_name || prev.full_name || currentAuthName,
+        usn: profile?.usn || prev.usn,
+        college_name: profile?.college_name || prev.college_name,
+        department: profile?.department || prev.department,
+        semester: profile?.semester || prev.semester,
+        graduation_year: profile?.graduation_year ? String(profile.graduation_year) : prev.graduation_year,
+        career_goal: profile?.career_goal || prev.career_goal,
+        target_role: profile?.target_role || prev.target_role,
       }));
     }
-  }, [user, isNameManuallyEdited]);
+  }, [user, profile, isNameManuallyEdited]);
 
   // If profile already exists, redirect directly to dashboard
   useEffect(() => {
@@ -140,21 +149,23 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
 
     try {
       setIsSubmitting(true);
-      const { profile: newProfile, error: dbError } = await profileService.createProfile(user.id, formData);
+      const { profile: savedProfile, error: dbError } = profile
+        ? await profileService.updateProfile(user.id, formData)
+        : await profileService.createProfile(user.id, formData);
 
       if (dbError) {
-        setFormError(dbError.message || 'Failed to save student profile in database. Please verify SQL setup.');
+        setFormError(dbError.message || 'Failed to save student profile. Please try again or contact support.');
         setIsSubmitting(false);
         return;
       }
 
-      if (newProfile) {
-        setProfileState(newProfile);
+      if (savedProfile) {
+        setProfileState(savedProfile);
         onNavigate('dashboard');
       }
     } catch (err: any) {
       console.error('Onboarding Submission Error:', err);
-      setFormError(err.message || 'An error occurred while creating your profile.');
+      setFormError(err.message || 'An error occurred while saving your profile.');
       setIsSubmitting(false);
     }
   };
@@ -415,9 +426,9 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
 
           </div>
 
-          {/* Role Security Note */}
+          {/* Personalization Note */}
           <div className="p-3.5 rounded-xl bg-slate-100/80 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-            <span className="font-semibold text-slate-800 dark:text-slate-300">Security Note:</span> Your profile role will default to <code className="text-emerald-700 dark:text-emerald-400 font-mono font-bold">student</code>. Admin permissions are protected and restricted at database level.
+            <span className="font-semibold text-slate-800 dark:text-slate-300">Personalization Note:</span> Your profile preferences and target role (<code className="text-indigo-600 dark:text-indigo-400 font-mono font-bold">{formData.target_role || 'General Engineering'}</code>) will customize your AI interview and technical practice roadmap.
           </div>
 
           {/* Submit CTA */}

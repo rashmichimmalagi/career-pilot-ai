@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, User } from '@supabase/supabase-js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://liqaeoxwjhsalfdqdwcr.supabase.co';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -25,6 +25,27 @@ export const supabase = createClient(
     },
   }
 );
+
+/**
+ * Helper to check if a user's email is verified.
+ * Google and GitHub OAuth users are automatically considered verified.
+ * Email/Password users require email_confirmed_at / confirmed_at from Supabase Auth.
+ */
+export const isUserEmailVerified = (user: User | null): boolean => {
+  if (!user) return false;
+
+  const provider = user.app_metadata?.provider;
+  const isOAuth =
+    provider === 'google' ||
+    provider === 'github' ||
+    Boolean(user.identities?.some((id) => id.provider === 'google' || id.provider === 'github'));
+
+  if (isOAuth) {
+    return true;
+  }
+
+  return Boolean(user.email_confirmed_at || user.confirmed_at);
+};
 
 /**
  * Helper to get the environment-aware auth redirect URL for OAuth providers.
@@ -185,6 +206,33 @@ export const updatePassword = async (newPassword: string) => {
 
   const { data, error } = await supabase.auth.updateUser({
     password: newPassword,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+/**
+ * Resend Verification Email using Supabase Auth
+ */
+export const resendVerificationEmail = async (email: string) => {
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      'Supabase environment variables (VITE_SUPABASE_ANON_KEY) are not configured yet. Please configure your key in environment secrets.'
+    );
+  }
+
+  const redirectTo = getAuthRedirectUrl();
+
+  const { data, error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: {
+      emailRedirectTo: redirectTo,
+    },
   });
 
   if (error) {

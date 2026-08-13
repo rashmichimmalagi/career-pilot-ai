@@ -3,11 +3,13 @@ import { User, Session } from '@supabase/supabase-js';
 import {
   supabase,
   isSupabaseConfigured,
+  isUserEmailVerified,
   signInWithGoogle,
   signInWithGitHub,
   signUpWithEmail,
   signInWithEmail,
   sendPasswordResetEmail,
+  resendVerificationEmail,
   updatePassword,
   signOutUser
 } from '../lib/supabase';
@@ -22,11 +24,13 @@ interface AuthContextType {
   profileLoading: boolean;
   error: string | null;
   isConfigured: boolean;
+  isEmailVerified: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithGitHub: () => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<any>;
   signInWithEmail: (email: string, password: string) => Promise<any>;
   sendPasswordResetEmail: (email: string) => Promise<any>;
+  resendVerificationEmail: (email: string) => Promise<any>;
   updatePassword: (newPassword: string) => Promise<any>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<Profile | null>;
@@ -200,6 +204,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const handleResendVerificationEmail = async (email: string) => {
+    setError(null);
+    try {
+      const data = await resendVerificationEmail(email);
+      return data;
+    } catch (err: any) {
+      console.error('Resend Verification Error:', err);
+      const msg = err.message || 'Failed to resend verification email.';
+      setError(msg);
+      throw err;
+    }
+  };
+
   const handleUpdatePassword = async (newPassword: string) => {
     setError(null);
     try {
@@ -233,6 +250,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearError = () => setError(null);
 
+  const isEmailVerified = isUserEmailVerified(user);
+
   return (
     <AuthContext.Provider
       value={{
@@ -243,11 +262,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profileLoading,
         error,
         isConfigured: configured,
+        isEmailVerified,
         signInWithGoogle: handleSignInWithGoogle,
         signInWithGitHub: handleSignInWithGitHub,
         signUpWithEmail: handleSignUpWithEmail,
         signInWithEmail: handleSignInWithEmail,
         sendPasswordResetEmail: handleSendPasswordResetEmail,
+        resendVerificationEmail: handleResendVerificationEmail,
         updatePassword: handleUpdatePassword,
         signOut: handleSignOut,
         refreshProfile,

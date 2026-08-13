@@ -44,12 +44,11 @@ export const profileService = {
       };
     }
 
-    const newProfile: Partial<Profile> = {
+    const newProfile = {
       id: userId,
       full_name: formData.full_name,
       email: formData.email,
       avatar_url: formData.avatar_url || '',
-      role: 'student', // ALWAYS default to 'student' for role security
       usn: formData.usn,
       college_name: formData.college_name,
       department: formData.department,
@@ -57,6 +56,7 @@ export const profileService = {
       graduation_year: formData.graduation_year,
       career_goal: formData.career_goal,
       target_role: formData.target_role,
+      role: 'student',
       updated_at: new Date().toISOString(),
     };
 
@@ -90,9 +90,25 @@ export const profileService = {
       };
     }
 
-    // Sanitize: do not allow role elevation via client updates
-    const sanitizedUpdates = { ...updates };
-    delete sanitizedUpdates.role;
+    const allowedKeys: (keyof Profile)[] = [
+      'full_name',
+      'email',
+      'avatar_url',
+      'usn',
+      'college_name',
+      'department',
+      'semester',
+      'graduation_year',
+      'career_goal',
+      'target_role',
+    ];
+
+    const sanitizedUpdates: Record<string, any> = {};
+    for (const key of allowedKeys) {
+      if (key in updates && updates[key] !== undefined) {
+        sanitizedUpdates[key] = updates[key];
+      }
+    }
     sanitizedUpdates.updated_at = new Date().toISOString();
 
     try {

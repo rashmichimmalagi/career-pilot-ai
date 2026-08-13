@@ -10,10 +10,11 @@ import { AuthPage } from './pages/AuthPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
-  const { user, profile, loading, isConfigured } = useAuth();
+  const { user, profile, loading, isConfigured, isEmailVerified } = useAuth();
   
   const getPathFromLocation = () => {
     const rawPath = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
@@ -21,7 +22,22 @@ function AppContent() {
     if (cleanPath === 'reset-password' || window.location.hash.includes('type=recovery')) {
       return 'reset-password';
     }
-    if (cleanPath === 'auth' || cleanPath === 'onboarding' || cleanPath === 'dashboard') {
+    if (cleanPath === 'verify-email') {
+      return 'verify-email';
+    }
+    if (
+      [
+        'auth',
+        'onboarding',
+        'dashboard',
+        'profile',
+        'coding',
+        'interview',
+        'resume',
+        'career-mentor',
+        'analytics',
+      ].includes(cleanPath)
+    ) {
       return cleanPath;
     }
     return 'home';
@@ -56,14 +72,43 @@ function AppContent() {
   useEffect(() => {
     if (loading) return;
 
+    const protectedPages = [
+      'onboarding',
+      'dashboard',
+      'profile',
+      'coding',
+      'interview',
+      'resume',
+      'career-mentor',
+      'analytics',
+    ];
+
     if (!user) {
       // Unauthenticated users attempting to access protected routes -> redirect to auth
-      if (currentPage === 'dashboard' || currentPage === 'onboarding') {
+      if (protectedPages.includes(currentPage) || currentPage === 'verify-email') {
         navigateTo('auth');
       }
     } else {
       // Allow user on reset-password page if they arrived via recovery link
       if (currentPage === 'reset-password') {
+        return;
+      }
+
+      // Check email verification for authenticated user
+      if (!isEmailVerified) {
+        if (currentPage !== 'verify-email') {
+          navigateTo('verify-email');
+        }
+        return;
+      }
+
+      // If user is verified and currently on verify-email screen, redirect to onboarding or dashboard
+      if (currentPage === 'verify-email') {
+        if (profile) {
+          navigateTo('dashboard');
+        } else {
+          navigateTo('onboarding');
+        }
         return;
       }
 
@@ -86,9 +131,13 @@ function AppContent() {
         if (profile) {
           navigateTo('dashboard');
         }
+      } else if (protectedPages.includes(currentPage)) {
+        if (!profile && currentPage !== 'onboarding') {
+          navigateTo('onboarding');
+        }
       }
     }
-  }, [user, profile, loading, currentPage]);
+  }, [user, profile, isEmailVerified, loading, currentPage]);
 
   if (loading) {
     return (
@@ -130,6 +179,10 @@ function AppContent() {
           />
         )}
 
+        {currentPage === 'verify-email' && (
+          <VerifyEmailPage onNavigate={navigateTo} />
+        )}
+
         {currentPage === 'onboarding' && (
           <OnboardingPage onNavigate={navigateTo} />
         )}
@@ -137,7 +190,6 @@ function AppContent() {
         {currentPage === 'dashboard' && (
           <DashboardPage
             onNavigate={navigateTo}
-            onOpenSetupGuide={() => setSetupGuideOpen(true)}
           />
         )}
 

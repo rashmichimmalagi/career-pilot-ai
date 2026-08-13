@@ -5,7 +5,6 @@ export interface Profile {
   full_name: string;
   email: string;
   avatar_url?: string;
-  role: UserRole;
   usn: string;
   college_name: string;
   department: string;
@@ -13,6 +12,7 @@ export interface Profile {
   graduation_year: string;
   career_goal?: string;
   target_role?: string;
+  role?: UserRole;
   created_at?: string;
   updated_at?: string;
 }
