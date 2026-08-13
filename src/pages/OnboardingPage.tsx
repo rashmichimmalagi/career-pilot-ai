@@ -54,7 +54,7 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
     email: authEmail,
     avatar_url: authAvatar,
     usn: '',
-    college: '',
+    college_name: '',
     department: '',
     semester: '',
     graduation_year: '',
@@ -108,7 +108,7 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
       return;
     }
 
-    if (!formData.college.trim()) {
+    if (!formData.college_name.trim()) {
       setFormError('Please enter your College Name.');
       return;
     }
@@ -285,8 +285,8 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
               </label>
               <input
                 type="text"
-                value={formData.college}
-                onChange={(e) => setFormData({ ...formData, college: e.target.value })}
+                value={formData.college_name}
+                onChange={(e) => setFormData({ ...formData, college_name: e.target.value })}
                 required
                 placeholder="Enter your college name"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"

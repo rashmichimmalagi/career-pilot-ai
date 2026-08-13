@@ -51,7 +51,7 @@ export const profileService = {
       avatar_url: formData.avatar_url || '',
       role: 'student', // ALWAYS default to 'student' for role security
       usn: formData.usn,
-      college: formData.college,
+      college_name: formData.college_name,
       department: formData.department,
       semester: formData.semester,
       graduation_year: formData.graduation_year,

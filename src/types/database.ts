@@ -7,7 +7,7 @@ export interface Profile {
   avatar_url?: string;
   role: UserRole;
   usn: string;
-  college: string;
+  college_name: string;
   department: string;
   semester: string;
   graduation_year: string;
@@ -22,7 +22,7 @@ export interface ProfileFormData {
   email: string;
   avatar_url?: string;
   usn: string;
-  college: string;
+  college_name: string;
   department: string;
   semester: string;
   graduation_year: string;

@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   avatar_url TEXT,
   role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin')),
   usn TEXT NOT NULL,
-  college TEXT NOT NULL,
+  college_name TEXT NOT NULL,
   department TEXT NOT NULL,
   semester TEXT NOT NULL,
   graduation_year TEXT NOT NULL,

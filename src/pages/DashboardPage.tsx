@@ -71,7 +71,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-xl">
-              {profile?.college ? `${profile.college} • ${profile.department}` : 'Engineering Student Placement Portal'}
+              {profile?.college_name ? `${profile.college_name} • ${profile.department}` : 'Engineering Student Placement Portal'}
             </p>
           </div>
 
@@ -207,7 +207,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                   <Building className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                   <span>College</span>
                 </span>
-                <span className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[180px] text-right">{profile?.college || 'Not Set'}</span>
+                <span className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[180px] text-right">{profile?.college_name || 'Not Set'}</span>
               </div>
 
               <div className="flex justify-between items-center py-1.5 border-b border-slate-100 dark:border-slate-800/60">
