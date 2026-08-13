@@ -8,17 +8,51 @@ interface OnboardingPageProps {
   onNavigate: (page: string) => void;
 }
 
+const getAuthFullName = (u: any): string => {
+  if (!u) return '';
+  const meta = u.user_metadata || {};
+  const identityData = u.identities?.[0]?.identity_data || {};
+
+  const name =
+    meta.full_name ||
+    meta.name ||
+    meta.preferred_username ||
+    meta.user_name ||
+    identityData.full_name ||
+    identityData.name ||
+    identityData.preferred_username ||
+    identityData.user_name ||
+    '';
+
+  return typeof name === 'string' ? name.trim() : '';
+};
+
+const getAuthAvatarUrl = (u: any): string => {
+  if (!u) return '';
+  const meta = u.user_metadata || {};
+  const identityData = u.identities?.[0]?.identity_data || {};
+
+  const avatar =
+    meta.avatar_url ||
+    meta.picture ||
+    identityData.avatar_url ||
+    identityData.picture ||
+    '';
+
+  return typeof avatar === 'string' ? avatar.trim() : '';
+};
+
 export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) => {
   const { user, profile, loading, setProfileState } = useAuth();
 
-  const googleFullName = user?.user_metadata?.full_name || user?.user_metadata?.name || '';
-  const googleEmail = user?.email || '';
-  const googleAvatar = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || '';
+  const authFullName = getAuthFullName(user);
+  const authEmail = user?.email || '';
+  const authAvatar = getAuthAvatarUrl(user);
 
   const [formData, setFormData] = useState<ProfileFormData>({
-    full_name: googleFullName,
-    email: googleEmail,
-    avatar_url: googleAvatar,
+    full_name: authFullName,
+    email: authEmail,
+    avatar_url: authAvatar,
     usn: '',
     college: '',
     department: '',
@@ -28,20 +62,25 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
     target_role: '',
   });
 
+  const [isNameManuallyEdited, setIsNameManuallyEdited] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Sync Google user details when user loads
+  // Synchronize authenticated user metadata when user state finishes loading or updates
   useEffect(() => {
     if (user) {
+      const currentAuthName = getAuthFullName(user);
+      const currentAuthEmail = user.email || '';
+      const currentAuthAvatar = getAuthAvatarUrl(user);
+
       setFormData((prev) => ({
         ...prev,
-        full_name: prev.full_name || user.user_metadata?.full_name || user.user_metadata?.name || '',
-        email: user.email || '',
-        avatar_url: prev.avatar_url || user.user_metadata?.avatar_url || user.user_metadata?.picture || '',
+        email: currentAuthEmail,
+        avatar_url: prev.avatar_url || currentAuthAvatar,
+        full_name: isNameManuallyEdited ? prev.full_name : (prev.full_name || currentAuthName),
       }));
     }
-  }, [user]);
+  }, [user, isNameManuallyEdited]);
 
   // If profile already exists, redirect directly to dashboard
   useEffect(() => {
@@ -150,21 +189,21 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
 
         {/* Authenticated Provider Populated Profile Summary */}
         <div className="p-4 rounded-2xl bg-slate-100/80 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 flex items-center gap-4">
-          {googleAvatar ? (
+          {authAvatar ? (
             <img
-              src={googleAvatar}
-              alt={googleFullName || 'User Avatar'}
+              src={authAvatar}
+              alt={formData.full_name || authEmail || 'User Avatar'}
               className="w-12 h-12 rounded-full border-2 border-indigo-500/40 object-cover"
             />
           ) : (
             <div className="w-12 h-12 rounded-full bg-indigo-600/20 border-2 border-indigo-500/40 flex items-center justify-center text-indigo-600 dark:text-indigo-300 font-bold text-base">
-              {(googleFullName || googleEmail || 'S').charAt(0).toUpperCase()}
+              {(formData.full_name || authEmail || 'U').charAt(0).toUpperCase()}
             </div>
           )}
 
           <div className="flex-1 min-w-0">
             <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Authenticated Account</p>
-            <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{formData.full_name || 'Engineering Student'}</p>
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{formData.full_name || authEmail || 'Authenticated Account'}</p>
             <p className="text-xs text-indigo-600 dark:text-indigo-400 font-mono truncate">{formData.email}</p>
           </div>
 
@@ -197,7 +236,10 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
               <input
                 type="text"
                 value={formData.full_name}
-                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                onChange={(e) => {
+                  setIsNameManuallyEdited(true);
+                  setFormData({ ...formData, full_name: e.target.value });
+                }}
                 required
                 placeholder="Enter your full name"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
