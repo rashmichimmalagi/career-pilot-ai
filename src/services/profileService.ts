@@ -55,6 +55,8 @@ export const profileService = {
       department: formData.department,
       semester: formData.semester,
       graduation_year: formData.graduation_year,
+      career_goal: formData.career_goal,
+      target_role: formData.target_role,
       updated_at: new Date().toISOString(),
     };
 

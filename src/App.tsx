@@ -9,19 +9,26 @@ import { LandingPage } from './pages/LandingPage';
 import { AuthPage } from './pages/AuthPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
   const { user, profile, loading, isConfigured } = useAuth();
   
-  // Custom router state synchronized with path
-  const [currentPage, setCurrentPage] = useState<string>(() => {
-    const path = window.location.pathname.replace('/', '');
-    if (path === 'auth' || path === 'onboarding' || path === 'dashboard') {
-      return path;
+  const getPathFromLocation = () => {
+    const rawPath = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
+    const cleanPath = rawPath.split('/')[0];
+    if (cleanPath === 'reset-password' || window.location.hash.includes('type=recovery')) {
+      return 'reset-password';
+    }
+    if (cleanPath === 'auth' || cleanPath === 'onboarding' || cleanPath === 'dashboard') {
+      return cleanPath;
     }
     return 'home';
-  });
+  };
+
+  // Custom router state synchronized with path
+  const [currentPage, setCurrentPage] = useState<string>(getPathFromLocation);
 
   const [setupGuideOpen, setSetupGuideOpen] = useState(false);
 
@@ -38,12 +45,7 @@ function AppContent() {
   // Handle browser back/forward buttons
   useEffect(() => {
     const handlePopState = () => {
-      const path = window.location.pathname.replace('/', '');
-      if (path === 'auth' || path === 'onboarding' || path === 'dashboard') {
-        setCurrentPage(path);
-      } else {
-        setCurrentPage('home');
-      }
+      setCurrentPage(getPathFromLocation());
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -60,6 +62,11 @@ function AppContent() {
         navigateTo('auth');
       }
     } else {
+      // Allow user on reset-password page if they arrived via recovery link
+      if (currentPage === 'reset-password') {
+        return;
+      }
+
       // Handle OAuth return redirect when landing on home or auth
       const hasOAuthParams =
         window.location.search.includes('code=') ||
@@ -132,6 +139,10 @@ function AppContent() {
             onNavigate={navigateTo}
             onOpenSetupGuide={() => setSetupGuideOpen(true)}
           />
+        )}
+
+        {currentPage === 'reset-password' && (
+          <ResetPasswordPage onNavigate={navigateTo} />
         )}
       </main>
 

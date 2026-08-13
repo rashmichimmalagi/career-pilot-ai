@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Compass, Sparkles, UserCheck, Building, GraduationCap, Calendar, Hash, BookOpen, AlertCircle, Loader2 } from 'lucide-react';
+import { Compass, Sparkles, UserCheck, Building, GraduationCap, Calendar, Hash, BookOpen, AlertCircle, Loader2, Target, Briefcase } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { profileService } from '../services/profileService';
 import { ProfileFormData } from '../types/database';
@@ -21,9 +21,11 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
     avatar_url: googleAvatar,
     usn: '',
     college: '',
-    department: 'Computer Science & Engineering',
-    semester: '6th Semester',
-    graduation_year: '2026',
+    department: '',
+    semester: '',
+    graduation_year: '',
+    career_goal: '',
+    target_role: '',
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,17 +55,47 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
     setFormError(null);
 
     if (!user) {
-      setFormError('Authentication required. Please sign in with Google first.');
+      setFormError('Authentication required. Please sign in with Google or GitHub first.');
+      return;
+    }
+
+    if (!formData.full_name.trim()) {
+      setFormError('Please enter your Full Name.');
       return;
     }
 
     if (!formData.usn.trim()) {
-      setFormError('Please enter your USN (University Seat Number).');
+      setFormError('Please enter your USN / Roll Number.');
       return;
     }
 
     if (!formData.college.trim()) {
       setFormError('Please enter your College Name.');
+      return;
+    }
+
+    if (!formData.department) {
+      setFormError('Please select your Department / Branch.');
+      return;
+    }
+
+    if (!formData.semester) {
+      setFormError('Please select your Current Semester.');
+      return;
+    }
+
+    if (!formData.graduation_year) {
+      setFormError('Please select your Graduation Year.');
+      return;
+    }
+
+    if (!formData.career_goal) {
+      setFormError('Please select your Career Goal.');
+      return;
+    }
+
+    if (!formData.target_role.trim()) {
+      setFormError('Please enter your Target Role.');
       return;
     }
 
@@ -105,18 +137,18 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs font-semibold">
             <UserCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            <span>Google Authentication Verified</span>
+            <span>Authentication Verified</span>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100">
             Welcome to CareerPilot AI 👋
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-            Let's personalize your placement journey with your academic details.
+            Let's personalize your career journey with your academic and role preferences.
           </p>
         </div>
 
-        {/* Google Populated Profile Summary */}
+        {/* Authenticated Provider Populated Profile Summary */}
         <div className="p-4 rounded-2xl bg-slate-100/80 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 flex items-center gap-4">
           {googleAvatar ? (
             <img
@@ -131,7 +163,7 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
           )}
 
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Authenticated Google Account</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Authenticated Account</p>
             <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{formData.full_name || 'Engineering Student'}</p>
             <p className="text-xs text-indigo-600 dark:text-indigo-400 font-mono truncate">{formData.email}</p>
           </div>
@@ -160,14 +192,14 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
             {/* Full Name */}
             <div className="space-y-1.5 sm:col-span-2">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Full Name
+                Full Name <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
                 value={formData.full_name}
                 onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                 required
-                placeholder="e.g. Rahul Sharma"
+                placeholder="Enter your full name"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
               />
             </div>
@@ -175,8 +207,8 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
             {/* Email (Read-Only) */}
             <div className="space-y-1.5 sm:col-span-2">
               <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center justify-between">
-                <span>Google Email (Read-Only)</span>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500">Provided by Google OAuth</span>
+                <span>Authenticated Email (Read-Only)</span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500">Provided by Auth Provider</span>
               </label>
               <input
                 type="email"
@@ -191,14 +223,14 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Hash className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                <span>USN / Roll Number</span>
+                <span>USN / Roll Number <span className="text-rose-500">*</span></span>
               </label>
               <input
                 type="text"
                 value={formData.usn}
                 onChange={(e) => setFormData({ ...formData, usn: e.target.value.toUpperCase() })}
                 required
-                placeholder="e.g. 1MS21CS001"
+                placeholder="Enter your USN / Roll Number"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-mono focus:border-indigo-500 focus:outline-none transition-colors"
               />
             </div>
@@ -207,14 +239,14 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Building className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                <span>College Name</span>
+                <span>College Name <span className="text-rose-500">*</span></span>
               </label>
               <input
                 type="text"
                 value={formData.college}
                 onChange={(e) => setFormData({ ...formData, college: e.target.value })}
                 required
-                placeholder="e.g. B.M.S. College of Engineering"
+                placeholder="Enter your college name"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
               />
             </div>
@@ -223,21 +255,29 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <BookOpen className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                <span>Department / Branch</span>
+                <span>Department / Branch <span className="text-rose-500">*</span></span>
               </label>
               <select
                 value={formData.department}
                 onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                required
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
               >
+                <option value="" disabled>Select your department / branch</option>
                 <option value="Computer Science & Engineering">Computer Science & Engineering</option>
-                <option value="Information Science & Engineering">Information Science & Engineering</option>
-                <option value="Artificial Intelligence & Machine Learning">AI & Machine Learning</option>
-                <option value="Electronics & Communication Engineering">Electronics & Communication</option>
-                <option value="Electrical & Electronics Engineering">Electrical & Electronics</option>
+                <option value="Information Science / Information Technology">Information Science / Information Technology</option>
+                <option value="Artificial Intelligence & Machine Learning">Artificial Intelligence & Machine Learning</option>
+                <option value="Data Science">Data Science</option>
+                <option value="Electronics & Communication Engineering">Electronics & Communication Engineering</option>
+                <option value="Electrical & Electronics Engineering">Electrical & Electronics Engineering</option>
+                <option value="Electrical Engineering">Electrical Engineering</option>
                 <option value="Mechanical Engineering">Mechanical Engineering</option>
                 <option value="Civil Engineering">Civil Engineering</option>
-                <option value="Other Engineering Branch">Other Engineering Branch</option>
+                <option value="Chemical Engineering">Chemical Engineering</option>
+                <option value="Aerospace Engineering">Aerospace Engineering</option>
+                <option value="Biotechnology">Biotechnology</option>
+                <option value="Industrial Engineering">Industrial Engineering</option>
+                <option value="Other">Other</option>
               </select>
             </div>
 
@@ -245,37 +285,90 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({ onNavigate }) =>
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <GraduationCap className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                <span>Current Semester</span>
+                <span>Current Semester <span className="text-rose-500">*</span></span>
               </label>
               <select
                 value={formData.semester}
                 onChange={(e) => setFormData({ ...formData, semester: e.target.value })}
+                required
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
               >
+                <option value="" disabled>Select current semester</option>
+                <option value="1st Semester">1st Semester</option>
+                <option value="2nd Semester">2nd Semester</option>
+                <option value="3rd Semester">3rd Semester</option>
+                <option value="4th Semester">4th Semester</option>
                 <option value="5th Semester">5th Semester</option>
                 <option value="6th Semester">6th Semester</option>
                 <option value="7th Semester">7th Semester</option>
                 <option value="8th Semester">8th Semester</option>
-                <option value="Graduated">Graduated / Alumni</option>
+                <option value="Graduated / Alumni">Graduated / Alumni</option>
               </select>
             </div>
 
             {/* Graduation Year */}
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                <span>Graduation Year</span>
+                <span>Graduation Year <span className="text-rose-500">*</span></span>
               </label>
               <select
                 value={formData.graduation_year}
                 onChange={(e) => setFormData({ ...formData, graduation_year: e.target.value })}
+                required
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
               >
+                <option value="" disabled>Select graduation year</option>
+                <option value="2024">2024</option>
                 <option value="2025">2025</option>
                 <option value="2026">2026</option>
                 <option value="2027">2027</option>
                 <option value="2028">2028</option>
+                <option value="2029">2029</option>
+                <option value="2030">2030</option>
               </select>
+            </div>
+
+            {/* Career Goal */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Target className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Career Goal <span className="text-rose-500">*</span></span>
+              </label>
+              <select
+                value={formData.career_goal}
+                onChange={(e) => setFormData({ ...formData, career_goal: e.target.value })}
+                required
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
+              >
+                <option value="" disabled>Select your career goal</option>
+                <option value="Software / IT">Software / IT</option>
+                <option value="AI / Data">AI / Data</option>
+                <option value="Cybersecurity">Cybersecurity</option>
+                <option value="Electronics / Embedded">Electronics / Embedded</option>
+                <option value="Core Engineering">Core Engineering</option>
+                <option value="Research">Research</option>
+                <option value="Business / Management">Business / Management</option>
+                <option value="Government / Public Sector">Government / Public Sector</option>
+                <option value="Higher Studies">Higher Studies</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            {/* Target Role */}
+            <div className="space-y-1.5 sm:col-span-2">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Briefcase className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Target Role <span className="text-rose-500">*</span></span>
+              </label>
+              <input
+                type="text"
+                value={formData.target_role}
+                onChange={(e) => setFormData({ ...formData, target_role: e.target.value })}
+                required
+                placeholder="Enter your target role"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
+              />
             </div>
 
           </div>

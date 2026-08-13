@@ -27,11 +27,22 @@ export const supabase = createClient(
 );
 
 /**
+ * Helper to get the environment-aware auth redirect URL for OAuth providers.
+ * Prefers VITE_SITE_URL if configured (e.g. on Vercel production),
+ * otherwise falls back to window.location.origin.
+ */
+export const getAuthRedirectUrl = (): string => {
+  if (import.meta.env.VITE_SITE_URL) {
+    return import.meta.env.VITE_SITE_URL;
+  }
+  return window.location.origin;
+};
+
+/**
  * Get the exact OAuth redirect URI for Supabase & Google Cloud configuration.
  */
 export const getOAuthRedirectUri = (): string => {
-  const origin = window.location.origin;
-  return `${origin}/auth`;
+  return getAuthRedirectUrl();
 };
 
 /**
@@ -44,7 +55,7 @@ export const signInWithGoogle = async () => {
     );
   }
 
-  const redirectTo = getOAuthRedirectUri();
+  const redirectTo = getAuthRedirectUrl();
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
@@ -74,13 +85,106 @@ export const signInWithGitHub = async () => {
     );
   }
 
-  const redirectTo = window.location.origin;
+  const redirectTo = getAuthRedirectUrl();
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: {
       redirectTo,
     },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+/**
+ * Sign up with Email and Password using Supabase Auth
+ */
+export const signUpWithEmail = async (email: string, password: string) => {
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      'Supabase environment variables (VITE_SUPABASE_ANON_KEY) are not configured yet. Please configure your key in environment secrets.'
+    );
+  }
+
+  const redirectTo = getAuthRedirectUrl();
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: redirectTo,
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+/**
+ * Sign in with Email and Password using Supabase Auth
+ */
+export const signInWithEmail = async (email: string, password: string) => {
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      'Supabase environment variables (VITE_SUPABASE_ANON_KEY) are not configured yet. Please configure your key in environment secrets.'
+    );
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+/**
+ * Send Password Reset Email using Supabase Auth
+ */
+export const sendPasswordResetEmail = async (email: string) => {
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      'Supabase environment variables (VITE_SUPABASE_ANON_KEY) are not configured yet. Please configure your key in environment secrets.'
+    );
+  }
+
+  const redirectTo = `${getAuthRedirectUrl()}/reset-password`;
+
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+/**
+ * Update user password (for password recovery flow)
+ */
+export const updatePassword = async (newPassword: string) => {
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      'Supabase environment variables (VITE_SUPABASE_ANON_KEY) are not configured yet. Please configure your key in environment secrets.'
+    );
+  }
+
+  const { data, error } = await supabase.auth.updateUser({
+    password: newPassword,
   });
 
   if (error) {

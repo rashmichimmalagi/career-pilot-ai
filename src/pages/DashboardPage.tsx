@@ -19,7 +19,9 @@ import {
   Lock,
   CheckCircle2,
   Clock,
-  ShieldCheck
+  ShieldCheck,
+  Target,
+  Briefcase
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -214,12 +216,28 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 <span className="font-medium text-slate-800 dark:text-slate-200">{profile?.semester || 'Not Set'}</span>
               </div>
 
-              <div className="flex justify-between items-center py-1.5">
+              <div className="flex justify-between items-center py-1.5 border-b border-slate-100 dark:border-slate-800/60">
                 <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                   <span>Graduation</span>
                 </span>
-                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{profile?.graduation_year || '2026'}</span>
+                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{profile?.graduation_year || 'Not Set'}</span>
+              </div>
+
+              <div className="flex justify-between items-center py-1.5 border-b border-slate-100 dark:border-slate-800/60">
+                <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Career Goal</span>
+                </span>
+                <span className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[180px] text-right">{profile?.career_goal || 'Not Set'}</span>
+              </div>
+
+              <div className="flex justify-between items-center py-1.5">
+                <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Briefcase className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Target Role</span>
+                </span>
+                <span className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[180px] text-right">{profile?.target_role || 'Not Set'}</span>
               </div>
             </div>
 

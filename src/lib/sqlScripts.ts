@@ -17,9 +17,15 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   department TEXT NOT NULL,
   semester TEXT NOT NULL,
   graduation_year TEXT NOT NULL,
+  career_goal TEXT,
+  target_role TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Ensure columns exist if table was already created
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS career_goal TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS target_role TEXT;
 
 -- 2. Enable Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;

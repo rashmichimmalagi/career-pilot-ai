@@ -1,6 +1,16 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured, signInWithGoogle, signInWithGitHub, signOutUser } from '../lib/supabase';
+import {
+  supabase,
+  isSupabaseConfigured,
+  signInWithGoogle,
+  signInWithGitHub,
+  signUpWithEmail,
+  signInWithEmail,
+  sendPasswordResetEmail,
+  updatePassword,
+  signOutUser
+} from '../lib/supabase';
 import { profileService } from '../services/profileService';
 import { Profile } from '../types/database';
 
@@ -14,6 +24,10 @@ interface AuthContextType {
   isConfigured: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithGitHub: () => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<any>;
+  signInWithEmail: (email: string, password: string) => Promise<any>;
+  sendPasswordResetEmail: (email: string) => Promise<any>;
+  updatePassword: (newPassword: string) => Promise<any>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<Profile | null>;
   clearError: () => void;
@@ -147,6 +161,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const handleSignUpWithEmail = async (email: string, password: string) => {
+    setError(null);
+    try {
+      const data = await signUpWithEmail(email, password);
+      return data;
+    } catch (err: any) {
+      console.error('Email Sign-Up Error:', err);
+      const msg = err.message || 'Failed to create account.';
+      setError(msg);
+      throw err;
+    }
+  };
+
+  const handleSignInWithEmail = async (email: string, password: string) => {
+    setError(null);
+    try {
+      const data = await signInWithEmail(email, password);
+      return data;
+    } catch (err: any) {
+      console.error('Email Sign-In Error:', err);
+      const msg = err.message || 'Failed to sign in with email.';
+      setError(msg);
+      throw err;
+    }
+  };
+
+  const handleSendPasswordResetEmail = async (email: string) => {
+    setError(null);
+    try {
+      const data = await sendPasswordResetEmail(email);
+      return data;
+    } catch (err: any) {
+      console.error('Password Reset Error:', err);
+      const msg = err.message || 'Failed to send password reset email.';
+      setError(msg);
+      throw err;
+    }
+  };
+
+  const handleUpdatePassword = async (newPassword: string) => {
+    setError(null);
+    try {
+      const data = await updatePassword(newPassword);
+      return data;
+    } catch (err: any) {
+      console.error('Update Password Error:', err);
+      const msg = err.message || 'Failed to update password.';
+      setError(msg);
+      throw err;
+    }
+  };
+
   const handleSignOut = async () => {
     setError(null);
     try {
@@ -179,6 +245,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isConfigured: configured,
         signInWithGoogle: handleSignInWithGoogle,
         signInWithGitHub: handleSignInWithGitHub,
+        signUpWithEmail: handleSignUpWithEmail,
+        signInWithEmail: handleSignInWithEmail,
+        sendPasswordResetEmail: handleSendPasswordResetEmail,
+        updatePassword: handleUpdatePassword,
         signOut: handleSignOut,
         refreshProfile,
         clearError,

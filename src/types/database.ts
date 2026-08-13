@@ -11,6 +11,8 @@ export interface Profile {
   department: string;
   semester: string;
   graduation_year: string;
+  career_goal?: string;
+  target_role?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -24,6 +26,8 @@ export interface ProfileFormData {
   department: string;
   semester: string;
   graduation_year: string;
+  career_goal: string;
+  target_role: string;
 }
 
 export interface FeaturePreviewItem {
