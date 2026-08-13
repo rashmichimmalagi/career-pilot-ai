@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Compass, ShieldAlert, Key, Loader2, ArrowLeft, CheckCircle2, AlertCircle, Mail, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { supabase, isUserEmailVerified } from '../lib/supabase';
+import { profileService } from '../services/profileService';
 
 interface AuthPageProps {
   onNavigate: (page: string) => void;
@@ -112,26 +114,37 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
     setSuccessMessage(null);
     setDuplicateAccountInfo(null);
 
-    if (user) {
-      if (!isEmailVerified) {
-        onNavigate('verify-email');
-      } else if (profile) {
-        onNavigate('dashboard');
-      } else {
-        onNavigate('onboarding');
-      }
-      return;
-    }
-
-    if (!isConfigured) {
-      setLocalError(
-        'Supabase Anon Key is missing. Please click "Setup Guide" above to configure your VITE_SUPABASE_ANON_KEY.'
-      );
-      return;
-    }
+    setIsGitHubAuthenticating(true);
 
     try {
-      setIsGitHubAuthenticating(true);
+      // 1. First check if a valid Supabase session exists
+      const { data: { session: existingSession } } = await supabase.auth.getSession();
+      const currentUser = existingSession?.user || user;
+
+      if (currentUser) {
+        // Active session exists -> do NOT open GitHub or request reauthorization
+        // Check public.profiles using currentUser.id
+        const userProfile = profile || (await profileService.getProfile(currentUser.id));
+        setIsGitHubAuthenticating(false);
+
+        if (!isUserEmailVerified(currentUser)) {
+          onNavigate('verify-email');
+        } else if (userProfile) {
+          onNavigate('dashboard');
+        } else {
+          onNavigate('onboarding');
+        }
+        return;
+      }
+
+      if (!isConfigured) {
+        setIsGitHubAuthenticating(false);
+        setLocalError(
+          'Supabase Anon Key is missing. Please click "Setup Guide" above to configure your VITE_SUPABASE_ANON_KEY.'
+        );
+        return;
+      }
+
       await signInWithGitHub();
     } catch (err: any) {
       setIsGitHubAuthenticating(false);

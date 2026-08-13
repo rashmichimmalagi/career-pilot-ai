@@ -222,6 +222,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleSignInWithGitHub = async () => {
     setError(null);
     try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (currentSession?.user) {
+        return;
+      }
       await signInWithGitHub();
     } catch (err: any) {
       console.error('GitHub Sign-In Error:', err);
