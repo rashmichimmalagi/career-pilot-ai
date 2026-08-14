@@ -1,11 +1,11 @@
 // Supabase Edge Function: analyze-resume
-// Deploy with: supabase functions deploy analyze-resume --no-verify-jwt
+// Deploy command: supabase functions deploy analyze-resume --no-verify-jwt
 
 import { GoogleGenAI, Type } from 'npm:@google/genai@^2.4.0';
 
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-auth',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
@@ -16,7 +16,7 @@ const SUPPORTED_MODELS = [
 ];
 
 Deno.serve(async (req: Request) => {
-  // 1. Handle CORS Preflight
+  // 1. CRITICAL: Handle CORS Preflight FIRST before authentication, body parsing, or AI
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       status: 200,
@@ -24,15 +24,12 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // 2. Enforce HTTP POST
+  // 2. Reject non-POST HTTP methods with 405 and CORS headers
   if (req.method !== 'POST') {
-    console.error(`[Resume Analyzer] Method not allowed: ${req.method}`);
+    console.error(`[Resume Analyzer Edge Function] Method not allowed: ${req.method}`);
     return new Response(
       JSON.stringify({
-        success: false,
-        stage: 'HTTP Method',
         error: `Method Not Allowed: ${req.method}. Resume analysis endpoint requires HTTP POST.`,
-        message: 'Method Not Allowed. Please send a POST request.',
       }),
       {
         status: 405,
@@ -51,10 +48,7 @@ Deno.serve(async (req: Request) => {
     } catch {
       return new Response(
         JSON.stringify({
-          success: false,
-          stage: 'Payload Parsing',
           error: 'Invalid JSON request payload.',
-          message: 'Malformed JSON payload.',
         }),
         {
           status: 400,
@@ -69,10 +63,7 @@ Deno.serve(async (req: Request) => {
     if (!resumeText || typeof resumeText !== 'string' || resumeText.trim().length < 15) {
       return new Response(
         JSON.stringify({
-          success: false,
-          stage: 'PDF extraction',
-          error: 'PDF extraction failed: Text length is too short or empty.',
-          message: 'Unable to read this PDF. Please upload a text-readable PDF.',
+          error: 'Resume text is required and must contain readable content.',
         }),
         {
           status: 400,
@@ -85,16 +76,13 @@ Deno.serve(async (req: Request) => {
       ? targetRole.trim()
       : 'Software Developer';
 
-    // 4. Initialize Gemini AI Client
+    // 4. Initialize Gemini AI Client from Server Environment
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     if (!apiKey) {
-      console.error('[Resume Analyzer] GEMINI_API_KEY secret is missing in Edge Function environment.');
+      console.error('[Resume Analyzer Edge Function] GEMINI_API_KEY secret is missing.');
       return new Response(
         JSON.stringify({
-          success: false,
-          stage: 'AI configuration',
-          error: 'AI provider API key is not configured in Edge Function secrets.',
-          message: 'Resume analysis service is temporarily unavailable.',
+          error: 'Resume analysis service is temporarily unavailable (Missing AI configuration).',
         }),
         {
           status: 503,
@@ -201,12 +189,10 @@ Provide the complete ATS and placement analysis for "${role}" strictly in the re
     }
 
     if (!rawResponse) {
+      console.error('[Resume Analyzer Edge Function] AI generation failed:', lastError?.message || lastError);
       return new Response(
         JSON.stringify({
-          success: false,
-          stage: 'AI request',
-          error: `AI request failed: ${lastError?.message || 'Upstream provider error'}`,
-          message: 'AI analysis is temporarily unavailable. Please try again.',
+          error: 'AI analysis is temporarily unavailable. Please try again.',
         }),
         {
           status: 500,
@@ -221,23 +207,17 @@ Provide the complete ATS and placement analysis for "${role}" strictly in the re
     const parsedData = JSON.parse(text);
 
     return new Response(
-      JSON.stringify({
-        success: true,
-        stage: 'Validation',
-        data: parsedData,
-      }),
+      JSON.stringify(parsedData),
       {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
   } catch (err: any) {
+    console.error('[Resume Analyzer Edge Function] Unexpected error:', err?.message || err);
     return new Response(
       JSON.stringify({
-        success: false,
-        stage: 'Execution',
-        error: err?.message || 'Internal server error',
-        message: 'Unable to generate a valid resume analysis. Please try again.',
+        error: 'Unable to generate a valid resume analysis. Please try again.',
       }),
       {
         status: 500,
