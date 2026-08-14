@@ -214,6 +214,17 @@ function normalizeAnalysisObject(parsed: any): ResumeAnalysisResponse {
 async function startServer() {
   const app = express();
 
+  // CORS and Preflight Middleware
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+    next();
+  });
+
   // Middleware to parse JSON payloads up to 10MB
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -221,6 +232,7 @@ async function startServer() {
   // Health check endpoint
   app.get('/api/health', (req, res) => {
     const hasApiKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0);
+    res.setHeader('Content-Type', 'application/json');
     res.json({
       status: 'ok',
       aiConfigured: hasApiKey,
@@ -230,6 +242,7 @@ async function startServer() {
 
   // Independent AI Diagnostics & Test Endpoint (Step 7)
   app.get('/api/test-ai', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     const { client: ai, error: configError } = getGemini();
     if (!ai || configError) {
       return res.status(503).json({
@@ -270,9 +283,24 @@ async function startServer() {
     });
   });
 
-  // Resume Analysis API Endpoint
-  app.post('/api/analyze-resume', async (req, res) => {
-    const { resumeText, targetRole } = req.body;
+  // Resume Analysis Handler (Supports POST, returns 405 JSON for other methods)
+  const resumeAnalysisHandler = async (req: express.Request, res: express.Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    console.log('[Resume Analyzer] Request method:', req.method);
+    console.log('[Resume Analyzer] Request received at:', req.originalUrl || req.url);
+
+    // Explicit HTTP Method check
+    if (req.method !== 'POST') {
+      console.error(`[Resume Analyzer] Method not allowed: received ${req.method}, expected POST`);
+      return res.status(405).json({
+        success: false,
+        stage: 'HTTP Method',
+        error: `Method Not Allowed: ${req.method}. Resume analysis endpoint requires HTTP POST.`,
+        message: `HTTP 405: Method ${req.method} is not allowed on this endpoint. Please send a POST request with resume data.`,
+      });
+    }
+
+    const { resumeText, targetRole } = req.body || {};
 
     // Stage 4: Validate incoming extracted resume text
     if (!resumeText || typeof resumeText !== 'string' || resumeText.trim().length < 15) {
@@ -285,6 +313,7 @@ async function startServer() {
       });
     }
 
+    console.log('[Resume Analyzer] Resume text length:', resumeText.length);
     console.log(`[Resume Analyzer] 4. Extracted text validation passed. Length: ${resumeText.length}`);
 
     // Stage 5: Check AI service configuration
@@ -479,7 +508,13 @@ Provide the complete ATS and placement analysis for "${role}" strictly in the re
         message: 'AI response parsing failed. Please try again.',
       });
     }
-  });
+  };
+
+  // Register resume analysis route handlers for both standard and alias endpoints
+  app.all('/api/analyze-resume', resumeAnalysisHandler);
+  app.all('/api/resume-analysis', resumeAnalysisHandler);
+  app.all('/analyze-resume', resumeAnalysisHandler);
+  app.all('/resume-analysis', resumeAnalysisHandler);
 
   // Vite middleware in development vs Static serving in production
   if (process.env.NODE_ENV !== 'production') {

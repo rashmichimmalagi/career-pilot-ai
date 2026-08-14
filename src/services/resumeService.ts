@@ -3,6 +3,8 @@ import { ResumeAnalysisPayload, ResumeAnalysisResult } from '../types/resume';
 export const resumeService = {
   async analyzeResume(payload: ResumeAnalysisPayload): Promise<ResumeAnalysisResult> {
     console.log('[Resume Analyzer] 5. AI request started');
+    console.log('[Resume Analyzer] Sending POST request to /api/analyze-resume');
+
     let response: Response;
 
     try {
@@ -20,9 +22,9 @@ export const resumeService = {
 
     console.log(`[Resume Analyzer] 6. AI request completed (HTTP ${response.status} ${response.statusText})`);
 
-    let rawText = '';
+    let responseText = '';
     try {
-      rawText = await response.text();
+      responseText = await response.text();
     } catch (textErr: any) {
       console.error('[Resume Analyzer] 7/8. AI response extraction failed:', textErr?.message || textErr);
       throw new Error('AI response extraction failed: Unable to read server response.');
@@ -30,21 +32,39 @@ export const resumeService = {
 
     console.log('[Resume Analyzer] 7. AI response received');
 
-    let json: any;
-    try {
-      json = JSON.parse(rawText);
-      console.log('[Resume Analyzer] 9. JSON parsing successful.');
-    } catch (jsonErr: any) {
-      console.error('[Resume Analyzer] 9. AI response JSON parsing failed:', {
-        rawSnippet: rawText.slice(0, 150),
-        error: jsonErr?.message,
+    if (!response.ok) {
+      console.error('[Resume Analyzer] Resume analysis API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        response: responseText,
       });
-      throw new Error(`AI response JSON parsing failed (HTTP ${response.status}): ${jsonErr?.message || 'Invalid JSON'}`);
+
+      let serverMessage = '';
+      try {
+        const errorJson = JSON.parse(responseText);
+        serverMessage = errorJson.message || errorJson.error || '';
+      } catch {
+        serverMessage = responseText ? responseText.slice(0, 150) : '';
+      }
+
+      throw new Error(
+        `Resume analysis API failed: HTTP ${response.status}${serverMessage ? ` - ${serverMessage}` : ''}`
+      );
     }
 
-    if (!response.ok || !json.success || !json.data) {
-      const stage = json?.stage || 'AI request';
-      const devError = json?.error || `HTTP ${response.status} error`;
+    let json: any;
+    try {
+      json = JSON.parse(responseText);
+      console.log('[Resume Analyzer] 8. Response text extracted');
+      console.log('[Resume Analyzer] 9. JSON parsing successful.');
+    } catch (parseError: any) {
+      console.error('Invalid JSON from resume analysis API:', responseText);
+      throw new Error(`Resume analysis API returned invalid JSON: ${parseError?.message || 'Parse error'}`);
+    }
+
+    if (!json || !json.success || !json.data) {
+      const stage = json?.stage || 'AI response';
+      const devError = json?.error || 'Invalid API response format';
       const userMessage = json?.message || `AI analysis failed at stage: ${stage}`;
 
       console.error(`[Resume Analyzer] Failure at stage "${stage}":`, devError);
@@ -77,3 +97,4 @@ export const resumeService = {
     }
   },
 };
+
