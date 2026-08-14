@@ -14,7 +14,9 @@ import {
   User,
   Mail,
   KeyRound,
-  ShieldCheck
+  ShieldCheck,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { profileService } from '../../services/profileService';
@@ -27,7 +29,7 @@ interface EditProfileModalProps {
 }
 
 export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose }) => {
-  const { user, profile, setProfileState, refreshProfile } = useAuth();
+  const { user, profile, setProfileState, refreshProfile, showToast } = useAuth();
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -48,6 +50,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isAddingPassword, setIsAddingPassword] = useState(false);
   const [passwordAddedSuccess, setPasswordAddedSuccess] = useState(false);
 
@@ -65,34 +69,84 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
     providers.includes('email') ||
     identities.some((i: any) => i.provider === 'email');
 
+  const handleCancelAddPassword = () => {
+    setShowAddPassword(false);
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+  };
+
   const handleAddEmailPassword = async () => {
-    setFormError(null);
-    setSuccessMessage(null);
+    if (isAddingPassword) return;
+
+    if (!newPassword) {
+      showToast('Password required', 'Please enter a password.', 'warning');
+      return;
+    }
 
     if (newPassword.length < 6) {
-      setFormError('Password must be at least 6 characters long.');
+      showToast('Password too short', 'Password must be at least 6 characters long.', 'warning');
+      return;
+    }
+
+    if (!confirmNewPassword) {
+      showToast('Confirm password required', 'Please confirm your password.', 'warning');
       return;
     }
 
     if (newPassword !== confirmNewPassword) {
-      setFormError('Passwords do not match.');
+      showToast('Passwords do not match', 'Please ensure both password fields match exactly.', 'warning');
       return;
     }
 
     setIsAddingPassword(true);
+
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      // Verify active authenticated session first
+      const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+      if (userError || !currentUser) {
+        showToast('Session Expired', 'Your session has expired. Please sign in again.', 'warning');
+        return;
+      }
+
+      // Update password for the current authenticated user without creating duplicate accounts
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+
       if (error) {
-        setFormError(error.message || 'Failed to set password for email login.');
-      } else {
-        setPasswordAddedSuccess(true);
-        setSuccessMessage('Email & Password login added successfully to your CareerPilot account!');
-        setShowAddPassword(false);
-        setNewPassword('');
-        setConfirmNewPassword('');
+        console.error('Add Email & Password Error:', error);
+        showToast(
+          'Unable to add password',
+          error.message || 'Unable to add Email & Password login. Please try again.',
+          'error'
+        );
+        return;
+      }
+
+      setPasswordAddedSuccess(true);
+      showToast(
+        'Email & Password login added successfully.',
+        'You can now sign in using either GitHub or your email and password.',
+        'success'
+      );
+      setShowAddPassword(false);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+
+      if (refreshProfile) {
+        await refreshProfile();
       }
     } catch (err: any) {
-      setFormError(err.message || 'An error occurred while adding password.');
+      console.error('Add Email & Password Exception:', err);
+      showToast(
+        'Unable to add password',
+        err.message || 'Unable to add Email & Password login. Please try again.',
+        'error'
+      );
     } finally {
       setIsAddingPassword(false);
     }
@@ -487,7 +541,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                   {hasEmailPassword ? (
                     <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1 font-mono">
                       <CheckCircle2 className="w-3 h-3" />
-                      <span>Configured</span>
+                      <span>Connected</span>
                     </span>
                   ) : (
                     <button
@@ -515,30 +569,56 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <input
-                      type="password"
-                      placeholder="New Password (min 6 chars)"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none"
-                    />
-                    <input
-                      type="password"
-                      placeholder="Confirm New Password"
-                      value={confirmNewPassword}
-                      onChange={(e) => setConfirmNewPassword(e.target.value)}
-                      className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="New Password (min 6 chars)"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full px-3.5 py-2 pr-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        placeholder="Confirm New Password"
+                        value={confirmNewPassword}
+                        onChange={(e) => setConfirmNewPassword(e.target.value)}
+                        className="w-full px-3.5 py-2 pr-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                        title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                        aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showConfirmPassword ? (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex gap-2 justify-end pt-1">
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowAddPassword(false);
-                        setNewPassword('');
-                        setConfirmNewPassword('');
-                      }}
+                      onClick={handleCancelAddPassword}
                       className="px-3 py-1.5 rounded-xl bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                     >
                       Cancel
@@ -549,7 +629,14 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                       disabled={isAddingPassword}
                       className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                     >
-                      {isAddingPassword ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save Password'}
+                      {isAddingPassword ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <span>Save Password</span>
+                      )}
                     </button>
                   </div>
                 </div>

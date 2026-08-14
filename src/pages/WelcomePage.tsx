@@ -130,16 +130,6 @@ export const WelcomePage: React.FC<WelcomePageProps> = ({ onNavigate }) => {
             )}
           </div>
 
-          {/* Secondary Link */}
-          <div>
-            <button
-              onClick={() => onNavigate('home')}
-              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer group pt-2"
-            >
-              <span>Explore the full platform capabilities →</span>
-            </button>
-          </div>
-
         </div>
       </section>
 
