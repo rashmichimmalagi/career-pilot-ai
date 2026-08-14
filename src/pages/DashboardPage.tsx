@@ -131,15 +131,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </div>
 
             {/* Stat 4: Resume Score */}
-            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-none space-y-3">
+            <div
+              onClick={() => onNavigate('resume-analyzer')}
+              className="p-5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 shadow-sm dark:shadow-none space-y-3 cursor-pointer transition-all group"
+            >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Resume Score</span>
-                <FileCheck className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <FileCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform" />
               </div>
               <div className="space-y-1">
-                <span className="text-xl font-bold text-slate-700 dark:text-slate-300 font-mono">Not Analyzed</span>
+                <span className="text-xl font-bold text-slate-700 dark:text-slate-300 font-mono group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                  Analyze Now →
+                </span>
                 <p className="text-xs text-slate-500 italic">
-                  No resume analyzed yet
+                  Launch Stage 2 AI ATS Analyzer
                 </p>
               </div>
             </div>
@@ -256,18 +261,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               
-              <div className="p-5 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-none space-y-3 relative overflow-hidden">
+              <div
+                onClick={() => onNavigate('resume-analyzer')}
+                className="p-5 rounded-2xl bg-gradient-to-br from-indigo-500/5 via-white to-purple-500/5 dark:from-indigo-950/40 dark:via-slate-900/80 dark:to-slate-900 border border-indigo-500/30 hover:border-indigo-500 shadow-sm hover:shadow-md dark:hover:shadow-indigo-950/40 transition-all duration-200 space-y-3 cursor-pointer group relative overflow-hidden"
+              >
                 <div className="flex items-center justify-between">
-                  <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400">
+                  <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 group-hover:scale-105 transition-transform">
                     <FileCheck className="w-5 h-5" />
                   </div>
-                  <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 flex items-center gap-1 font-mono">
-                    <Lock className="w-3 h-3" />
-                    <span>Coming in Stage 2</span>
+                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1 font-mono">
+                    <Sparkles className="w-3 h-3 text-emerald-500" />
+                    <span>Stage 2 Live</span>
                   </span>
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-200">AI Resume Analyzer</h3>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors flex items-center gap-1">
+                    <span>AI Resume Analyzer</span>
+                    <span className="text-xs text-indigo-500 group-hover:translate-x-0.5 transition-transform">→</span>
+                  </h3>
                   <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Upload resume for instant ATS match against engineering job descriptions.</p>
                 </div>
               </div>

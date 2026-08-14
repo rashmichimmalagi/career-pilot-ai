@@ -12,6 +12,7 @@ import { OnboardingPage } from './pages/OnboardingPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
+import { ResumeAnalyzerPage } from './pages/ResumeAnalyzerPage';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
@@ -39,6 +40,7 @@ function AppContent() {
         'coding',
         'interview',
         'resume',
+        'resume-analyzer',
         'career-mentor',
         'analytics',
       ].includes(cleanPath)
@@ -91,6 +93,7 @@ function AppContent() {
       'coding',
       'interview',
       'resume',
+      'resume-analyzer',
       'career-mentor',
       'analytics',
     ];
@@ -208,6 +211,12 @@ function AppContent() {
 
         {currentPage === 'dashboard' && (
           <DashboardPage
+            onNavigate={navigateTo}
+          />
+        )}
+
+        {(currentPage === 'resume-analyzer' || currentPage === 'resume') && (
+          <ResumeAnalyzerPage
             onNavigate={navigateTo}
           />
         )}
