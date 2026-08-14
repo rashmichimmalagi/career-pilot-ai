@@ -1,10 +1,38 @@
 import { ResumeAnalysisPayload, ResumeAnalysisResult } from '../types/resume';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export const resumeService = {
   async analyzeResume(payload: ResumeAnalysisPayload): Promise<ResumeAnalysisResult> {
     console.log('[Resume Analyzer] 5. AI request started');
-    console.log('[Resume Analyzer] Sending POST request to /api/analyze-resume');
 
+    // 1. If Supabase is configured, try Supabase Edge Function first
+    if (isSupabaseConfigured()) {
+      console.log('[Resume Analyzer] Attempting Supabase Edge Function: analyze-resume');
+      try {
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke('analyze-resume', {
+          body: payload,
+        });
+
+        if (!edgeError && edgeData) {
+          const resObj = edgeData.data || edgeData;
+          if (
+            typeof resObj.overall_score === 'number' &&
+            typeof resObj.ats_score === 'number' &&
+            typeof resObj.role_match_score === 'number'
+          ) {
+            console.log('[Resume Analyzer] 10. Validation successful via Supabase Edge Function.');
+            return resObj as ResumeAnalysisResult;
+          }
+        } else if (edgeError) {
+          console.warn('[Resume Analyzer] Supabase Edge Function invocation warning:', edgeError.message);
+        }
+      } catch (edgeInvokeErr: any) {
+        console.warn('[Resume Analyzer] Supabase Edge Function failed, falling back to server API:', edgeInvokeErr?.message);
+      }
+    }
+
+    // 2. Full-stack Server API route (POST /api/analyze-resume)
+    console.log('[Resume Analyzer] Sending POST request to /api/analyze-resume');
     let response: Response;
 
     try {
