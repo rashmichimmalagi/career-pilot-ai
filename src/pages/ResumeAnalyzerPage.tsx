@@ -19,11 +19,10 @@ import {
   Award,
   Lightbulb,
   BookOpen,
-  Briefcase,
-  TrendingUp,
   Cpu
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 import { extractTextFromPdf } from '../utils/pdfExtractor';
 import { resumeService } from '../services/resumeService';
 import { ResumeAnalysisResult } from '../types/resume';
@@ -55,7 +54,6 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
   const [customRoleInput, setCustomRoleInput] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisStep, setAnalysisStep] = useState<'idle' | 'extracting' | 'analyzing'>('idle');
   const [analysisResult, setAnalysisResult] = useState<ResumeAnalysisResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -136,53 +134,52 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
     }
 
     setIsAnalyzing(true);
-    setAnalysisStep('extracting');
 
     try {
-      // Step A: Extract text from PDF
-      let extractedText = '';
-      let pdfBase64 = '';
-
-      try {
-        extractedText = await extractTextFromPdf(selectedFile);
-      } catch (pdfErr) {
-        console.warn('Frontend PDF text extraction warning, falling back to base64 buffer:', pdfErr);
-        // Convert to base64 for backend Gemini extraction
-        const arrayBuffer = await selectedFile.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        pdfBase64 = btoa(binary);
-      }
-
-      if (!extractedText && !pdfBase64) {
-        showToast('PDF Extraction Error', 'Unable to read this PDF. Please upload another PDF.', 'error');
+      // Step 1: Authentication verification
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr || !sessionData?.session) {
+        showToast('Session Missing', 'Your session has expired. Please sign in again.', 'error');
         setIsAnalyzing(false);
-        setAnalysisStep('idle');
         return;
       }
 
-      // Step B: Send to backend AI analysis
-      setAnalysisStep('analyzing');
+      // Step 2: PDF Text Extraction
+      let extractedText = '';
+      try {
+        extractedText = await extractTextFromPdf(selectedFile);
+        if (!extractedText || extractedText.trim().length < 20) {
+          console.error('[PDF extraction] Failure stage: Extracted text is empty or under 20 characters.');
+          showToast('PDF Extraction Error', 'Unable to read this PDF. Please upload a text-readable PDF.', 'error');
+          setIsAnalyzing(false);
+          return;
+        }
+        // Log length only as required
+        console.log('[PDF extraction] PDF text extracted successfully. Length:', extractedText.length);
+      } catch (pdfErr) {
+        console.error('[PDF extraction] Failure stage: Text extraction from PDF failed:', pdfErr);
+        showToast('PDF Extraction Error', 'Unable to read this PDF. Please upload a text-readable PDF.', 'error');
+        setIsAnalyzing(false);
+        return;
+      }
 
+      // Step 3: Secure AI Request
+      console.log('[AI request] Initiating resume analysis request for role:', targetRole.trim());
       const result = await resumeService.analyzeResume({
         resumeText: extractedText,
         targetRole: targetRole.trim(),
-        pdfBase64: pdfBase64 || undefined,
       });
 
+      console.log('[AI response] AI Analysis result received and parsed successfully.');
       setAnalysisResult(result);
       showToast('Analysis Complete', 'Your resume has been analyzed successfully!', 'success');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
       console.error('Resume analysis failed:', err);
-      const msg = err.message || 'Resume analysis is temporarily unavailable. Please try again.';
+      const msg = err.message || 'AI analysis is temporarily unavailable. Please try again.';
       showToast('Analysis Error', msg, 'error');
     } finally {
       setIsAnalyzing(false);
-      setAnalysisStep('idle');
     }
   };
 
@@ -193,12 +190,6 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
       fileInputRef.current.value = '';
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
-    if (score >= 60) return 'text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10';
-    return 'text-rose-600 dark:text-rose-400 border-rose-500/30 bg-rose-500/10';
   };
 
   const getScoreRingColor = (score: number) => {
@@ -402,11 +393,7 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
                   {isAnalyzing ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>
-                        {analysisStep === 'extracting'
-                          ? 'Extracting PDF content...'
-                          : 'Analyzing your resume...'}
-                      </span>
+                      <span>Analyzing Resume...</span>
                     </>
                   ) : (
                     <>

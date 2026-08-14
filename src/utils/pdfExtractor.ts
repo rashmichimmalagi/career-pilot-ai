@@ -1,23 +1,23 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
-// Configure worker safely for browser environment
 if (typeof window !== 'undefined') {
   try {
-    // Use worker from standard CDN matching version or fallback
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.10.38'}/pdf.worker.min.mjs`;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
   } catch (e) {
-    console.warn('PDF Worker initialization note:', e);
+    console.warn('[PDF Worker Init] Setting worker URL fallback:', e);
   }
 }
 
 /**
- * Extracts all text from a PDF file using pdfjs-dist
+ * Robustly extracts all text from a PDF file using pdfjs-dist
  */
 export async function extractTextFromPdf(file: File): Promise<string> {
   try {
     const arrayBuffer = await file.arrayBuffer();
     const typedArray = new Uint8Array(arrayBuffer);
 
+    // Initialize document loading task
     const loadingTask = pdfjsLib.getDocument({
       data: typedArray,
       useSystemFonts: true,
@@ -30,27 +30,25 @@ export async function extractTextFromPdf(file: File): Promise<string> {
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
-      
+
       const pageText = textContent.items
         .map((item: any) => {
-          if ('str' in item) {
+          if ('str' in item && typeof item.str === 'string') {
             return item.str;
           }
           return '';
         })
         .join(' ');
 
-      fullText += `\n--- Page ${pageNum} ---\n` + pageText;
+      if (pageText.trim()) {
+        fullText += `\n--- Page ${pageNum} ---\n` + pageText;
+      }
     }
 
     const cleanedText = fullText.trim();
-    if (!cleanedText || cleanedText.length < 30) {
-      throw new Error('Extracted text is too short or empty');
-    }
-
     return cleanedText;
   } catch (error) {
-    console.error('Error extracting text from PDF:', error);
-    throw new Error('Unable to read this PDF. Please upload another PDF.');
+    console.error('[PDF extraction] Extraction error details:', error);
+    throw error;
   }
 }

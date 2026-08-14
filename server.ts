@@ -14,12 +14,16 @@ const PORT = 3000;
 
 // Lazy initialization of Gemini Client
 let geminiClient: GoogleGenAI | null = null;
-function getGemini(): GoogleGenAI {
+
+function getGemini(): { client: GoogleGenAI | null; error: string | null } {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey.trim() === '') {
+    return {
+      client: null,
+      error: 'AI analysis service is not configured.',
+    };
+  }
   if (!geminiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY environment variable is missing.');
-    }
     geminiClient = new GoogleGenAI({
       apiKey: apiKey,
       httpOptions: {
@@ -29,8 +33,14 @@ function getGemini(): GoogleGenAI {
       },
     });
   }
-  return geminiClient;
+  return { client: geminiClient, error: null };
 }
+
+const SUPPORTED_MODELS = [
+  'gemini-3.7-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+];
 
 async function startServer() {
   const app = express();
@@ -41,178 +51,225 @@ async function startServer() {
 
   // Health check endpoint
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    const hasApiKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0);
+    res.json({
+      status: 'ok',
+      aiConfigured: hasApiKey,
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // Resume Analysis API Endpoint
   app.post('/api/analyze-resume', async (req, res) => {
-    try {
-      const { resumeText, targetRole, pdfBase64 } = req.body;
+    const { resumeText, targetRole } = req.body;
 
-      if ((!resumeText || typeof resumeText !== 'string' || resumeText.trim().length < 20) && !pdfBase64) {
-        return res.status(400).json({
-          error: 'Resume content is required.',
-          message: 'Unable to read this PDF. Please upload another PDF.',
-        });
-      }
-
-      const role = targetRole && typeof targetRole === 'string' ? targetRole.trim() : 'Software Engineer';
-      const ai = getGemini();
-
-      const systemInstruction = `You are a Senior Engineering Hiring Manager and ATS (Applicant Tracking System) Technical Recruiter at top tech companies.
-Your job is to thoroughly analyze an engineering student's resume against their target role: "${role}".
-Provide actionable, highly specific, constructive feedback tailored to campus placements and tech hiring.
-
-Calculate realistic, differentiated scores (0 to 100):
-- overall_score: Comprehensive rating of the resume (0-100)
-- ats_score: ATS readability, standard section headers, clean typography, absence of parsing blockers, keyword density (0-100)
-- role_match_score: How closely the skills and projects align with the requirements of "${role}" (0-100)
-
-Return your evaluation as a valid JSON object matching the required schema.`;
-
-      let contents: any;
-      if (resumeText && resumeText.trim().length >= 20) {
-        contents = `Target Role: ${role}\n\nResume Content:\n${resumeText.slice(0, 15000)}`;
-      } else if (pdfBase64) {
-        contents = [
-          {
-            inlineData: {
-              mimeType: 'application/pdf',
-              data: pdfBase64,
-            },
-          },
-          {
-            text: `Please analyze this resume for the target role: "${role}".`,
-          },
-        ];
-      }
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              overall_score: {
-                type: Type.NUMBER,
-                description: 'Overall resume score between 0 and 100',
-              },
-              ats_score: {
-                type: Type.NUMBER,
-                description: 'ATS compatibility score between 0 and 100',
-              },
-              role_match_score: {
-                type: Type.NUMBER,
-                description: 'Target role match score between 0 and 100',
-              },
-              strengths: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: 'List of specific strengths identified in the resume (3-5 items)',
-              },
-              missing_skills: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: 'List of key missing skills or technologies for the target role (3-6 items)',
-              },
-              improvement_suggestions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: 'Actionable numbered suggestions to improve the resume (3-5 items)',
-              },
-              keyword_analysis: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    keyword: { type: Type.STRING },
-                    matched: { type: Type.BOOLEAN },
-                    category: { type: Type.STRING },
-                  },
-                  required: ['keyword', 'matched'],
-                },
-                description: 'Crucial keywords for the target role indicating whether they are present in the resume',
-              },
-              experience_summary: {
-                type: Type.STRING,
-                description: 'Brief executive summary of the student background and experience quality',
-              },
-              project_feedback: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    strength: { type: Type.STRING },
-                    suggestion: { type: Type.STRING },
-                  },
-                  required: ['name', 'strength', 'suggestion'],
-                },
-                description: 'Detailed feedback on 1-3 key projects mentioned in the resume',
-              },
-              education_feedback: {
-                type: Type.STRING,
-                description: 'Feedback on academic background, relevant coursework, and degree details',
-              },
-              final_recommendation: {
-                type: Type.STRING,
-                description: 'Inspiring, clear, and actionable closing recommendation for placement readiness',
-              },
-            },
-            required: [
-              'overall_score',
-              'ats_score',
-              'role_match_score',
-              'strengths',
-              'missing_skills',
-              'improvement_suggestions',
-              'keyword_analysis',
-              'experience_summary',
-              'project_feedback',
-              'education_feedback',
-              'final_recommendation',
-            ],
-          },
-        },
+    // Stage 1: Validate incoming extracted resume text
+    if (!resumeText || typeof resumeText !== 'string' || resumeText.trim().length < 15) {
+      console.error('[PDF extraction] Failure stage: Resume text received by server is empty or invalid.');
+      return res.status(400).json({
+        success: false,
+        error: 'Unable to read this PDF. Please upload a text-readable PDF.',
+        message: 'Unable to read this PDF. Please upload a text-readable PDF.',
+        stage: 'PDF extraction',
       });
+    }
 
-      const responseText = response.text;
-      if (!responseText) {
-        throw new Error('Empty response from AI model');
+    // Stage 2: Check AI service configuration
+    const { client: ai, error: configError } = getGemini();
+    if (!ai || configError) {
+      console.error('[AI request] Failure stage: AI analysis service is not configured (missing GEMINI_API_KEY).');
+      return res.status(503).json({
+        success: false,
+        error: 'AI analysis service is not configured.',
+        message: 'Resume analysis is not configured yet. Please try again later.',
+        stage: 'AI request',
+      });
+    }
+
+    const role = targetRole && typeof targetRole === 'string' && targetRole.trim().length > 0
+      ? targetRole.trim()
+      : 'Software Developer';
+
+    console.log(`[AI request] Starting resume analysis for role: "${role}". Resume text length: ${resumeText.length}`);
+
+    // Stage 3: Send structured prompt to Gemini with resilient model fallback
+    let responseText = '';
+    let usedModel = '';
+    let lastError: any = null;
+
+    const systemInstruction = `You are a Senior Engineering Hiring Manager and ATS Placement Specialist.
+Your task is to analyze the student resume strictly against their target role: "${role}".
+Calculate realistic, differentiated scores (0 to 100):
+- overall_score: Comprehensive placement readiness score (0-100)
+- ats_score: ATS readability, standardized headers, formatting, keyword presence (0-100)
+- role_match_score: Alignment of skills and projects with industry job expectations for "${role}" (0-100)
+
+Return a valid JSON object matching the requested schema.`;
+
+    const prompt = `TARGET ROLE: ${role}
+
+RESUME TEXT CONTENT:
+"""
+${resumeText.slice(0, 20000)}
+"""
+
+Please evaluate this resume for the "${role}" role and provide full structured ATS analysis.`;
+
+    for (const modelName of SUPPORTED_MODELS) {
+      try {
+        console.log(`[AI request] Attempting generation with model: ${modelName}`);
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: prompt,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                overall_score: {
+                  type: Type.NUMBER,
+                  description: 'Overall placement readiness score between 0 and 100',
+                },
+                ats_score: {
+                  type: Type.NUMBER,
+                  description: 'ATS compatibility and parsability score between 0 and 100',
+                },
+                role_match_score: {
+                  type: Type.NUMBER,
+                  description: 'Target role match score between 0 and 100',
+                },
+                strengths: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: 'List of specific strengths identified in the resume (3-5 items)',
+                },
+                missing_skills: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: 'List of key missing skills or technologies for this role (3-6 items)',
+                },
+                improvement_suggestions: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: 'Actionable numbered suggestions to improve the resume (3-5 items)',
+                },
+                keyword_analysis: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      keyword: { type: Type.STRING },
+                      matched: { type: Type.BOOLEAN },
+                      category: { type: Type.STRING },
+                    },
+                    required: ['keyword', 'matched'],
+                  },
+                  description: 'Crucial keywords for this role indicating matched vs missing',
+                },
+                experience_summary: {
+                  type: Type.STRING,
+                  description: 'Brief executive summary of student profile and work/internship quality',
+                },
+                project_feedback: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING },
+                      strength: { type: Type.STRING },
+                      suggestion: { type: Type.STRING },
+                    },
+                    required: ['name', 'strength', 'suggestion'],
+                  },
+                  description: 'Detailed feedback on projects mentioned in the resume',
+                },
+                education_feedback: {
+                  type: Type.STRING,
+                  description: 'Feedback on academic background, relevant coursework, and degree presentation',
+                },
+                final_recommendation: {
+                  type: Type.STRING,
+                  description: 'Clear and inspiring closing recommendation for placement readiness',
+                },
+              },
+              required: [
+                'overall_score',
+                'ats_score',
+                'role_match_score',
+                'strengths',
+                'missing_skills',
+                'improvement_suggestions',
+                'keyword_analysis',
+                'experience_summary',
+                'project_feedback',
+                'education_feedback',
+                'final_recommendation',
+              ],
+            },
+          },
+        });
+
+        if (response.text && response.text.trim().length > 0) {
+          responseText = response.text;
+          usedModel = modelName;
+          console.log(`[AI response] Received response successfully using model "${usedModel}". Length: ${responseText.length}`);
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AI request] Model "${modelName}" failed, attempting next fallback model:`, err.message || err);
       }
+    }
 
+    if (!responseText || responseText.trim() === '') {
+      console.error('[AI response] Failure stage: All Gemini models failed to generate content:', lastError);
+      return res.status(500).json({
+        success: false,
+        error: 'AI analysis is temporarily unavailable. Please try again.',
+        message: 'AI analysis is temporarily unavailable. Please try again.',
+        stage: 'AI response',
+      });
+    }
+
+    // Stage 4: Parse and Validate AI Response JSON
+    try {
       const parsedData = JSON.parse(responseText);
 
-      // Clamp scores to valid 0-100 range
-      parsedData.overall_score = Math.min(100, Math.max(0, Math.round(parsedData.overall_score || 75)));
-      parsedData.ats_score = Math.min(100, Math.max(0, Math.round(parsedData.ats_score || 70)));
-      parsedData.role_match_score = Math.min(100, Math.max(0, Math.round(parsedData.role_match_score || 72)));
+      // Validate numeric score ranges (0 to 100)
+      const overall = typeof parsedData.overall_score === 'number' ? parsedData.overall_score : 75;
+      const ats = typeof parsedData.ats_score === 'number' ? parsedData.ats_score : 70;
+      const roleMatch = typeof parsedData.role_match_score === 'number' ? parsedData.role_match_score : 72;
 
-      // Ensure array safety
+      parsedData.overall_score = Math.min(100, Math.max(0, Math.round(overall)));
+      parsedData.ats_score = Math.min(100, Math.max(0, Math.round(ats)));
+      parsedData.role_match_score = Math.min(100, Math.max(0, Math.round(roleMatch)));
+
+      // Validate array fields
       if (!Array.isArray(parsedData.strengths)) parsedData.strengths = [];
       if (!Array.isArray(parsedData.missing_skills)) parsedData.missing_skills = [];
       if (!Array.isArray(parsedData.improvement_suggestions)) parsedData.improvement_suggestions = [];
       if (!Array.isArray(parsedData.keyword_analysis)) parsedData.keyword_analysis = [];
       if (!Array.isArray(parsedData.project_feedback)) parsedData.project_feedback = [];
 
+      // Validate string fields
+      if (typeof parsedData.experience_summary !== 'string') parsedData.experience_summary = '';
+      if (typeof parsedData.education_feedback !== 'string') parsedData.education_feedback = '';
+      if (typeof parsedData.final_recommendation !== 'string') parsedData.final_recommendation = '';
+
+      console.log(`[JSON parsing] Successfully parsed and validated resume analysis. Overall: ${parsedData.overall_score}, ATS: ${parsedData.ats_score}, RoleMatch: ${parsedData.role_match_score}`);
+
       return res.json({
         success: true,
         data: parsedData,
       });
-    } catch (err: any) {
-      console.error('Server Resume Analysis Error:', err);
-      if (err.message && err.message.includes('GEMINI_API_KEY')) {
-        return res.status(500).json({
-          error: 'API Key Configuration Issue',
-          message: 'Resume analysis is temporarily unavailable. Please try again.',
-        });
-      }
-      return res.status(500).json({
-        error: 'Analysis Error',
-        message: 'Resume analysis is temporarily unavailable. Please try again.',
+    } catch (parseErr: any) {
+      console.error('[JSON parsing] Failure stage: JSON parsing error:', parseErr);
+      return res.status(502).json({
+        success: false,
+        error: 'Unable to generate a valid resume analysis. Please try again.',
+        message: 'Unable to generate a valid resume analysis. Please try again.',
+        stage: 'JSON parsing',
       });
     }
   });
