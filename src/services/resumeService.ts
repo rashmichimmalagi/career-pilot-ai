@@ -33,11 +33,21 @@ export const resumeService = {
     console.log('[Resume Analyzer] 7. AI response received');
 
     if (!response.ok) {
-      console.error('[Resume Analyzer] Resume analysis API error:', {
-        status: response.status,
-        statusText: response.statusText,
-        response: responseText,
-      });
+      if (response.status === 405) {
+        console.error('[Resume Analyzer] API returned 405', {
+          endpoint: '/api/analyze-resume',
+          method: 'POST',
+          status: response.status,
+        });
+      } else {
+        console.error('[Resume Analyzer] Resume analysis API error:', {
+          endpoint: '/api/analyze-resume',
+          method: 'POST',
+          status: response.status,
+          statusText: response.statusText,
+          response: responseText,
+        });
+      }
 
       let serverMessage = '';
       try {

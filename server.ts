@@ -510,11 +510,24 @@ Provide the complete ATS and placement analysis for "${role}" strictly in the re
     }
   };
 
-  // Register resume analysis route handlers for both standard and alias endpoints
+  // Register resume analysis route handlers for both standard and alias endpoints (with and without trailing slashes)
   app.all('/api/analyze-resume', resumeAnalysisHandler);
+  app.all('/api/analyze-resume/', resumeAnalysisHandler);
   app.all('/api/resume-analysis', resumeAnalysisHandler);
+  app.all('/api/resume-analysis/', resumeAnalysisHandler);
   app.all('/analyze-resume', resumeAnalysisHandler);
   app.all('/resume-analysis', resumeAnalysisHandler);
+
+  // Catch-all for API routes to return structured JSON errors instead of falling through to Vite static 405
+  app.all('/api/*', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.status(404).json({
+      success: false,
+      stage: 'Route Lookup',
+      error: `API route not found: ${req.method} ${req.originalUrl || req.url}`,
+      message: `The requested endpoint ${req.originalUrl || req.url} does not exist.`,
+    });
+  });
 
   // Vite middleware in development vs Static serving in production
   if (process.env.NODE_ENV !== 'production') {
