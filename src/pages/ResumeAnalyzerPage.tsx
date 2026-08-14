@@ -126,6 +126,7 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
   };
 
   const handleStartAnalysis = async () => {
+    console.log('[Resume Analyzer] 1. Analyze clicked');
     if (!selectedFile || isAnalyzing) return;
 
     if (!targetRole.trim()) {
@@ -136,47 +137,58 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
     setIsAnalyzing(true);
 
     try {
-      // Step 1: Authentication verification
+      // Stage 2: Authentication session check
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr || !sessionData?.session) {
+      const hasSession = Boolean(sessionData?.session);
+      console.log('[Resume Analyzer] 2. Auth session:', hasSession);
+
+      if (sessionErr || !hasSession) {
+        console.error('[Resume Analyzer] 2. Auth session check failed:', sessionErr?.message || 'No active session');
         showToast('Session Missing', 'Your session has expired. Please sign in again.', 'error');
         setIsAnalyzing(false);
         return;
       }
 
-      // Step 2: PDF Text Extraction
+      // Stage 3: PDF Text Extraction
+      console.log('[Resume Analyzer] 3. PDF extraction started');
       let extractedText = '';
       try {
         extractedText = await extractTextFromPdf(selectedFile);
-        if (!extractedText || extractedText.trim().length < 20) {
-          console.error('[PDF extraction] Failure stage: Extracted text is empty or under 20 characters.');
-          showToast('PDF Extraction Error', 'Unable to read this PDF. Please upload a text-readable PDF.', 'error');
-          setIsAnalyzing(false);
-          return;
-        }
-        // Log length only as required
-        console.log('[PDF extraction] PDF text extracted successfully. Length:', extractedText.length);
-      } catch (pdfErr) {
-        console.error('[PDF extraction] Failure stage: Text extraction from PDF failed:', pdfErr);
+      } catch (pdfErr: any) {
+        console.error('[Resume Analyzer] 3. PDF extraction failed:', pdfErr?.message || pdfErr);
         showToast('PDF Extraction Error', 'Unable to read this PDF. Please upload a text-readable PDF.', 'error');
         setIsAnalyzing(false);
         return;
       }
 
-      // Step 3: Secure AI Request
-      console.log('[AI request] Initiating resume analysis request for role:', targetRole.trim());
+      // Stage 4: Extracted Text Validation
+      const textLen = extractedText?.length || 0;
+      console.log('[Resume Analyzer] 4. Extracted text length:', textLen);
+
+      if (!extractedText || textLen < 15) {
+        console.error('[Resume Analyzer] 4. Extracted text validation failed: Extracted length is', textLen);
+        showToast('PDF Extraction Error', 'Unable to read this PDF. Please upload a text-readable PDF.', 'error');
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // Stage 5 to 10: Secure AI Request, Response Extraction, JSON Parsing, and Validation
+      console.log('[Resume Analyzer] 5. AI request started for role:', targetRole.trim());
       const result = await resumeService.analyzeResume({
         resumeText: extractedText,
         targetRole: targetRole.trim(),
       });
 
-      console.log('[AI response] AI Analysis result received and parsed successfully.');
+      console.log('[Resume Analyzer] 10. Validation confirmed by client.');
+
+      // Stage 11: Result Rendering
+      console.log('[Resume Analyzer] 11. Rendering');
       setAnalysisResult(result);
       showToast('Analysis Complete', 'Your resume has been analyzed successfully!', 'success');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
-      console.error('Resume analysis failed:', err);
-      const msg = err.message || 'AI analysis is temporarily unavailable. Please try again.';
+      console.error('[Resume Analyzer] Failure encountered during analysis flow:', err?.message || err);
+      const msg = err.message || 'AI request failed. Please try again.';
       showToast('Analysis Error', msg, 'error');
     } finally {
       setIsAnalyzing(false);
