@@ -42,6 +42,174 @@ const SUPPORTED_MODELS = [
   'gemini-flash-latest',
 ];
 
+export interface KeywordAnalysisItem {
+  keyword: string;
+  matched: boolean;
+  category?: string;
+}
+
+export interface ProjectFeedbackItem {
+  name: string;
+  strength: string;
+  suggestion: string;
+}
+
+export interface ResumeAnalysisResponse {
+  overall_score: number;
+  ats_score: number;
+  role_match_score: number;
+  strengths: string[];
+  missing_skills: string[];
+  improvement_suggestions: string[];
+  keyword_analysis: KeywordAnalysisItem[];
+  experience_summary: string;
+  project_feedback: ProjectFeedbackItem[];
+  education_feedback: string;
+  final_recommendation: string;
+}
+
+/**
+ * Robust JSON parser and validator for Resume Analysis AI responses
+ */
+export function parseResumeAnalysisResponse(rawResponse: any): ResumeAnalysisResponse {
+  // Step 1: Extract model text safely from raw response
+  let rawText = '';
+  if (typeof rawResponse === 'string') {
+    rawText = rawResponse;
+  } else if (rawResponse && typeof rawResponse.text === 'string') {
+    rawText = rawResponse.text;
+  } else if (rawResponse?.candidates?.[0]?.content?.parts) {
+    rawText = rawResponse.candidates[0].content.parts
+      .map((p: any) => (typeof p.text === 'string' ? p.text : ''))
+      .join('');
+  } else if (typeof rawResponse === 'object' && rawResponse !== null) {
+    // If it was already parsed into an object
+    if (
+      'overall_score' in rawResponse &&
+      'ats_score' in rawResponse &&
+      'role_match_score' in rawResponse
+    ) {
+      return normalizeAnalysisObject(rawResponse);
+    }
+    rawText = JSON.stringify(rawResponse);
+  }
+
+  // Step 2: Trim whitespace
+  let cleanText = (rawText || '').trim();
+
+  if (!cleanText) {
+    console.error('Resume analysis parsing failed: Empty response text received.', {
+      responseType: typeof rawResponse,
+      rawResponse,
+    });
+    throw new Error('AI returned an empty response.');
+  }
+
+  // Step 3: Remove ```json and ``` code fences if present
+  cleanText = cleanText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // Step 4: Locate the JSON object if there is surrounding conversational text
+  const firstOpen = cleanText.indexOf('{');
+  const lastClose = cleanText.lastIndexOf('}');
+
+  if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+    cleanText = cleanText.substring(firstOpen, lastClose + 1).trim();
+  }
+
+  // Step 5: Parse JSON safely
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleanText);
+  } catch (parseError: any) {
+    console.error('Resume analysis parsing failed:', {
+      responseType: typeof rawResponse,
+      rawResponse: cleanText,
+      error: parseError?.message,
+    });
+    throw new Error('Failed to parse AI response as JSON.');
+  }
+
+  // Step 6 & 7: Validate & normalize the resulting object
+  return normalizeAnalysisObject(parsed);
+}
+
+function normalizeAnalysisObject(parsed: any): ResumeAnalysisResponse {
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Invalid analysis result structure: not an object.');
+  }
+
+  // Required numeric scores
+  const rawOverall = Number(parsed.overall_score);
+  const rawAts = Number(parsed.ats_score);
+  const rawRoleMatch = Number(parsed.role_match_score);
+
+  if (isNaN(rawOverall) || isNaN(rawAts) || isNaN(rawRoleMatch)) {
+    console.error('Validation failed: Required numeric scores missing or invalid in parsed object:', parsed);
+    throw new Error('Required numeric scores (overall_score, ats_score, role_match_score) are invalid.');
+  }
+
+  const overall_score = Math.min(100, Math.max(0, Math.round(rawOverall)));
+  const ats_score = Math.min(100, Math.max(0, Math.round(rawAts)));
+  const role_match_score = Math.min(100, Math.max(0, Math.round(rawRoleMatch)));
+
+  // Optional fields with robust defaults
+  const strengths = Array.isArray(parsed.strengths)
+    ? parsed.strengths
+        .filter((s: any) => typeof s === 'string' && s.trim().length > 0)
+        .map((s: string) => s.trim())
+    : [];
+
+  const missing_skills = Array.isArray(parsed.missing_skills)
+    ? parsed.missing_skills
+        .filter((s: any) => typeof s === 'string' && s.trim().length > 0)
+        .map((s: string) => s.trim())
+    : [];
+
+  const improvement_suggestions = Array.isArray(parsed.improvement_suggestions)
+    ? parsed.improvement_suggestions
+        .filter((s: any) => typeof s === 'string' && s.trim().length > 0)
+        .map((s: string) => s.trim())
+    : [];
+
+  const keyword_analysis: KeywordAnalysisItem[] = Array.isArray(parsed.keyword_analysis)
+    ? parsed.keyword_analysis
+        .filter((k: any) => k && typeof k === 'object' && typeof k.keyword === 'string')
+        .map((k: any) => ({
+          keyword: String(k.keyword).trim(),
+          matched: Boolean(k.matched),
+          category: typeof k.category === 'string' ? k.category.trim() : undefined,
+        }))
+    : [];
+
+  const project_feedback: ProjectFeedbackItem[] = Array.isArray(parsed.project_feedback)
+    ? parsed.project_feedback
+        .filter((p: any) => p && typeof p === 'object')
+        .map((p: any) => ({
+          name: typeof p.name === 'string' && p.name.trim() ? p.name.trim() : 'Highlighted Project',
+          strength: typeof p.strength === 'string' ? p.strength.trim() : '',
+          suggestion: typeof p.suggestion === 'string' ? p.suggestion.trim() : '',
+        }))
+    : [];
+
+  const experience_summary = typeof parsed.experience_summary === 'string' ? parsed.experience_summary.trim() : '';
+  const education_feedback = typeof parsed.education_feedback === 'string' ? parsed.education_feedback.trim() : '';
+  const final_recommendation = typeof parsed.final_recommendation === 'string' ? parsed.final_recommendation.trim() : '';
+
+  return {
+    overall_score,
+    ats_score,
+    role_match_score,
+    strengths,
+    missing_skills,
+    improvement_suggestions,
+    keyword_analysis,
+    experience_summary,
+    project_feedback,
+    education_feedback,
+    final_recommendation,
+  };
+}
+
 async function startServer() {
   const app = express();
 
@@ -65,7 +233,7 @@ async function startServer() {
 
     // Stage 1: Validate incoming extracted resume text
     if (!resumeText || typeof resumeText !== 'string' || resumeText.trim().length < 15) {
-      console.error('[PDF extraction] Failure stage: Resume text received by server is empty or invalid.');
+      console.error('Resume analysis failed: Extracted text is empty or too short (<15 characters).');
       return res.status(400).json({
         success: false,
         error: 'Unable to read this PDF. Please upload a text-readable PDF.',
@@ -77,7 +245,7 @@ async function startServer() {
     // Stage 2: Check AI service configuration
     const { client: ai, error: configError } = getGemini();
     if (!ai || configError) {
-      console.error('[AI request] Failure stage: AI analysis service is not configured (missing GEMINI_API_KEY).');
+      console.error('AI request failed: GEMINI_API_KEY environment variable is not configured.');
       return res.status(503).json({
         success: false,
         error: 'AI analysis service is not configured.',
@@ -90,21 +258,23 @@ async function startServer() {
       ? targetRole.trim()
       : 'Software Developer';
 
-    console.log(`[AI request] Starting resume analysis for role: "${role}". Resume text length: ${resumeText.length}`);
+    console.log(`[AI request] Starting resume analysis for target role: "${role}". Extracted text character count: ${resumeText.length}`);
 
     // Stage 3: Send structured prompt to Gemini with resilient model fallback
-    let responseText = '';
+    let rawResponse: any = null;
     let usedModel = '';
     let lastError: any = null;
 
-    const systemInstruction = `You are a Senior Engineering Hiring Manager and ATS Placement Specialist.
-Your task is to analyze the student resume strictly against their target role: "${role}".
-Calculate realistic, differentiated scores (0 to 100):
-- overall_score: Comprehensive placement readiness score (0-100)
-- ats_score: ATS readability, standardized headers, formatting, keyword presence (0-100)
-- role_match_score: Alignment of skills and projects with industry job expectations for "${role}" (0-100)
+    const systemInstruction = `You are a Principal Engineering Recruiter and Senior ATS Placement Specialist.
+Your task is to analyze the provided student resume strictly against their target role: "${role}".
 
-Return a valid JSON object matching the requested schema.`;
+CRITICAL INSTRUCTIONS:
+- You must return ONLY a single valid raw JSON object adhering to the schema.
+- Do NOT include markdown formatting, code fences (\`\`\`json), or conversational text before or after the JSON.
+- Calculate realistic, differentiated scores (0 to 100):
+  - overall_score: Comprehensive placement readiness score (0-100)
+  - ats_score: ATS readability, standardized headers, formatting, keyword presence (0-100)
+  - role_match_score: Alignment of skills and projects with industry job expectations for "${role}" (0-100)`;
 
     const prompt = `TARGET ROLE: ${role}
 
@@ -113,7 +283,7 @@ RESUME TEXT CONTENT:
 ${resumeText.slice(0, 20000)}
 """
 
-Please evaluate this resume for the "${role}" role and provide full structured ATS analysis.`;
+Provide the complete ATS and placement analysis for "${role}" strictly in the requested JSON structure.`;
 
     for (const modelName of SUPPORTED_MODELS) {
       try {
@@ -152,7 +322,7 @@ Please evaluate this resume for the "${role}" role and provide full structured A
                 improvement_suggestions: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
-                  description: 'Actionable numbered suggestions to improve the resume (3-5 items)',
+                  description: 'Actionable suggestions to improve the resume (3-5 items)',
                 },
                 keyword_analysis: {
                   type: Type.ARRAY,
@@ -210,61 +380,42 @@ Please evaluate this resume for the "${role}" role and provide full structured A
           },
         });
 
-        if (response.text && response.text.trim().length > 0) {
-          responseText = response.text;
+        if (response) {
+          rawResponse = response;
           usedModel = modelName;
-          console.log(`[AI response] Received response successfully using model "${usedModel}". Length: ${responseText.length}`);
+          console.log(`[AI response] Received response successfully using model "${usedModel}".`);
           break;
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`[AI request] Model "${modelName}" failed, attempting next fallback model:`, err.message || err);
+        console.warn(`[AI request] Model "${modelName}" attempt failed:`, err?.message || err);
       }
     }
 
-    if (!responseText || responseText.trim() === '') {
-      console.error('[AI response] Failure stage: All Gemini models failed to generate content:', lastError);
+    if (!rawResponse) {
+      console.error('AI request failed: All Gemini models failed to generate content:', lastError);
       return res.status(500).json({
         success: false,
         error: 'AI analysis is temporarily unavailable. Please try again.',
         message: 'AI analysis is temporarily unavailable. Please try again.',
-        stage: 'AI response',
+        stage: 'AI request',
       });
     }
 
-    // Stage 4: Parse and Validate AI Response JSON
+    // Stage 4: Parse and Validate AI Response using robust parser
     try {
-      const parsedData = JSON.parse(responseText);
-
-      // Validate numeric score ranges (0 to 100)
-      const overall = typeof parsedData.overall_score === 'number' ? parsedData.overall_score : 75;
-      const ats = typeof parsedData.ats_score === 'number' ? parsedData.ats_score : 70;
-      const roleMatch = typeof parsedData.role_match_score === 'number' ? parsedData.role_match_score : 72;
-
-      parsedData.overall_score = Math.min(100, Math.max(0, Math.round(overall)));
-      parsedData.ats_score = Math.min(100, Math.max(0, Math.round(ats)));
-      parsedData.role_match_score = Math.min(100, Math.max(0, Math.round(roleMatch)));
-
-      // Validate array fields
-      if (!Array.isArray(parsedData.strengths)) parsedData.strengths = [];
-      if (!Array.isArray(parsedData.missing_skills)) parsedData.missing_skills = [];
-      if (!Array.isArray(parsedData.improvement_suggestions)) parsedData.improvement_suggestions = [];
-      if (!Array.isArray(parsedData.keyword_analysis)) parsedData.keyword_analysis = [];
-      if (!Array.isArray(parsedData.project_feedback)) parsedData.project_feedback = [];
-
-      // Validate string fields
-      if (typeof parsedData.experience_summary !== 'string') parsedData.experience_summary = '';
-      if (typeof parsedData.education_feedback !== 'string') parsedData.education_feedback = '';
-      if (typeof parsedData.final_recommendation !== 'string') parsedData.final_recommendation = '';
-
-      console.log(`[JSON parsing] Successfully parsed and validated resume analysis. Overall: ${parsedData.overall_score}, ATS: ${parsedData.ats_score}, RoleMatch: ${parsedData.role_match_score}`);
+      const normalizedData = parseResumeAnalysisResponse(rawResponse);
+      console.log(`[JSON parsing] Analysis validated successfully. Overall: ${normalizedData.overall_score}, ATS: ${normalizedData.ats_score}, RoleMatch: ${normalizedData.role_match_score}`);
 
       return res.json({
         success: true,
-        data: parsedData,
+        data: normalizedData,
       });
     } catch (parseErr: any) {
-      console.error('[JSON parsing] Failure stage: JSON parsing error:', parseErr);
+      console.error('Resume analysis parsing failed:', {
+        responseType: typeof rawResponse,
+        error: parseErr?.message,
+      });
       return res.status(502).json({
         success: false,
         error: 'Unable to generate a valid resume analysis. Please try again.',
