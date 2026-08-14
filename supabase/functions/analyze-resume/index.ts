@@ -16,6 +16,8 @@ const SUPPORTED_MODELS = [
 ];
 
 Deno.serve(async (req: Request) => {
+  console.log('analyze-resume request method:', req.method);
+
   // 1. CRITICAL: Handle CORS Preflight FIRST before authentication, body parsing, or AI
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
@@ -26,7 +28,7 @@ Deno.serve(async (req: Request) => {
 
   // 2. Reject non-POST HTTP methods with 405 and CORS headers
   if (req.method !== 'POST') {
-    console.error(`[Resume Analyzer Edge Function] Method not allowed: ${req.method}`);
+    console.error(`analyze-resume Method not allowed: ${req.method}`);
     return new Response(
       JSON.stringify({
         error: `Method Not Allowed: ${req.method}. Resume analysis endpoint requires HTTP POST.`,
@@ -40,6 +42,8 @@ Deno.serve(async (req: Request) => {
       }
     );
   }
+
+  console.log('analyze-resume POST received');
 
   try {
     let body: any;
@@ -72,6 +76,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    console.log('resume text length:', resumeText.length);
+
     const role = targetRole && typeof targetRole === 'string' && targetRole.trim().length > 0
       ? targetRole.trim()
       : 'Software Developer';
@@ -79,7 +85,7 @@ Deno.serve(async (req: Request) => {
     // 4. Initialize Gemini AI Client from Server Environment
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     if (!apiKey) {
-      console.error('[Resume Analyzer Edge Function] GEMINI_API_KEY secret is missing.');
+      console.error('analyze-resume GEMINI_API_KEY secret is missing.');
       return new Response(
         JSON.stringify({
           error: 'Resume analysis service is temporarily unavailable (Missing AI configuration).',
@@ -189,7 +195,7 @@ Provide the complete ATS and placement analysis for "${role}" strictly in the re
     }
 
     if (!rawResponse) {
-      console.error('[Resume Analyzer Edge Function] AI generation failed:', lastError?.message || lastError);
+      console.error('analyze-resume AI generation failed:', lastError?.message || lastError);
       return new Response(
         JSON.stringify({
           error: 'AI analysis is temporarily unavailable. Please try again.',
@@ -214,7 +220,7 @@ Provide the complete ATS and placement analysis for "${role}" strictly in the re
       }
     );
   } catch (err: any) {
-    console.error('[Resume Analyzer Edge Function] Unexpected error:', err?.message || err);
+    console.error('analyze-resume Unexpected error:', err?.message || err);
     return new Response(
       JSON.stringify({
         error: 'Unable to generate a valid resume analysis. Please try again.',

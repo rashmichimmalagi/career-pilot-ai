@@ -3,6 +3,9 @@ import { createClient, User } from '@supabase/supabase-js';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://liqaeoxwjhsalfdqdwcr.supabase.co';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
+// Fallback dummy JWT token with standard anon structure to prevent supabase-js initialization warnings
+const DUMMY_ANON_JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxpcWFlb3h3amhzYWxmZHFkd2NyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MjAwMDAwMDAwMH0.signature';
+
 export const isSupabaseConfigured = (): boolean => {
   return (
     Boolean(SUPABASE_URL) &&
@@ -15,7 +18,7 @@ export const isSupabaseConfigured = (): boolean => {
 // Create Supabase client instance
 export const supabase = createClient(
   SUPABASE_URL,
-  SUPABASE_ANON_KEY || 'placeholder-anon-key-for-initialization',
+  SUPABASE_ANON_KEY || DUMMY_ANON_JWT,
   {
     auth: {
       persistSession: true,
