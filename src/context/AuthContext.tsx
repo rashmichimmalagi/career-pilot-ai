@@ -82,6 +82,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToast(null);
   }, []);
 
+  const recordGitHubEmailIfApplicable = useCallback((authUser: any) => {
+    if (!authUser || !authUser.email) return;
+    const isGithub =
+      authUser.app_metadata?.provider === 'github' ||
+      authUser.app_metadata?.providers?.includes('github') ||
+      authUser.identities?.some((i: any) => i.provider === 'github');
+    if (isGithub) {
+      try {
+        const raw = localStorage.getItem('careerpilot_github_emails');
+        const emails: string[] = raw ? JSON.parse(raw) : [];
+        const lower = authUser.email.toLowerCase();
+        if (!emails.includes(lower)) {
+          emails.push(lower);
+          localStorage.setItem('careerpilot_github_emails', JSON.stringify(emails));
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
+  }, []);
+
   // Auto-dismiss toast after 5 seconds
   useEffect(() => {
     if (!toast) return;
@@ -146,6 +167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (currentSession?.user) {
+          recordGitHubEmailIfApplicable(currentSession.user);
           if (currentSession.access_token) {
             sessionStorage.setItem('notified_session_token', currentSession.access_token);
           }
@@ -175,11 +197,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           sessionStorage.setItem('notified_session_token', newSession.access_token);
         }
         if (newSession?.user) {
+          recordGitHubEmailIfApplicable(newSession.user);
           await fetchProfileForUser(newSession.user.id);
         } else {
           setProfile(null);
         }
       } else if (event === 'SIGNED_IN' && newSession?.user && newSession.access_token) {
+        recordGitHubEmailIfApplicable(newSession.user);
         const prevToken = sessionStorage.getItem('notified_session_token');
         const userProfile = await fetchProfileForUser(newSession.user.id);
 

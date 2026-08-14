@@ -196,6 +196,40 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
 
         // Check if Supabase returned an existing user (identities array is empty for existing emails)
         if (res?.user && res.user.identities && res.user.identities.length === 0) {
+          const appMeta = res.user.app_metadata || {};
+          const providers = appMeta.providers || [];
+          const identities = res.user.identities || [];
+
+          let isGithubAccount =
+            appMeta.provider === 'github' ||
+            providers.includes('github') ||
+            identities.some((i: any) => i.provider === 'github');
+
+          if (!isGithubAccount) {
+            try {
+              const raw = localStorage.getItem('careerpilot_github_emails');
+              const emails: string[] = raw ? JSON.parse(raw) : [];
+              if (emails.includes(trimmedEmail.toLowerCase())) {
+                isGithubAccount = true;
+              }
+            } catch {
+              // ignore storage errors
+            }
+          }
+
+          if (isGithubAccount) {
+            showToast(
+              'GitHub account detected',
+              'This email is associated with a GitHub account. Please sign in using GitHub.',
+              'info',
+              {
+                label: 'Continue with GitHub',
+                onClick: handleGitHubSignIn
+              }
+            );
+            return;
+          }
+
           showToast(
             'Account already exists',
             'This email is already associated with an existing CareerPilot account. Please sign in using your existing authentication method.',
@@ -249,6 +283,30 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
           lower.includes('already exists') ||
           lower.includes('identity_already_exists')
         ) {
+          let isGithubAccount = false;
+          try {
+            const raw = localStorage.getItem('careerpilot_github_emails');
+            const emails: string[] = raw ? JSON.parse(raw) : [];
+            if (emails.includes(trimmedEmail.toLowerCase())) {
+              isGithubAccount = true;
+            }
+          } catch {
+            // ignore
+          }
+
+          if (isGithubAccount) {
+            showToast(
+              'GitHub account detected',
+              'This email is associated with a GitHub account. Please sign in using GitHub.',
+              'info',
+              {
+                label: 'Continue with GitHub',
+                onClick: handleGitHubSignIn
+              }
+            );
+            return;
+          }
+
           showToast(
             'Account already exists',
             'This email is already associated with an existing CareerPilot account. Please sign in using your existing authentication method.',
@@ -269,6 +327,31 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
           lower.includes('invalid credentials') ||
           lower.includes('incorrect email or password')
         ) {
+          // Check if this email is known to be associated with a GitHub account
+          let isGithubAccount = false;
+          try {
+            const raw = localStorage.getItem('careerpilot_github_emails');
+            const emails: string[] = raw ? JSON.parse(raw) : [];
+            if (emails.includes(trimmedEmail.toLowerCase())) {
+              isGithubAccount = true;
+            }
+          } catch {
+            // ignore
+          }
+
+          if (isGithubAccount) {
+            showToast(
+              'GitHub account detected',
+              'This email is associated with a GitHub account. Please sign in using GitHub.',
+              'info',
+              {
+                label: 'Continue with GitHub',
+                onClick: handleGitHubSignIn
+              }
+            );
+            return;
+          }
+
           showToast(
             'Invalid login credentials',
             'Please check your email and password and try again.',
