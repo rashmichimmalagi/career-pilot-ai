@@ -31,7 +31,8 @@ interface AuthContextType {
     title: string,
     subtitle?: string,
     type?: 'success' | 'info' | 'warning' | 'error',
-    action?: { label: string; onClick: () => void }
+    action?: { label: string; onClick: () => void },
+    duration?: number
   ) => void;
   dismissToast: () => void;
   signInWithGoogle: () => Promise<void>;
@@ -43,8 +44,10 @@ interface AuthContextType {
   updatePassword: (newPassword: string) => Promise<any>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<Profile | null>;
+  refreshUser: () => Promise<User | null>;
   clearError: () => void;
   setProfileState: (profile: Profile | null) => void;
+  setUserState: (user: User | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -65,14 +68,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       title: string,
       subtitle?: string,
       type: 'success' | 'info' | 'warning' | 'error' = 'success',
-      action?: { label: string; onClick: () => void }
+      action?: { label: string; onClick: () => void },
+      duration?: number
     ) => {
       setToast({
         id: Date.now().toString(),
         title,
         subtitle,
         type,
-        action
+        action,
+        duration
       });
     },
     []
@@ -82,33 +87,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToast(null);
   }, []);
 
-  const recordGitHubEmailIfApplicable = useCallback((authUser: any) => {
-    if (!authUser || !authUser.email) return;
-    const isGithub =
-      authUser.app_metadata?.provider === 'github' ||
-      authUser.app_metadata?.providers?.includes('github') ||
-      authUser.identities?.some((i: any) => i.provider === 'github');
-    if (isGithub) {
-      try {
-        const raw = localStorage.getItem('careerpilot_github_emails');
-        const emails: string[] = raw ? JSON.parse(raw) : [];
-        const lower = authUser.email.toLowerCase();
-        if (!emails.includes(lower)) {
-          emails.push(lower);
-          localStorage.setItem('careerpilot_github_emails', JSON.stringify(emails));
-        }
-      } catch {
-        // ignore storage errors
-      }
-    }
-  }, []);
-
-  // Auto-dismiss toast after 5 seconds
+  // Auto-dismiss toast after duration
   useEffect(() => {
     if (!toast) return;
+    const duration = toast.duration || (toast.type === 'warning' || toast.type === 'error' ? 2800 : 4000);
     const timer = setTimeout(() => {
       setToast(null);
-    }, 5000);
+    }, duration);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -161,17 +146,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (isMounted) setError(sessionError.message);
         }
 
-        if (isMounted) {
-          setSession(currentSession);
-          setUser(currentSession?.user ?? null);
+        let authenticatedUser = currentSession?.user ?? null;
+        if (currentSession) {
+          try {
+            const { data: { user: serverUser } } = await supabase.auth.getUser();
+            if (serverUser) {
+              authenticatedUser = serverUser;
+            }
+          } catch {
+            // fallback to currentSession user
+          }
         }
 
-        if (currentSession?.user) {
-          recordGitHubEmailIfApplicable(currentSession.user);
-          if (currentSession.access_token) {
+        if (isMounted) {
+          setSession(currentSession);
+          setUser(authenticatedUser);
+        }
+
+        if (authenticatedUser) {
+          if (currentSession?.access_token) {
             sessionStorage.setItem('notified_session_token', currentSession.access_token);
           }
-          const p = await fetchProfileForUser(currentSession.user.id);
+          const p = await fetchProfileForUser(authenticatedUser.id);
           if (isMounted) setProfile(p);
         }
       } catch (err: any) {
@@ -197,13 +193,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           sessionStorage.setItem('notified_session_token', newSession.access_token);
         }
         if (newSession?.user) {
-          recordGitHubEmailIfApplicable(newSession.user);
           await fetchProfileForUser(newSession.user.id);
         } else {
           setProfile(null);
         }
       } else if (event === 'SIGNED_IN' && newSession?.user && newSession.access_token) {
-        recordGitHubEmailIfApplicable(newSession.user);
         const prevToken = sessionStorage.getItem('notified_session_token');
         const userProfile = await fetchProfileForUser(newSession.user.id);
 
@@ -240,9 +234,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
+    const handleProfileUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<{ profile: Profile; userId: string }>;
+      if (customEvent.detail?.profile) {
+        setProfile(customEvent.detail.profile);
+      }
+    };
+    window.addEventListener('careerpilot_profile_updated', handleProfileUpdated);
+
     return () => {
       isMounted = false;
       subscription.unsubscribe();
+      window.removeEventListener('careerpilot_profile_updated', handleProfileUpdated);
     };
   }, [configured, fetchProfileForUser, showToast]);
 
@@ -352,42 +355,89 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const refreshProfile = async (): Promise<Profile | null> => {
-    if (!user) return null;
-    return await fetchProfileForUser(user.id);
-  };
+  const refreshProfile = useCallback(async (): Promise<Profile | null> => {
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) return null;
+      return await fetchProfileForUser(currentUser.id);
+    } catch {
+      return null;
+    }
+  }, [fetchProfileForUser]);
 
-  const clearError = () => setError(null);
+  const refreshUser = useCallback(async (): Promise<User | null> => {
+    try {
+      const { data: { user: freshUser }, error } = await supabase.auth.getUser();
+      if (!error && freshUser) {
+        setUser(freshUser);
+        return freshUser;
+      }
+      return null;
+    } catch (err) {
+      console.warn('Failed to refresh user auth state:', err);
+      return null;
+    }
+  }, []);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const isEmailVerified = isUserEmailVerified(user);
 
+  const contextValue = React.useMemo<AuthContextType>(
+    () => ({
+      user,
+      session,
+      profile,
+      loading,
+      profileLoading,
+      error,
+      isConfigured: configured,
+      isEmailVerified,
+      toast,
+      showToast,
+      dismissToast,
+      signInWithGoogle: handleSignInWithGoogle,
+      signInWithGitHub: handleSignInWithGitHub,
+      signUpWithEmail: handleSignUpWithEmail,
+      signInWithEmail: handleSignInWithEmail,
+      sendPasswordResetEmail: handleSendPasswordResetEmail,
+      resendVerificationEmail: handleResendVerificationEmail,
+      updatePassword: handleUpdatePassword,
+      signOut: handleSignOut,
+      refreshProfile,
+      refreshUser,
+      clearError,
+      setProfileState: setProfile,
+      setUserState: setUser,
+    }),
+    [
+      user,
+      session,
+      profile,
+      loading,
+      profileLoading,
+      error,
+      configured,
+      isEmailVerified,
+      toast,
+      showToast,
+      dismissToast,
+      handleSignInWithGoogle,
+      handleSignInWithGitHub,
+      handleSignUpWithEmail,
+      handleSignInWithEmail,
+      handleSendPasswordResetEmail,
+      handleResendVerificationEmail,
+      handleUpdatePassword,
+      handleSignOut,
+      refreshProfile,
+      refreshUser,
+      clearError,
+    ]
+  );
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        session,
-        profile,
-        loading,
-        profileLoading,
-        error,
-        isConfigured: configured,
-        isEmailVerified,
-        toast,
-        showToast,
-        dismissToast,
-        signInWithGoogle: handleSignInWithGoogle,
-        signInWithGitHub: handleSignInWithGitHub,
-        signUpWithEmail: handleSignUpWithEmail,
-        signInWithEmail: handleSignInWithEmail,
-        sendPasswordResetEmail: handleSendPasswordResetEmail,
-        resendVerificationEmail: handleResendVerificationEmail,
-        updatePassword: handleUpdatePassword,
-        signOut: handleSignOut,
-        refreshProfile,
-        clearError,
-        setProfileState: setProfile,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
       <Toast toast={toast} onClose={dismissToast} />
     </AuthContext.Provider>

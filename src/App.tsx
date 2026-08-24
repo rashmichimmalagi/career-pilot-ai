@@ -13,55 +13,153 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { ResumeAnalyzerPage } from './pages/ResumeAnalyzerPage';
+import { CodingPracticePage } from './pages/CodingPracticePage';
+import { TechnicalInterviewPage } from './pages/TechnicalInterviewPage';
+import { PlacementPracticePage } from './pages/PlacementPracticePage';
+import { CompanyPreparationPage } from './pages/CompanyPreparationPage';
+import { CareerRoadmapPage } from './pages/CareerRoadmapPage';
+import { CareerMentorPage } from './pages/CareerMentorPage';
+import { StudyPlannerPage } from './pages/StudyPlannerPage';
+import { ResumePrintPage } from './pages/ResumePrintPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { Loader2 } from 'lucide-react';
 
+export function extractResumeIdFromPath(raw: string): string | null {
+  if (!raw) return null;
+  const clean = raw.split('?')[0].split('#')[0].replace(/^\/+|\/+$/g, '');
+  const match = clean.match(/(?:resume\/print|print-resume|print\/resume)\/(.+)/i);
+  if (match && match[1]) {
+    return decodeURIComponent(match[1]);
+  }
+  const searchPart = raw.includes('?') ? raw.split('?')[1] : window.location.search;
+  if (searchPart) {
+    const params = new URLSearchParams(searchPart);
+    const id = params.get('id') || params.get('resumeId');
+    if (id) return id;
+  }
+  return null;
+}
+
+function normalizeRoute(raw: string): string {
+  if (!raw) return 'welcome';
+  const clean = raw.split('?')[0].split('#')[0].replace(/^\/+|\/+$/g, '').toLowerCase();
+
+  // Dedicated Print Route
+  if (
+    clean.startsWith('resume/print') ||
+    clean.startsWith('print-resume') ||
+    clean.startsWith('print/resume')
+  ) {
+    return 'resume-print';
+  }
+
+  const firstSegment = clean.split('/')[0];
+
+  if (!firstSegment || firstSegment === 'welcome' || firstSegment === 'index' || firstSegment === 'index.html') {
+    return 'welcome';
+  }
+  if (firstSegment === 'home' || firstSegment === 'landing') {
+    return 'home';
+  }
+  if (firstSegment === 'auth' || firstSegment === 'login' || firstSegment === 'signin' || firstSegment === 'signup') {
+    return 'auth';
+  }
+  if (firstSegment === 'resume' || firstSegment === 'resume-analyzer' || firstSegment === 'ai-resume') {
+    return 'resume-analyzer';
+  }
+  if (firstSegment === 'coding' || firstSegment === 'coding-practice' || firstSegment === 'coding-arena') {
+    return 'coding';
+  }
+  if (firstSegment === 'interview' || firstSegment === 'technical-interview') {
+    return 'interview';
+  }
+  if (firstSegment === 'placement' || firstSegment === 'placement-practice' || firstSegment === 'placement-arena' || firstSegment === 'aptitude') {
+    return 'placement';
+  }
+  if (firstSegment === 'company' || firstSegment === 'company-prep' || firstSegment === 'company-preparation') {
+    return 'company-prep';
+  }
+  if (firstSegment === 'roadmap' || firstSegment === 'career-roadmap' || firstSegment === 'my-roadmap') {
+    return 'roadmap';
+  }
+  if (
+    firstSegment === 'study-planner' ||
+    firstSegment === 'planner' ||
+    firstSegment === 'study' ||
+    firstSegment === 'ai-study-planner' ||
+    firstSegment === 'daily-planner'
+  ) {
+    return 'study-planner';
+  }
+  if (
+    firstSegment === 'mentor' ||
+    firstSegment === 'career-mentor' ||
+    firstSegment === 'ai-mentor' ||
+    firstSegment === 'ai-career-mentor'
+  ) {
+    return 'career-mentor';
+  }
+  if (firstSegment === 'reset-password' || window.location.hash.includes('type=recovery')) {
+    return 'reset-password';
+  }
+  if (firstSegment === 'verify-email') {
+    return 'verify-email';
+  }
+  if (firstSegment === 'onboarding') {
+    return 'onboarding';
+  }
+  if (
+    firstSegment === 'dashboard' ||
+    firstSegment === 'preparation-dashboard' ||
+    firstSegment === 'prep-dashboard'
+  ) {
+    return 'dashboard';
+  }
+  if (
+    [
+      'profile',
+      'career-mentor',
+      'analytics',
+    ].includes(firstSegment)
+  ) {
+    return firstSegment;
+  }
+  return 'welcome';
+}
+
 function AppContent() {
-  const { user, profile, loading, isConfigured, isEmailVerified } = useAuth();
+  const { user, profile, loading, profileLoading, isConfigured, isEmailVerified } = useAuth();
   
-  const getPathFromLocation = () => {
-    const rawPath = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
-    const cleanPath = rawPath.split('/')[0];
-    if (cleanPath === 'reset-password' || window.location.hash.includes('type=recovery')) {
+  const getPathFromLocation = (): string => {
+    if (window.location.hash.includes('type=recovery')) {
       return 'reset-password';
     }
-    if (cleanPath === 'verify-email') {
-      return 'verify-email';
-    }
-    if (cleanPath === 'welcome' || cleanPath === '') {
-      return 'welcome';
-    }
-    if (
-      [
-        'home',
-        'auth',
-        'onboarding',
-        'dashboard',
-        'profile',
-        'coding',
-        'interview',
-        'resume',
-        'resume-analyzer',
-        'career-mentor',
-        'analytics',
-      ].includes(cleanPath)
-    ) {
-      return cleanPath;
-    }
-    return 'welcome';
+    return normalizeRoute(window.location.pathname);
   };
 
   // Custom router state synchronized with path
   const [currentPage, setCurrentPage] = useState<string>(getPathFromLocation);
-
   const [setupGuideOpen, setSetupGuideOpen] = useState(false);
 
   // Sync route with window pathname and query params
   const navigateTo = (target: string) => {
-    const [page, query] = target.split('?');
-    const cleanPage = page.toLowerCase();
+    if (!target || target === '/' || target === '') {
+      setCurrentPage('welcome');
+      if (window.location.pathname !== '/') {
+        window.history.pushState({}, '', '/');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const [pagePart, query] = target.split('?');
+    const cleanPage = normalizeRoute(pagePart);
     setCurrentPage(cleanPage);
 
     let targetPath = cleanPage === 'welcome' ? '/' : `/${cleanPage}`;
+    if (cleanPage === 'home') {
+      targetPath = '/home';
+    }
     if (query) {
       targetPath += `?${query}`;
     }
@@ -89,19 +187,22 @@ function AppContent() {
     const protectedPages = [
       'onboarding',
       'dashboard',
+      'study-planner',
       'profile',
       'coding',
       'interview',
-      'resume',
+      'placement',
+      'company-prep',
+      'roadmap',
       'resume-analyzer',
       'career-mentor',
       'analytics',
     ];
 
     if (!user) {
-      // Unauthenticated users attempting to access protected routes -> redirect to auth
+      // Unauthenticated users attempting to access protected routes -> redirect to auth with return redirect
       if (protectedPages.includes(currentPage) || currentPage === 'verify-email') {
-        navigateTo('auth');
+        navigateTo(`auth?mode=signin&redirect=${currentPage}`);
       }
     } else {
       // Allow user on reset-password page if they arrived via recovery link
@@ -137,7 +238,11 @@ function AppContent() {
       }
 
       if (currentPage === 'auth' || ((currentPage === 'home' || currentPage === 'welcome') && hasOAuthParams)) {
-        if (profile) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectParam = urlParams.get('redirect');
+        if (redirectParam && protectedPages.includes(redirectParam)) {
+          navigateTo(redirectParam);
+        } else if (profile) {
           navigateTo('dashboard');
         } else {
           navigateTo('onboarding');
@@ -146,13 +251,13 @@ function AppContent() {
         if (profile) {
           navigateTo('dashboard');
         }
-      } else if (protectedPages.includes(currentPage)) {
-        if (!profile && currentPage !== 'onboarding') {
+      } else if (currentPage === 'dashboard') {
+        if (!profile && !profileLoading) {
           navigateTo('onboarding');
         }
       }
     }
-  }, [user, profile, isEmailVerified, loading, currentPage]);
+  }, [user, profile, isEmailVerified, loading, profileLoading, currentPage]);
 
   if (loading) {
     return (
@@ -160,6 +265,21 @@ function AppContent() {
         <Loader2 className="w-8 h-8 animate-spin text-indigo-600 dark:text-indigo-400" />
         <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 tracking-wide">Initializing CareerPilot AI...</p>
       </div>
+    );
+  }
+
+  // Dedicated Print Route: Render strictly the print document page with NO application shell, navbar, or footer
+  if (currentPage === 'resume-print') {
+    const printResumeId =
+      extractResumeIdFromPath(window.location.pathname) ||
+      extractResumeIdFromPath(window.location.hash) ||
+      extractResumeIdFromPath(window.location.href);
+
+    return (
+      <ResumePrintPage
+        resumeId={printResumeId}
+        onNavigate={navigateTo}
+      />
     );
   }
 
@@ -215,14 +335,100 @@ function AppContent() {
           />
         )}
 
+        {currentPage === 'profile' && (
+          <ProfilePage
+            onNavigate={navigateTo}
+          />
+        )}
+
         {(currentPage === 'resume-analyzer' || currentPage === 'resume') && (
           <ResumeAnalyzerPage
             onNavigate={navigateTo}
           />
         )}
 
+        {(currentPage === 'coding' || currentPage === 'coding-practice' || currentPage === 'coding-arena') && (
+          <CodingPracticePage
+            onNavigate={navigateTo}
+          />
+        )}
+
+        {(currentPage === 'interview' || currentPage === 'technical-interview') && (
+          <TechnicalInterviewPage
+            onNavigate={navigateTo}
+          />
+        )}
+
+        {(currentPage === 'placement' || currentPage === 'placement-practice' || currentPage === 'placement-arena' || currentPage === 'aptitude') && (
+          <PlacementPracticePage
+            onNavigate={navigateTo}
+          />
+        )}
+
+        {(currentPage === 'company-prep' || currentPage === 'company' || currentPage === 'company-preparation') && (
+          <CompanyPreparationPage
+            onNavigate={navigateTo}
+          />
+        )}
+
+        {(currentPage === 'roadmap' || currentPage === 'career-roadmap') && (
+          <CareerRoadmapPage
+            onNavigate={navigateTo}
+          />
+        )}
+
+        {(currentPage === 'career-mentor' || currentPage === 'mentor' || currentPage === 'ai-mentor') && (
+          <CareerMentorPage
+            onNavigate={navigateTo}
+          />
+        )}
+
+        {(currentPage === 'study-planner' || currentPage === 'planner' || currentPage === 'study') && (
+          <StudyPlannerPage
+            onNavigate={navigateTo}
+          />
+        )}
+
         {currentPage === 'reset-password' && (
           <ResetPasswordPage onNavigate={navigateTo} />
+        )}
+
+        {/* Safe fallback if route is unrecognized so app NEVER renders blank */}
+        {![
+          'welcome',
+          'home',
+          'auth',
+          'verify-email',
+          'onboarding',
+          'dashboard',
+          'study-planner',
+          'planner',
+          'study',
+          'resume-analyzer',
+          'resume',
+          'coding',
+          'coding-practice',
+          'coding-arena',
+          'interview',
+          'technical-interview',
+          'placement',
+          'placement-practice',
+          'placement-arena',
+          'aptitude',
+          'company-prep',
+          'company',
+          'company-preparation',
+          'roadmap',
+          'career-roadmap',
+          'career-mentor',
+          'mentor',
+          'ai-mentor',
+          'reset-password',
+        ].includes(currentPage) && (
+          <WelcomePage
+            onNavigate={navigateTo}
+            onOpenSetupGuide={() => setSetupGuideOpen(true)}
+          />
         )}
       </main>
 

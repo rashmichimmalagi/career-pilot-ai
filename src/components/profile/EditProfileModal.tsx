@@ -16,12 +16,15 @@ import {
   KeyRound,
   ShieldCheck,
   Eye,
-  EyeOff
+  EyeOff,
+  Award,
+  Layers,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { profileService } from '../../services/profileService';
 import { Profile } from '../../types/database';
 import { supabase } from '../../lib/supabase';
+import { SendTestEmailCard } from '../common/SendTestEmailCard';
 
 interface EditProfileModalProps {
   isOpen: boolean;
@@ -29,15 +32,18 @@ interface EditProfileModalProps {
 }
 
 export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose }) => {
-  const { user, profile, setProfileState, refreshProfile, showToast } = useAuth();
+  const { user, profile, setProfileState, refreshProfile, refreshUser, setUserState, showToast } = useAuth();
 
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
     usn: '',
     college_name: '',
+    degree: '',
     department: '',
+    current_year: '',
     semester: '',
+    cgpa: '',
     graduation_year: '',
     career_goal: '',
     target_role: '',
@@ -48,6 +54,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [showAddPassword, setShowAddPassword] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -55,29 +62,67 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const [isAddingPassword, setIsAddingPassword] = useState(false);
   const [passwordAddedSuccess, setPasswordAddedSuccess] = useState(false);
 
-  // Determine login provider status
+  // Determine login provider status from real Supabase user authentication metadata
   const providers = user?.app_metadata?.providers || [];
   const identities = user?.identities || [];
+  const userMetadata = user?.user_metadata || {};
 
-  const isGitHubConnected =
+  const isGitHubConnected = Boolean(
     user?.app_metadata?.provider === 'github' ||
     providers.includes('github') ||
-    identities.some((i: any) => i.provider === 'github');
+    identities.some((i: any) => i.provider === 'github')
+  );
 
-  const hasEmailPassword =
+  const hasEmailPassword = Boolean(
     passwordAddedSuccess ||
+    user?.app_metadata?.provider === 'email' ||
     providers.includes('email') ||
-    identities.some((i: any) => i.provider === 'email');
+    identities.some((i: any) => i.provider === 'email') ||
+    userMetadata.has_password === true ||
+    userMetadata.email_login_enabled === true ||
+    userMetadata.password_configured === true ||
+    Boolean(userMetadata.password_updated_at)
+  );
 
-  const handleCancelAddPassword = () => {
+  // Debug logging for authentication methods
+  useEffect(() => {
+    if (isOpen && user) {
+      console.log('[Auth Methods] Current user ID:', user.id);
+      console.log('[Auth Methods] Current email:', user.email);
+      console.log('[Auth Methods] GitHub provider connected:', isGitHubConnected);
+      console.log('[Auth Methods] Email/Password connected:', hasEmailPassword);
+    }
+  }, [isOpen, user, isGitHubConnected, hasEmailPassword]);
+
+  const handleToggleEmailPasswordCard = () => {
+    if (hasEmailPassword) {
+      setShowChangePassword((prev) => {
+        const next = !prev;
+        if (next) console.log('[Auth Methods] Password form opened');
+        return next;
+      });
+      setShowAddPassword(false);
+    } else {
+      console.log('[Auth Methods] Add Password clicked');
+      setShowAddPassword((prev) => {
+        const next = !prev;
+        if (next) console.log('[Auth Methods] Password form opened');
+        return next;
+      });
+      setShowChangePassword(false);
+    }
+  };
+
+  const handleCancelPasswordForm = () => {
     setShowAddPassword(false);
+    setShowChangePassword(false);
     setNewPassword('');
     setConfirmNewPassword('');
     setShowPassword(false);
     setShowConfirmPassword(false);
   };
 
-  const handleAddEmailPassword = async () => {
+  const handleSavePassword = async (isUpdatingExisting = false) => {
     if (isAddingPassword) return;
 
     if (!newPassword) {
@@ -101,50 +146,106 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
     }
 
     setIsAddingPassword(true);
+    console.log('[Auth Methods] Password save started');
 
     try {
       // Verify active authenticated session first
       const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
       if (userError || !currentUser) {
+        console.log('[Auth Methods] Password save failed:', userError?.message || 'No active session');
         showToast('Session Expired', 'Your session has expired. Please sign in again.', 'warning');
         return;
       }
 
-      // Update password for the current authenticated user without creating duplicate accounts
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword
+      // Update password for the current authenticated user with persistent metadata flags
+      const { data: updateData, error } = await supabase.auth.updateUser({
+        password: newPassword,
+        data: {
+          has_password: true,
+          email_login_enabled: true,
+          password_configured: true,
+          password_updated_at: new Date().toISOString(),
+        }
       });
 
       if (error) {
-        console.error('Add Email & Password Error:', error);
+        console.log('[Auth Methods] Password save failed:', error.message);
+        
+        // If the error indicates that the password is the same as the old password,
+        // it confirms that password authentication is already active on this exact account!
+        if (
+          error.message?.toLowerCase().includes('same as') ||
+          error.message?.toLowerCase().includes('different from the old password') ||
+          error.message?.toLowerCase().includes('should be different')
+        ) {
+          // Synchronize metadata to reflect password exists
+          const { data: metaData } = await supabase.auth.updateUser({
+            data: {
+              has_password: true,
+              email_login_enabled: true,
+              password_configured: true,
+              password_updated_at: new Date().toISOString(),
+            }
+          });
+
+          if (metaData?.user && setUserState) {
+            setUserState(metaData.user);
+          }
+
+          setPasswordAddedSuccess(true);
+          handleCancelPasswordForm();
+
+          showToast(
+            'Email & Password Configured',
+            'Email & Password login is already enabled.',
+            'info'
+          );
+
+          if (refreshUser) {
+            await refreshUser();
+          }
+          if (refreshProfile) {
+            await refreshProfile();
+          }
+          return;
+        }
+
         showToast(
-          'Unable to add password',
-          error.message || 'Unable to add Email & Password login. Please try again.',
+          'Unable to save password',
+          error.message || 'Unable to configure Email & Password login. Please try again.',
           'error'
         );
         return;
       }
 
+      console.log('[Auth Methods] Password save succeeded');
+
+      if (updateData?.user && setUserState) {
+        setUserState(updateData.user);
+      }
+
       setPasswordAddedSuccess(true);
+      handleCancelPasswordForm();
+
       showToast(
-        'Email & Password login added successfully.',
-        'You can now sign in using either GitHub or your email and password.',
+        isUpdatingExisting ? 'Password Updated' : 'Email & Password Added',
+        isUpdatingExisting
+          ? 'Password updated successfully.'
+          : 'Email & Password login enabled successfully.',
         'success'
       );
-      setShowAddPassword(false);
-      setNewPassword('');
-      setConfirmNewPassword('');
-      setShowPassword(false);
-      setShowConfirmPassword(false);
 
+      if (refreshUser) {
+        await refreshUser();
+      }
       if (refreshProfile) {
         await refreshProfile();
       }
     } catch (err: any) {
-      console.error('Add Email & Password Exception:', err);
+      console.log('[Auth Methods] Password save failed:', err.message || 'Exception');
       showToast(
-        'Unable to add password',
-        err.message || 'Unable to add Email & Password login. Please try again.',
+        'Unable to configure password',
+        err.message || 'Unable to update Email & Password login. Please try again.',
         'error'
       );
     } finally {
@@ -152,7 +253,21 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
     }
   };
 
-  // Pre-fill existing profile data when modal opens or profile changes
+  // Pre-fill existing profile data and reset password forms when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setShowAddPassword(false);
+      setShowChangePassword(false);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      if (refreshUser) {
+        refreshUser();
+      }
+    }
+  }, [isOpen]);
+
   useEffect(() => {
     if (isOpen && user) {
       setFormData({
@@ -160,8 +275,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
         email: profile?.email || user.email || '',
         usn: profile?.usn || '',
         college_name: profile?.college_name || '',
+        degree: profile?.degree || 'Bachelor of Technology (B.Tech)',
         department: profile?.department || '',
+        current_year: profile?.current_year || 'Final Year (4th Year)',
         semester: profile?.semester || '',
+        cgpa: profile?.cgpa ? String(profile.cgpa) : '',
         graduation_year: profile?.graduation_year ? String(profile.graduation_year) : '',
         career_goal: profile?.career_goal || '',
         target_role: profile?.target_role || '',
@@ -203,10 +321,31 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
       setFormError('Please select your Current Semester.');
       return;
     }
+
+    // Validation for CGPA (Cumulative GPA)
+    let formattedCgpa = '';
+    if (formData.cgpa && formData.cgpa.trim()) {
+      const cleanVal = formData.cgpa.trim();
+      const num = parseFloat(cleanVal);
+
+      if (isNaN(num) || !/^-?\d+(\.\d+)?$/.test(cleanVal)) {
+        setFormError('Please enter a valid numeric CGPA (e.g. 8.42).');
+        return;
+      }
+
+      if (num < 0 || num > 10.0) {
+        setFormError('CGPA must be a value between 0.0 and 10.0 (e.g. 8.42).');
+        return;
+      }
+
+      formattedCgpa = cleanVal;
+    }
+
     if (!formData.graduation_year) {
       setFormError('Please select your Graduation Year.');
       return;
     }
+
     if (!formData.career_goal) {
       setFormError('Please select your Career Goal.');
       return;
@@ -223,9 +362,12 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
         full_name: formData.full_name.trim(),
         usn: formData.usn.trim().toUpperCase(),
         college_name: formData.college_name.trim(),
+        degree: formData.degree,
         department: formData.department,
+        current_year: formData.current_year,
         semester: formData.semester,
         graduation_year: formData.graduation_year,
+        cgpa: formattedCgpa,
         career_goal: formData.career_goal,
         target_role: formData.target_role.trim(),
       };
@@ -241,12 +383,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
         setSuccessMessage('Profile updated successfully!');
         if (updatedProfile) {
           setProfileState(updatedProfile);
-        } else {
-          await refreshProfile();
         }
+        await refreshProfile();
         setTimeout(() => {
           onClose();
-        }, 800);
+        }, 400);
       }
     } catch (err: any) {
       setFormError(err.message || 'An error occurred while updating your profile.');
@@ -353,19 +494,43 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
               </div>
 
               {/* College Name */}
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                   <Building className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                  <span>College Name <span className="text-rose-500">*</span></span>
+                  <span>College / Institution Name <span className="text-rose-500">*</span></span>
                 </label>
                 <input
                   type="text"
                   value={formData.college_name}
                   onChange={(e) => setFormData({ ...formData, college_name: e.target.value })}
                   required
-                  placeholder="Enter your college name"
+                  placeholder="Enter your college or institution name"
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
                 />
+              </div>
+
+              {/* Degree Program */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Degree Program <span className="text-rose-500">*</span></span>
+                </label>
+                <select
+                  value={formData.degree}
+                  onChange={(e) => setFormData({ ...formData, degree: e.target.value })}
+                  required
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
+                >
+                  <option value="" disabled>Select degree program</option>
+                  <option value="Bachelor of Engineering (B.E. / B.Tech)">Bachelor of Engineering (B.E. / B.Tech)</option>
+                  <option value="Bachelor of Technology (B.Tech)">Bachelor of Technology (B.Tech)</option>
+                  <option value="Bachelor of Computer Applications (BCA)">Bachelor of Computer Applications (BCA)</option>
+                  <option value="Bachelor of Science (B.Sc)">Bachelor of Science (B.Sc)</option>
+                  <option value="Master of Technology (M.Tech)">Master of Technology (M.Tech)</option>
+                  <option value="Master of Computer Applications (MCA)">Master of Computer Applications (MCA)</option>
+                  <option value="Master of Science (M.Sc)">Master of Science (M.Sc)</option>
+                  <option value="Other">Other Degree</option>
+                </select>
               </div>
 
               {/* Department */}
@@ -398,6 +563,25 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                 </select>
               </div>
 
+              {/* Current Academic Year */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <GraduationCap className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Academic Year</span>
+                </label>
+                <select
+                  value={formData.current_year}
+                  onChange={(e) => setFormData({ ...formData, current_year: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
+                >
+                  <option value="1st Year">1st Year</option>
+                  <option value="2nd Year">2nd Year</option>
+                  <option value="3rd Year">3rd Year</option>
+                  <option value="Final Year (4th Year)">Final Year (4th Year)</option>
+                  <option value="Graduated / Alumni">Graduated / Alumni</option>
+                </select>
+              </div>
+
               {/* Semester */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
@@ -423,8 +607,26 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                 </select>
               </div>
 
-              {/* Graduation Year */}
+              {/* Cumulative GPA (CGPA) */}
               <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Award className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Cumulative GPA (CGPA)</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.cgpa}
+                  onChange={(e) => setFormData({ ...formData, cgpa: e.target.value })}
+                  placeholder="e.g. 8.42"
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:border-indigo-500 focus:outline-none transition-colors"
+                />
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Enter your current cumulative GPA on a 10-point scale.
+                </p>
+              </div>
+
+              {/* Graduation Year */}
+              <div className="space-y-1.5 sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                   <span>Graduation Year <span className="text-rose-500">*</span></span>
@@ -527,26 +729,51 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                   )}
                 </div>
 
-                {/* Email & Password Method */}
-                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                {/* Email & Password Method (Fully interactive card) */}
+                <div
+                  id="email-password-auth-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={handleToggleEmailPasswordCard}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleToggleEmailPasswordCard();
+                    }
+                  }}
+                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer select-none flex items-center justify-between group ${
+                    showAddPassword || showChangePassword
+                      ? 'bg-indigo-500/10 border-indigo-500/40 shadow-sm'
+                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-indigo-500/30 hover:bg-slate-100/70 dark:hover:bg-slate-900/70'
+                  }`}
+                  title={hasEmailPassword ? 'Click to change password' : 'Click to add email & password login'}
+                >
                   <div className="flex items-center gap-2.5">
-                    <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400">
+                    <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 group-hover:scale-105 transition-transform">
                       <Mail className="w-4 h-4" />
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-slate-900 dark:text-slate-100">Email & Password</p>
+                      <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                        Email & Password
+                      </p>
                       <p className="text-[10px] text-slate-500">Password Login</p>
                     </div>
                   </div>
                   {hasEmailPassword ? (
-                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1 font-mono">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Connected</span>
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 flex items-center gap-1 font-mono">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>Connected</span>
+                      </span>
+                    </div>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setShowAddPassword(!showAddPassword)}
+                      id="add-password-card-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleEmailPasswordCard();
+                      }}
                       className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer"
                     >
                       {showAddPassword ? 'Cancel' : 'Add Password'}
@@ -555,7 +782,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                 </div>
               </div>
 
-              {/* Expandable Add Password Form */}
+              {/* Expandable Add Password Form (When password not configured yet) */}
               {showAddPassword && !hasEmailPassword && (
                 <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/20 space-y-3 animate-fade-in">
                   <div className="flex items-center gap-2">
@@ -618,14 +845,14 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                   <div className="flex gap-2 justify-end pt-1">
                     <button
                       type="button"
-                      onClick={handleCancelAddPassword}
+                      onClick={handleCancelPasswordForm}
                       className="px-3 py-1.5 rounded-xl bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
                       type="button"
-                      onClick={handleAddEmailPassword}
+                      onClick={() => handleSavePassword(false)}
                       disabled={isAddingPassword}
                       className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                     >
@@ -641,6 +868,97 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                   </div>
                 </div>
               )}
+
+              {/* Expandable Change Password Form (When password is already configured) */}
+              {showChangePassword && hasEmailPassword && (
+                <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/20 space-y-3 animate-fade-in">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <h5 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                      Change Password
+                    </h5>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                    Update the password for your account (<span className="font-mono text-indigo-600 dark:text-indigo-400 font-semibold">{user?.email}</span>).
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="New Password (min 6 chars)"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full px-3.5 py-2 pr-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        placeholder="Confirm New Password"
+                        value={confirmNewPassword}
+                        onChange={(e) => setConfirmNewPassword(e.target.value)}
+                        className="w-full px-3.5 py-2 pr-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                        title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                        aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showConfirmPassword ? (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={handleCancelPasswordForm}
+                      className="px-3 py-1.5 rounded-xl bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSavePassword(true)}
+                      disabled={isAddingPassword}
+                      className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isAddingPassword ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Updating...</span>
+                        </>
+                      ) : (
+                        <span>Update Password</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* Email Notifications Section (Coming Soon) */}
+              <div className="pt-2">
+                <SendTestEmailCard variant="card" />
+              </div>
             </div>
           </form>
         </div>

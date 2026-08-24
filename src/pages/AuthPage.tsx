@@ -200,24 +200,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
           const providers = appMeta.providers || [];
           const identities = res.user.identities || [];
 
-          let isGithubAccount =
+          const isGithubAccount = Boolean(
             appMeta.provider === 'github' ||
             providers.includes('github') ||
-            identities.some((i: any) => i.provider === 'github');
-
-          if (!isGithubAccount) {
-            try {
-              const raw = localStorage.getItem('careerpilot_github_emails');
-              const emails: string[] = raw ? JSON.parse(raw) : [];
-              if (emails.includes(trimmedEmail.toLowerCase())) {
-                isGithubAccount = true;
-              }
-            } catch {
-              // ignore storage errors
-            }
-          }
+            identities.some((i: any) => i.provider === 'github')
+          );
 
           if (isGithubAccount) {
+            console.log('[Login] GitHub-only account detected: true');
             showToast(
               'GitHub account detected',
               'This email is associated with a GitHub account. Please sign in using GitHub.',
@@ -249,18 +239,61 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
         );
         onNavigate('verify-email');
       } else if (emailMode === 'signin') {
+        console.log('[Login] Email/password login started');
+        console.log('[Login] Attempting Supabase email/password authentication');
+
         const res = await signInWithEmail(trimmedEmail, password);
-        if (res?.user && !res.user.email_confirmed_at && !res.user.confirmed_at) {
-          showToast(
-            'Email not verified',
-            'Please verify your email before continuing.',
-            'warning',
-            {
-              label: 'Verify Email',
-              onClick: () => onNavigate('verify-email')
-            }
+
+        if (res?.user) {
+          console.log('[Login] Email/password authentication succeeded');
+          console.log('[Login] Existing user ID:', res.user.id);
+
+          const providers = res.user.app_metadata?.providers || [];
+          const identities = res.user.identities || [];
+          const userMeta = res.user.user_metadata || {};
+
+          const isGitHubPresent = Boolean(
+            res.user.app_metadata?.provider === 'github' ||
+            providers.includes('github') ||
+            identities.some((i: any) => i.provider === 'github')
           );
-          onNavigate('verify-email');
+          console.log('[Login] GitHub provider present:', isGitHubPresent);
+
+          const isEmailPasswordEnabled = Boolean(
+            res.user.app_metadata?.provider === 'email' ||
+            providers.includes('email') ||
+            identities.some((i: any) => i.provider === 'email') ||
+            userMeta.has_password === true ||
+            userMeta.email_login_enabled === true ||
+            userMeta.password_configured === true ||
+            Boolean(userMeta.password_updated_at)
+          );
+          console.log('[Login] Email/password login enabled:', isEmailPasswordEnabled);
+
+          if (!res.user.email_confirmed_at && !res.user.confirmed_at && !isGitHubPresent) {
+            showToast(
+              'Email not verified',
+              'Please verify your email before continuing.',
+              'warning',
+              {
+                label: 'Verify Email',
+                onClick: () => onNavigate('verify-email')
+              }
+            );
+            onNavigate('verify-email');
+            return;
+          }
+
+          const rawName =
+            res.user.user_metadata?.full_name ||
+            res.user.user_metadata?.name ||
+            res.user.user_metadata?.user_name ||
+            profile?.full_name ||
+            '';
+          const studentName = typeof rawName === 'string' && rawName.trim() ? rawName.trim().split(' ')[0] : '';
+          const welcomeTitle = studentName ? `Welcome back, ${studentName}! 👋` : 'Welcome back! 👋';
+          showToast(welcomeTitle, "You're successfully signed in.", 'success');
+          onNavigate('dashboard');
         }
       } else if (emailMode === 'forgot') {
         await sendPasswordResetEmail(trimmedEmail);
@@ -283,30 +316,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
           lower.includes('already exists') ||
           lower.includes('identity_already_exists')
         ) {
-          let isGithubAccount = false;
-          try {
-            const raw = localStorage.getItem('careerpilot_github_emails');
-            const emails: string[] = raw ? JSON.parse(raw) : [];
-            if (emails.includes(trimmedEmail.toLowerCase())) {
-              isGithubAccount = true;
-            }
-          } catch {
-            // ignore
-          }
-
-          if (isGithubAccount) {
-            showToast(
-              'GitHub account detected',
-              'This email is associated with a GitHub account. Please sign in using GitHub.',
-              'info',
-              {
-                label: 'Continue with GitHub',
-                onClick: handleGitHubSignIn
-              }
-            );
-            return;
-          }
-
           showToast(
             'Account already exists',
             'This email is already associated with an existing CareerPilot account. Please sign in using your existing authentication method.',
@@ -321,39 +330,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
       }
 
       if (emailMode === 'signin') {
+        console.log('[Login] Login failed:', rawMsg);
+
         if (
           lower.includes('invalid login credentials') ||
           lower.includes('invalid_grant') ||
           lower.includes('invalid credentials') ||
           lower.includes('incorrect email or password')
         ) {
-          // Check if this email is known to be associated with a GitHub account
-          let isGithubAccount = false;
-          try {
-            const raw = localStorage.getItem('careerpilot_github_emails');
-            const emails: string[] = raw ? JSON.parse(raw) : [];
-            if (emails.includes(trimmedEmail.toLowerCase())) {
-              isGithubAccount = true;
-            }
-          } catch {
-            // ignore
-          }
-
-          if (isGithubAccount) {
-            showToast(
-              'GitHub account detected',
-              'This email is associated with a GitHub account. Please sign in using GitHub.',
-              'info',
-              {
-                label: 'Continue with GitHub',
-                onClick: handleGitHubSignIn
-              }
-            );
-            return;
-          }
-
           showToast(
-            'Invalid login credentials',
+            'Invalid email or password',
             'Please check your email and password and try again.',
             'error'
           );

@@ -1,0 +1,7 @@
+[functions.analyze-resume]
+verify_jwt = false
+
+[functions.send-career-email]
+verify_jwt = true
+
+

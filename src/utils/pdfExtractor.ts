@@ -10,43 +10,51 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Robustly extracts all text from a PDF file using pdfjs-dist
+ * Robustly and efficiently extracts all readable text from a PDF file using pdfjs-dist
  */
 export async function extractTextFromPdf(file: File): Promise<string> {
   try {
     const arrayBuffer = await file.arrayBuffer();
     const typedArray = new Uint8Array(arrayBuffer);
 
-    // Initialize document loading task
+    // Initialize document loading task with optimized options
     const loadingTask = pdfjsLib.getDocument({
       data: typedArray,
       useSystemFonts: true,
-      disableFontFace: false,
+      disableFontFace: true,
+      stopAtErrors: false,
     });
 
     const pdf = await loadingTask.promise;
-    let fullText = '';
+    const pageTexts: string[] = [];
 
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
+      const textContent = await page.getTextContent({
+        includeMarkedContent: false,
+      });
 
-      const pageText = textContent.items
+      const pageStr = textContent.items
         .map((item: any) => {
           if ('str' in item && typeof item.str === 'string') {
-            return item.str;
+            return item.str.trim();
           }
           return '';
         })
+        .filter(Boolean)
         .join(' ');
 
-      if (pageText.trim()) {
-        fullText += `\n--- Page ${pageNum} ---\n` + pageText;
+      if (pageStr.trim()) {
+        pageTexts.push(pageStr.trim());
       }
+
+      // Cleanup page resources immediately
+      page.cleanup();
     }
 
-    const cleanedText = fullText.trim();
-    return cleanedText;
+    const fullText = pageTexts.join('\n\n').trim();
+    // Safety text ceiling
+    return fullText.slice(0, 20000);
   } catch (error) {
     console.error('[PDF extraction] Extraction error details:', error);
     throw error;

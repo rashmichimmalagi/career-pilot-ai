@@ -6,6 +6,7 @@ export interface ToastData {
   title: string;
   subtitle?: string;
   type?: 'success' | 'info' | 'warning' | 'error';
+  duration?: number;
   action?: {
     label: string;
     onClick: () => void;

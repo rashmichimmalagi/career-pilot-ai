@@ -6,6 +6,20 @@
     <title>CareerPilot AI - AI-Powered Placement Copilot</title>
     <script>
       (function() {
+        // Prevent benign ResizeObserver loop errors from surfacing in unhandled error dialogs
+        window.addEventListener('error', function(e) {
+          if (
+            e &&
+            (e.message === 'ResizeObserver loop completed with undelivered notifications.' ||
+              e.message === 'ResizeObserver loop limit exceeded' ||
+              (typeof e.message === 'string' && e.message.indexOf('ResizeObserver') !== -1))
+          ) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        });
+
         try {
           var saved = localStorage.getItem('careerpilot_theme');
           var isLight = saved === 'light' || (!saved && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);

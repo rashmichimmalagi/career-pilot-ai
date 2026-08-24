@@ -2,6 +2,10 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+html {
+  scrollbar-gutter: stable;
+}
+
 @layer utilities {
   /* Custom background grid & noise pattern */
   .bg-grid-pattern {
@@ -64,6 +68,29 @@
     border-color: rgba(99, 102, 241, 0.4);
     box-shadow: 0 12px 28px -6px rgba(99, 102, 241, 0.12);
   }
+}
+
+/* Monaco Editor Internal Scrollbars */
+.monaco-editor .scrollbar.vertical {
+  right: 0px !important;
+  z-index: 20 !important;
+}
+
+.monaco-editor .scrollbar.vertical .slider {
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  min-height: 24px !important;
+}
+
+.monaco-editor .scrollbar.horizontal {
+  bottom: 0px !important;
+  z-index: 20 !important;
+}
+
+.monaco-editor .scrollbar.horizontal .slider {
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  min-width: 24px !important;
 }
 
 /* Animations */
@@ -130,3 +157,103 @@
     animation: none !important;
   }
 }
+
+/* ATS Resume Print Rules */
+@media print {
+  @page {
+    size: auto;
+    margin: 10mm 12mm 10mm 12mm;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* Hide app navigation, screen action bars, and non-printable elements */
+  .no-print,
+  nav,
+  header,
+  footer,
+  dialog,
+  [role="dialog"] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Ensure root container allows print doc to display cleanly */
+  #root {
+    display: block !important;
+    visibility: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Dedicated print document and portal */
+  .careerpilot-print-doc,
+  #careerpilot-print-portal {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .careerpilot-print-doc *,
+  #careerpilot-print-portal * {
+    visibility: visible !important;
+  }
+
+  /* Print Page Separations */
+  .careerpilot-print-page {
+    page-break-after: always !important;
+    break-after: page !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 0 8mm 0 !important;
+    box-sizing: border-box !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .careerpilot-print-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  /* Print pagination and break controls */
+  .print-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-section {
+    break-inside: auto;
+    margin-bottom: 12px !important;
+  }
+
+  .print-section-header {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+}
+
+

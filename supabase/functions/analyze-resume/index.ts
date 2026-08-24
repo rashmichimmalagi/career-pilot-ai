@@ -5,13 +5,14 @@ import { GoogleGenAI, Type } from 'npm:@google/genai@^2.4.0';
 
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-auth',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-auth, prefer',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+  'Access-Control-Max-Age': '86400',
 };
 
 const SUPPORTED_MODELS = [
-  'gemini-3.1-flash-lite',
   'gemini-3.7-flash',
+  'gemini-3.1-flash-lite',
   'gemini-flash-latest',
 ];
 

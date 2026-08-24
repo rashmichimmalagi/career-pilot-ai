@@ -1,6 +1,6 @@
 {
   "name": "CareerPilot AI",
-  "description": "Your AI-Powered Placement Copilot for engineering students.",
+  "description": "Your AI-Powered Placement & Career Copilot for engineering students, featuring AI Career Mentor, Placement Practice, Resume Analyzer, Coding Arena, and Technical Mock Interviews.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

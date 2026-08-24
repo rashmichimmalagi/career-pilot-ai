@@ -1,0 +1,1511 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import {
+  Code2,
+  Sparkles,
+  ArrowLeft,
+  Sliders,
+  Play,
+  RotateCcw,
+  BookOpen,
+  Layers,
+  CheckCircle2,
+  Terminal,
+  Cpu,
+  Target,
+  Clock,
+  Zap,
+  HelpCircle,
+  BarChart2,
+  Loader2,
+  Check,
+  ChevronRight,
+  ChevronLeft,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  Award,
+  Edit3,
+  FileCode,
+  Laptop,
+  History,
+  TrendingUp,
+  Trophy,
+  Bookmark,
+  BookmarkCheck,
+  ListOrdered
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import {
+  CodingSubject,
+  CodingDifficulty,
+  CodingLanguage,
+  CodingProblem,
+  CodingSubmission,
+  SubmissionEvaluationResult,
+  PracticeConfig,
+  Achievement,
+  QuestionSeriesItem,
+  SavedQuestion,
+  TopicProgressSummary
+} from '../types/coding';
+import {
+  SUBJECTS,
+  SUBJECT_TOPICS,
+  DIFFICULTIES,
+  LANGUAGES,
+  getAvailableLanguagesForSubject,
+  getSubjectDefaultLanguage,
+  getBoilerplateTemplate,
+  sanitizeStarterCode,
+  codingService
+} from '../services/codingService';
+import { codingHistoryService } from '../services/codingHistoryService';
+import { checkNewlyUnlockedAchievements } from '../services/achievementService';
+import { DEFAULT_CODING_QUESTION_BANK } from '../data/codingQuestionBank';
+import { ProblemView } from '../components/coding/ProblemView';
+import { CodeEditorWorkspace } from '../components/coding/CodeEditorWorkspace';
+import { MyPracticeView } from '../components/coding/MyPracticeView';
+import { FloatingDropdown } from '../components/coding/FloatingDropdown';
+import { AchievementToast } from '../components/coding/AchievementToast';
+import { TopicQuestionSeriesView } from '../components/coding/TopicQuestionSeriesView';
+import { SavedQuestionsModal } from '../components/coding/SavedQuestionsModal';
+
+interface CodingPracticePageProps {
+  onNavigate: (page: string) => void;
+}
+
+export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNavigate }) => {
+  const { user, showToast } = useAuth();
+
+  // Page View Mode (Arena vs My Practice History vs Achievements)
+  const [pageTab, setPageTab] = useState<'arena' | 'history' | 'achievements'>('arena');
+  const [submissionCount, setSubmissionCount] = useState<number>(0);
+  const [newlyUnlockedAchievement, setNewlyUnlockedAchievement] = useState<Achievement | null>(null);
+
+  // Practice Configuration State
+  const [selectedSubject, setSelectedSubject] = useState<CodingSubject>('DSA');
+  const [customSubject, setCustomSubject] = useState<string>('');
+  const [selectedTopic, setSelectedTopic] = useState<string>(SUBJECT_TOPICS['DSA'][0]);
+  const [customTopic, setCustomTopic] = useState<string>('');
+  const [selectedDifficulty, setSelectedDifficulty] = useState<CodingDifficulty>('Medium');
+  const [selectedLanguage, setSelectedLanguage] = useState<CodingLanguage>('Python');
+  const [activeCompanyContext, setActiveCompanyContext] = useState<{ company?: string; role?: string } | null>(null);
+  const [isFromCompanyPrep, setIsFromCompanyPrep] = useState<boolean>(false);
+  const [sourceContext, setSourceContext] = useState<string | null>(null);
+
+  // Generator & Workspace State
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [activeProblem, setActiveProblem] = useState<CodingProblem | null>(() => {
+    try {
+      const saved = localStorage.getItem('careerpilot_active_coding_problem');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.title) return parsed;
+      }
+    } catch (_) {}
+    return DEFAULT_CODING_QUESTION_BANK[0] || null;
+  });
+  const [currentCode, setCurrentCode] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('careerpilot_active_coding_problem');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.title) {
+          const raw = parsed.starterCode?.['Python'] || parsed.starter_templates?.['Python'] || '';
+          return sanitizeStarterCode(raw, 'Python', parsed.title, parsed.functionSignature?.['Python']);
+        }
+      }
+    } catch (_) {}
+    const defaultProb = DEFAULT_CODING_QUESTION_BANK[0];
+    if (defaultProb) {
+      const raw = defaultProb.starterCode?.['Python'] || defaultProb.starter_templates?.['Python'] || '';
+      return sanitizeStarterCode(raw, 'Python', defaultProb.title, defaultProb.functionSignature?.['Python']);
+    }
+    return '';
+  });
+  const [submissions, setSubmissions] = useState<CodingSubmission[]>([]);
+  const [evaluationResult, setEvaluationResult] = useState<SubmissionEvaluationResult | null>(null);
+  const [currentExecutionId, setCurrentExecutionId] = useState<string>('');
+  const [isRunning, setIsRunning] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isConfigExpanded, setIsConfigExpanded] = useState<boolean>(false);
+
+  // Question Series & Bookmarks State
+  const [seriesItems, setSeriesItems] = useState<QuestionSeriesItem[]>([]);
+  const [isLoadingSeries, setIsLoadingSeries] = useState<boolean>(false);
+  const [topicProgress, setTopicProgress] = useState<TopicProgressSummary | null>(null);
+  const [savedQuestions, setSavedQuestions] = useState<SavedQuestion[]>([]);
+  const [isSavedModalOpen, setIsSavedModalOpen] = useState<boolean>(false);
+
+  // Mobile / Tablet Tab Switcher (Problem vs Code Editor)
+  const [mobileActiveView, setMobileActiveView] = useState<'problem' | 'editor'>('problem');
+
+  // Stable references for high-frequency callbacks without triggering remounts
+  const activeProblemRef = useRef(activeProblem);
+  activeProblemRef.current = activeProblem;
+
+  const currentCodeRef = useRef(currentCode);
+  currentCodeRef.current = currentCode;
+
+  const selectedLanguageRef = useRef(selectedLanguage);
+  selectedLanguageRef.current = selectedLanguage;
+
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[RENDER] CodingArena: activeProblem=', activeProblem?.id, activeProblem?.title, 'pageTab=', pageTab);
+  }
+
+  // AbortController refs to cancel abandoned in-flight requests
+  const generateAbortRef = useRef<AbortController | null>(null);
+  const runAbortRef = useRef<AbortController | null>(null);
+  const submitAbortRef = useRef<AbortController | null>(null);
+
+  // Prevent multiple auto-generation triggers on mount
+  const autoTriggeredRef = React.useRef(false);
+
+  // Cleanup active requests on unmount
+  useEffect(() => {
+    return () => {
+      generateAbortRef.current?.abort();
+      runAbortRef.current?.abort();
+      submitAbortRef.current?.abort();
+    };
+  }, []);
+
+  // Core execution function for problem generation
+  const executeGenerateProblem = async (config: {
+    subject: CodingSubject;
+    topic: string;
+    difficulty: CodingDifficulty;
+    language: CodingLanguage;
+    targetCompany?: string;
+    targetRole?: string;
+  }) => {
+    // Abort previous in-flight generation if any
+    if (generateAbortRef.current) {
+      generateAbortRef.current.abort();
+    }
+    const abortController = new AbortController();
+    generateAbortRef.current = abortController;
+
+    setIsGenerating(true);
+    setEvaluationResult(null);
+    setSubmissions([]);
+
+    try {
+      const problem = await codingService.generateProblem(
+        {
+          subject: config.subject,
+          topic: config.topic,
+          difficulty: config.difficulty,
+          language: config.language,
+          targetCompany: config.targetCompany,
+          targetRole: config.targetRole,
+          userId: user?.id,
+        },
+        abortController.signal
+      );
+
+      // If aborted, do not update state
+      if (abortController.signal.aborted) return;
+
+      setActiveProblem(problem);
+      setMobileActiveView('problem');
+      setPageTab('arena');
+
+      // Set guaranteed sanitized starter code
+      const rawStarter =
+        problem.starterCode?.[config.language] ||
+        problem.starter_templates?.[config.language] ||
+        '';
+      const cleanStarter = sanitizeStarterCode(
+        rawStarter,
+        config.language,
+        problem.title,
+        problem.functionSignature?.[config.language]
+      );
+      setCurrentCode(cleanStarter);
+
+      setIsConfigExpanded(false);
+      showToast(
+        'Problem Ready',
+        config.targetCompany
+          ? `Generated "${problem.title}" (${problem.difficulty}) tailored for ${config.targetCompany}!`
+          : `Generated "${problem.title}" (${problem.difficulty}) for ${config.topic}!`,
+        'success'
+      );
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      console.error('Error generating problem:', err);
+      const errMsg =
+        err?.message || "I couldn't generate a problem for this topic. Try describing the topic differently.";
+      showToast('Generation Notice', errMsg, 'error');
+    } finally {
+      setIsGenerating(false);
+      if (generateAbortRef.current === abortController) {
+        generateAbortRef.current = null;
+      }
+    }
+  };
+
+  // Keep active problem persisted locally for instant restoration
+  useEffect(() => {
+    if (activeProblem) {
+      try {
+        localStorage.setItem('careerpilot_active_coding_problem', JSON.stringify(activeProblem));
+      } catch (_) {}
+    }
+  }, [activeProblem]);
+
+  // URL query parameter listener for automatic context & auto-generation from Roadmap & Company Prep
+  useEffect(() => {
+    if (autoTriggeredRef.current) return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const subjectParam = searchParams.get('subject');
+    const topicParam = searchParams.get('topic');
+    const diffParam = searchParams.get('difficulty') as CodingDifficulty;
+    const langParam = searchParams.get('language') as CodingLanguage;
+    const companyParam = searchParams.get('company');
+    const roleParam = searchParams.get('role');
+    const autoParam = searchParams.get('auto');
+
+    const sourceParam = searchParams.get('source');
+    if (sourceParam) {
+      setSourceContext(sourceParam);
+    }
+    if (sourceParam === 'company-preparation' || sourceParam === 'company-prep') {
+      setIsFromCompanyPrep(true);
+    }
+
+    if (subjectParam || topicParam || companyParam) {
+      autoTriggeredRef.current = true;
+
+      // 1. Resolve Subject
+      let targetSubj: CodingSubject = 'DSA';
+      let targetCustomSubj = '';
+      if (subjectParam) {
+        if (SUBJECTS.includes(subjectParam as any)) {
+          targetSubj = subjectParam as CodingSubject;
+        } else {
+          targetSubj = '+ Custom Subject';
+          targetCustomSubj = subjectParam;
+        }
+        setSelectedSubject(targetSubj);
+        setCustomSubject(targetCustomSubj);
+      }
+
+      // 2. Resolve Topic
+      let targetTop = topicParam || 'Arrays';
+      let targetCustomTop = '';
+      const availableForSubj = SUBJECT_TOPICS[targetSubj] || SUBJECT_TOPICS['DSA'] || [];
+      if (topicParam) {
+        if (availableForSubj.includes(topicParam)) {
+          targetTop = topicParam;
+        } else {
+          targetTop = 'Custom Topic';
+          targetCustomTop = topicParam;
+        }
+        setSelectedTopic(targetTop);
+        setCustomTopic(targetCustomTop);
+      }
+
+      // 3. Resolve Difficulty
+      let targetDiff: CodingDifficulty = 'Medium';
+      if (diffParam && ['Easy', 'Medium', 'Hard'].includes(diffParam)) {
+        targetDiff = diffParam;
+        setSelectedDifficulty(targetDiff);
+      }
+
+      // 4. Resolve Language
+      let targetLang: CodingLanguage = 'Python';
+      if (langParam && ['Python', 'Java', 'C++', 'C', 'JavaScript', 'SQL'].includes(langParam)) {
+        targetLang = langParam;
+        setSelectedLanguage(targetLang);
+      }
+
+      // 5. Resolve Company Context
+      if (companyParam) {
+        setActiveCompanyContext({
+          company: companyParam,
+          role: roleParam || undefined,
+        });
+      }
+
+      // 6. Auto-generate immediately if auto flag is present or topic is explicitly specified
+      if (autoParam === 'true' || autoParam === '1' || topicParam) {
+        const finalSubjVal = targetSubj === '+ Custom Subject' ? targetCustomSubj : targetSubj;
+        const finalTopVal = targetTop === 'Custom Topic' ? targetCustomTop : targetTop;
+
+        executeGenerateProblem({
+          subject: finalSubjVal,
+          topic: finalTopVal,
+          difficulty: targetDiff,
+          language: targetLang,
+          targetCompany: companyParam || undefined,
+          targetRole: roleParam || undefined,
+        });
+      }
+    }
+  }, [user?.id]);
+
+  // Load count of user submissions for badge
+  useEffect(() => {
+    const effectiveUserId = user?.id || 'guest';
+    codingService.getSubmissions(effectiveUserId).then((subs) => {
+      setSubmissionCount(subs.length);
+    }).catch(() => {});
+  }, [user?.id]);
+
+  // Compute final subject & topic according to user selection
+  const isCustomSubjectSelected = selectedSubject === '+ Custom Subject';
+  const finalSubject = isCustomSubjectSelected ? customSubject.trim() : selectedSubject;
+  const displaySubject = isCustomSubjectSelected ? (customSubject.trim() || 'Custom Subject') : selectedSubject;
+
+  const isCustomTopicSelected = selectedTopic === 'Custom Topic';
+  const finalTopic = isCustomTopicSelected ? customTopic.trim() : selectedTopic.trim();
+  const displayTopic = isCustomTopicSelected ? (customTopic.trim() || 'Custom Topic') : selectedTopic;
+
+  // Load Question Series, Topic Progress, and Saved Bookmarks
+  useEffect(() => {
+    let isMounted = true;
+    const effectiveUserId = user?.id || 'guest';
+
+    const loadSeriesData = async () => {
+      setIsLoadingSeries(true);
+      try {
+        const [series, progress, saved] = await Promise.all([
+          codingService.getQuestionSeries(
+            (isCustomSubjectSelected ? 'DSA' : selectedSubject) as CodingSubject,
+            finalTopic || 'Arrays',
+            selectedDifficulty,
+            selectedLanguageRef.current,
+            effectiveUserId
+          ),
+          codingService.getTopicProgress(
+            (isCustomSubjectSelected ? 'DSA' : selectedSubject) as CodingSubject,
+            finalTopic || 'Arrays',
+            effectiveUserId
+          ),
+          codingService.getSavedQuestions(effectiveUserId),
+        ]);
+
+        if (isMounted) {
+          setSeriesItems(series);
+          setTopicProgress(progress);
+          setSavedQuestions(saved);
+
+          // If no problem is selected, initialize with the first series problem or default bank question
+          if (!activeProblemRef.current) {
+            const firstProblem = series[0]?.problem || DEFAULT_CODING_QUESTION_BANK[0];
+            if (firstProblem) {
+              const currentLang = selectedLanguageRef.current;
+              const rawStarter =
+                firstProblem.starterCode?.[currentLang] ||
+                firstProblem.starter_templates?.[currentLang] ||
+                '';
+              const cleanStarter = sanitizeStarterCode(
+                rawStarter,
+                currentLang,
+                firstProblem.title,
+                firstProblem.functionSignature?.[currentLang]
+              );
+              setActiveProblem(firstProblem);
+              setCurrentCode(cleanStarter);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error loading series and bookmarks:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingSeries(false);
+        }
+      }
+    };
+
+    loadSeriesData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedSubject, selectedTopic, customSubject, customTopic, selectedDifficulty, user?.id]);
+
+  // Bookmark Toggle Handler
+  const handleToggleBookmark = useCallback(async (problem: CodingProblem) => {
+    const effectiveUserId = user?.id || 'guest';
+    const isCurrentlySaved = savedQuestions.some(
+      (q) => q.question_id === problem.id || q.id === problem.id || q.title.toLowerCase() === problem.title.toLowerCase()
+    );
+
+    try {
+      if (isCurrentlySaved) {
+        await codingService.unsaveQuestionBookmark(problem.id, effectiveUserId);
+        setSavedQuestions((prev) => prev.filter((q) => q.question_id !== problem.id && q.id !== problem.id));
+        setSeriesItems((prev) =>
+          prev.map((item) => (item.id === problem.id ? { ...item, isSaved: false } : item))
+        );
+        showToastRef.current('Bookmark Removed', `"${problem.title}" removed from bookmarks.`, 'info');
+      } else {
+        const newSaved = await codingService.saveQuestionBookmark(problem, effectiveUserId);
+        setSavedQuestions((prev) => [newSaved, ...prev]);
+        setSeriesItems((prev) =>
+          prev.map((item) => (item.id === problem.id ? { ...item, isSaved: true } : item))
+        );
+        showToastRef.current('Question Saved', `"${problem.title}" added to bookmarks.`, 'success');
+      }
+    } catch (err) {
+      console.error('Error toggling bookmark:', err);
+      showToastRef.current('Bookmark Notice', 'Updated locally.', 'info');
+    }
+  }, [savedQuestions, user?.id]);
+
+  // Remove Saved Question from modal
+  const handleRemoveSavedQuestion = useCallback(async (questionId: string) => {
+    const effectiveUserId = user?.id || 'guest';
+    try {
+      await codingService.unsaveQuestionBookmark(questionId, effectiveUserId);
+      setSavedQuestions((prev) => prev.filter((q) => q.question_id !== questionId && q.id !== questionId));
+      setSeriesItems((prev) =>
+        prev.map((item) => (item.id === questionId ? { ...item, isSaved: false } : item))
+      );
+      showToastRef.current('Bookmark Removed', 'Question removed from saved collection.', 'info');
+    } catch (err) {
+      console.error('Error removing bookmark:', err);
+    }
+  }, [user?.id]);
+
+  // Active Series Index & Navigation
+  const currentSeriesIndex = useMemo(() => {
+    if (!activeProblem || seriesItems.length === 0) return -1;
+    return seriesItems.findIndex(
+      (item) =>
+        item.id === activeProblem.id ||
+        item.title.trim().toLowerCase() === activeProblem.title.trim().toLowerCase()
+    );
+  }, [activeProblem, seriesItems]);
+
+  const isCurrentActiveSaved = useMemo(() => {
+    if (!activeProblem) return false;
+    return savedQuestions.some(
+      (q) =>
+        q.question_id === activeProblem.id ||
+        q.id === activeProblem.id ||
+        q.title.trim().toLowerCase() === activeProblem.title.trim().toLowerCase()
+    );
+  }, [activeProblem, savedQuestions]);
+
+  // Select problem from past history for fresh re-practice
+  const handleSelectProblemForPractice = useCallback((problem: CodingProblem, preferredLanguage?: CodingLanguage) => {
+    setActiveProblem(problem);
+    if (problem.subject) {
+      if (SUBJECTS.includes(problem.subject)) {
+        setSelectedSubject(problem.subject);
+        setCustomSubject('');
+      } else {
+        setSelectedSubject('+ Custom Subject');
+        setCustomSubject(problem.subject);
+      }
+    }
+    if (problem.topic) {
+      const standardTopics = SUBJECT_TOPICS[problem.subject || 'DSA'] || SUBJECT_TOPICS['Default'] || [];
+      if (standardTopics.includes(problem.topic)) {
+        setSelectedTopic(problem.topic);
+        setCustomTopic('');
+      } else {
+        setSelectedTopic('Custom Topic');
+        setCustomTopic(problem.topic);
+      }
+    }
+    if (problem.difficulty) setSelectedDifficulty(problem.difficulty);
+
+    const langToUse = preferredLanguage || selectedLanguageRef.current;
+    setSelectedLanguage(langToUse);
+
+    const rawStarter =
+      problem.starterCode?.[langToUse] ||
+      problem.starter_templates?.[langToUse] ||
+      '';
+    const cleanStarter = sanitizeStarterCode(
+      rawStarter,
+      langToUse,
+      problem.title,
+      problem.functionSignature?.[langToUse]
+    );
+    setCurrentCode(cleanStarter);
+    setEvaluationResult(null);
+    setPageTab('arena');
+    setMobileActiveView('problem');
+    showToastRef.current('Loaded Problem', `"${problem.title}" is ready in the Coding Arena!`, 'success');
+  }, []);
+
+  const handleNavigateSeries = useCallback((direction: 'prev' | 'next') => {
+    if (currentSeriesIndex === -1) return;
+    const targetIdx = direction === 'next' ? currentSeriesIndex + 1 : currentSeriesIndex - 1;
+    if (targetIdx >= 0 && targetIdx < seriesItems.length) {
+      const targetItem = seriesItems[targetIdx];
+      handleSelectProblemForPractice(targetItem.problem, selectedLanguageRef.current);
+    }
+  }, [currentSeriesIndex, seriesItems, handleSelectProblemForPractice]);
+
+  // Update available topics and default language when subject changes
+  const handleSubjectChange = useCallback((subject: CodingSubject) => {
+    setSelectedSubject(subject);
+    if (subject === '+ Custom Subject') {
+      const defaultTopics = SUBJECT_TOPICS['Default'] || [];
+      if (defaultTopics.length > 0) {
+        setSelectedTopic(defaultTopics[0]);
+      }
+    } else {
+      const topics = SUBJECT_TOPICS[subject] || [];
+      if (topics.length > 0) {
+        setSelectedTopic(topics[0]);
+      }
+      const defaultLang = getSubjectDefaultLanguage(subject);
+      setSelectedLanguage(defaultLang);
+    }
+  }, []);
+
+  // Handle Topic Dropdown Change
+  const handleTopicDropdownChange = useCallback((value: string) => {
+    setSelectedTopic(value);
+  }, []);
+
+  // Update code boilerplate when language changes
+  const handleLanguageChange = useCallback((newLanguage: CodingLanguage) => {
+    setSelectedLanguage(newLanguage);
+    const prob = activeProblemRef.current;
+    if (prob) {
+      const rawStarter =
+        prob.starterCode?.[newLanguage] ||
+        prob.starter_templates?.[newLanguage] ||
+        '';
+      const cleanStarter = sanitizeStarterCode(
+        rawStarter,
+        newLanguage,
+        prob.title,
+        prob.functionSignature?.[newLanguage]
+      );
+      setCurrentCode(cleanStarter);
+    }
+  }, []);
+
+  // Real AI Problem Generator Handler
+  const handleGenerateProblem = async () => {
+    if (isGenerating) return;
+
+    // Validation 1: Custom Subject validation
+    if (isCustomSubjectSelected && (!customSubject || !customSubject.trim())) {
+      showToastRef.current('Validation Error', 'Please enter a custom subject.', 'error');
+      return;
+    }
+
+    if (!finalSubject) {
+      showToastRef.current('Validation Error', 'Please enter a custom subject.', 'error');
+      return;
+    }
+
+    // Validation 2: Custom Topic validation
+    if (isCustomTopicSelected && (!customTopic || !customTopic.trim())) {
+      showToastRef.current('Validation Error', 'Please enter a custom topic.', 'error');
+      return;
+    }
+
+    if (!finalTopic) {
+      showToastRef.current('Validation Error', 'Please enter a custom topic.', 'error');
+      return;
+    }
+
+    await executeGenerateProblem({
+      subject: finalSubject as CodingSubject,
+      topic: finalTopic,
+      difficulty: selectedDifficulty,
+      language: selectedLanguage,
+      targetCompany: activeCompanyContext?.company,
+      targetRole: activeCompanyContext?.role,
+    });
+  };
+
+  // Run Code against custom input or chosen example testcase
+  const handleRunCode = useCallback(async (customInput: string) => {
+    const prob = activeProblemRef.current;
+    const lang = selectedLanguageRef.current;
+    const code = currentCodeRef.current;
+    if (!prob) return null;
+
+    if (runAbortRef.current) {
+      runAbortRef.current.abort();
+    }
+    const abortController = new AbortController();
+    runAbortRef.current = abortController;
+
+    const execId = `exec_run_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    setCurrentExecutionId(execId);
+    setIsRunning(true);
+
+    const effectiveUserId = user?.id || 'guest';
+    codingHistoryService.saveRunCode(effectiveUserId, prob.id, lang, code);
+
+    try {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[API] evaluateSubmission (run):', prob.title, lang);
+      }
+      const runResult = await codingService.evaluateSubmission(
+        prob,
+        lang,
+        code,
+        customInput,
+        'run',
+        abortController.signal,
+        execId
+      );
+      if (!abortController.signal.aborted) {
+        return runResult;
+      }
+      return null;
+    } catch (error: any) {
+      if (error?.name === 'AbortError') return null;
+      return {
+        executionId: execId,
+        status: 'error',
+        statusText: 'Execution Error',
+        stdout: error?.name === 'TimeoutError' ? 'Code execution timed out. Please try again.' : 'Error during code execution.',
+        runtimeMs: 0,
+      };
+    } finally {
+      setIsRunning(false);
+      if (runAbortRef.current === abortController) {
+        runAbortRef.current = null;
+      }
+    }
+  }, [user?.id]);
+
+  // Real AI Submission Evaluation (Decoupled with instantaneous UI feedback & background persistence)
+  const handleSubmitSolution = useCallback(async (): Promise<SubmissionEvaluationResult | null> => {
+    const prob = activeProblemRef.current;
+    const lang = selectedLanguageRef.current;
+    const code = currentCodeRef.current;
+    if (!prob) return null;
+
+    if (submitAbortRef.current) {
+      submitAbortRef.current.abort();
+    }
+    const abortController = new AbortController();
+    submitAbortRef.current = abortController;
+
+    const execId = `exec_sub_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    setCurrentExecutionId(execId);
+    setEvaluationResult(null); // Clear stale evaluation result immediately
+    setIsSubmitting(true);
+
+    try {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[API] evaluateSubmission (submit):', prob.title, lang);
+      }
+      const evalResult = await codingService.evaluateSubmission(
+        prob,
+        lang,
+        code,
+        '',
+        'submit',
+        abortController.signal,
+        execId
+      );
+
+      if (abortController.signal.aborted) return null;
+
+      // 1. Immediately update UI state with execution and evaluation results
+      setEvaluationResult(evalResult);
+
+      const effectiveUserId = user?.id || 'guest';
+      codingHistoryService.saveSubmittedCode(effectiveUserId, prob.id, lang, code);
+
+      const newSubmission: CodingSubmission = {
+        id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        problem_id: prob.id || `prob_${Date.now()}`,
+        problem_title: prob.title,
+        difficulty: prob.difficulty,
+        subject: prob.subject,
+        topic: prob.topic,
+        user_id: effectiveUserId,
+        code: code,
+        submitted_code: code,
+        language: lang,
+        status: evalResult.status,
+        status_text: evalResult.statusText,
+        test_cases_passed: evalResult.passedTestCases,
+        total_test_cases: evalResult.totalTestCases,
+        runtime_ms: evalResult.runtimeMs,
+        memory_kb: evalResult.memoryKb,
+        ai_feedback: evalResult.aiFeedback,
+        created_at: new Date().toISOString(),
+      };
+
+      setSubmissions((prev) => [newSubmission, ...prev]);
+      setSubmissionCount((prev) => prev + 1);
+
+      if (evalResult.status === 'accepted') {
+        showToastRef.current('Accepted!', `All ${evalResult.totalTestCases} test cases passed! Great job!`, 'success');
+      } else {
+        showToastRef.current(
+          'Submission Evaluated',
+          `${evalResult.statusText} (${evalResult.passedTestCases}/${evalResult.totalTestCases} passed). Review AI feedback.`,
+          'info'
+        );
+      }
+
+      // 2. Non-blocking asynchronous background sync for persistence & achievements
+      (async () => {
+        try {
+          await codingService.saveSubmission(newSubmission);
+          const allSubs = await codingService.getSubmissions(effectiveUserId);
+          const newlyUnlocked = checkNewlyUnlockedAchievements(allSubs, effectiveUserId);
+          if (newlyUnlocked.length > 0) {
+            setNewlyUnlockedAchievement(newlyUnlocked[0]);
+          }
+        } catch (bgErr) {
+          console.warn('Background submission sync warning:', bgErr);
+        }
+      })();
+
+      return evalResult;
+    } catch (error: any) {
+      if (error?.name === 'AbortError') return null;
+      console.error('Error submitting code:', error);
+      showToastRef.current('Evaluation Error', error?.name === 'TimeoutError' ? 'Evaluation timed out. Please try again.' : 'Failed to evaluate code. Please retry.', 'error');
+      return null;
+    } finally {
+      setIsSubmitting(false);
+      if (submitAbortRef.current === abortController) {
+        submitAbortRef.current = null;
+      }
+    }
+  }, [user?.id]);
+
+  const handleViewAchievements = useCallback(() => {
+    setPageTab('history');
+    setTimeout(() => {
+      const el = document.getElementById('coding-achievements-section');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 150);
+  }, []);
+
+  const handleResetWorkspace = useCallback(() => {
+    setActiveProblem(null);
+    setCurrentCode('');
+    setEvaluationResult(null);
+    setSubmissions([]);
+    setMobileActiveView('problem');
+    setIsConfigExpanded(false);
+  }, []);
+
+  const availableLanguages = useMemo(
+    () => getAvailableLanguagesForSubject(isCustomSubjectSelected ? 'DSA' : selectedSubject),
+    [isCustomSubjectSelected, selectedSubject]
+  );
+
+  const currentTopics = useMemo(
+    () => (isCustomSubjectSelected
+      ? (SUBJECT_TOPICS['Default'] || [])
+      : (SUBJECT_TOPICS[selectedSubject] || SUBJECT_TOPICS['Default'] || [])),
+    [isCustomSubjectSelected, selectedSubject]
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300">
+      <div className="max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6 flex-1 flex flex-col">
+        
+        {/* Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              {sourceContext === 'roadmap' && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('roadmap')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 font-bold text-xs shadow-2xs border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer group"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                  <span>Back to Roadmap</span>
+                </button>
+              )}
+
+              {(sourceContext === 'company-preparation' || sourceContext === 'company-prep') && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('company-prep')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 font-bold text-xs shadow-2xs border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer group"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                  <span>Back to Company Preparation</span>
+                </button>
+              )}
+
+              {(sourceContext === 'preparation-dashboard' || sourceContext === 'dashboard' || sourceContext === 'prep-dashboard') && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('dashboard')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 font-bold text-xs shadow-2xs border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer group"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                  <span>Back to Preparation Dashboard</span>
+                </button>
+              )}
+
+              {sourceContext && <span className="text-slate-300 dark:text-slate-700">•</span>}
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                AI Arena Live
+              </span>
+              {isFromCompanyPrep && activeCompanyContext?.company && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20">
+                  Target: {activeCompanyContext.company}
+                </span>
+              )}
+            </div>
+
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400">
+                <Code2 className="w-6 h-6" />
+              </div>
+              <span>Coding Practice Arena</span>
+            </h1>
+
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+              Practice interview-style problems with Monaco code editor and AI evaluation.
+            </p>
+          </div>
+
+          {/* Navigation Tab Switcher (Arena vs My Practice vs Achievements) */}
+          <div className="flex items-center gap-2">
+            <div className="p-1 bg-slate-200/70 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setPageTab('arena')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  pageTab === 'arena'
+                    ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>Coding Arena</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPageTab('history')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  pageTab === 'history'
+                    ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <History className="w-3.5 h-3.5" />
+                <span>My Practice</span>
+                {submissionCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                    {submissionCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPageTab('achievements');
+                  setTimeout(() => {
+                    const el = document.getElementById('coding-achievements-section');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                  }, 100);
+                }}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  pageTab === 'achievements'
+                    ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                <span>Achievements</span>
+              </button>
+            </div>
+
+            {pageTab === 'arena' && activeProblem && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleGenerateProblem}
+                  disabled={isGenerating}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">Regenerate</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResetWorkspace}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">New Config</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {pageTab === 'history' || pageTab === 'achievements' ? (
+          /* MY PRACTICE / SUBMISSIONS HISTORY / ACHIEVEMENTS VIEW */
+          <MyPracticeView
+            userId={user?.id || 'guest'}
+            onSelectProblemForPractice={handleSelectProblemForPractice}
+            onSwitchToArena={() => setPageTab('arena')}
+          />
+        ) : (
+          /* ARENA VIEW */
+          <>
+            {/* Targeted Company Context Banner */}
+            {activeCompanyContext?.company && (
+              <div className="p-4 rounded-2xl bg-indigo-50/90 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-indigo-600 text-white font-bold shadow-xs">
+                    <Target className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                        Targeted Placement Practice
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-200/80 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">
+                        {activeCompanyContext.company}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                      Problems are calibrated for <strong>{activeCompanyContext.company}</strong> interview benchmarks {activeCompanyContext.role ? `(${activeCompanyContext.role})` : ''}.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveCompanyContext(null);
+                      // Clean URL query parameters smoothly
+                      window.history.replaceState({}, '', '/coding');
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    Clear Filter
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('company-prep')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <span>View Company Plan</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 1: PRACTICE CONFIGURATION BAR / SUMMARY */}
+            {activeProblem && !isConfigExpanded ? (
+              <div className="p-3 sm:px-4 sm:py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>{displaySubject}</span>
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-700">•</span>
+                  <span className="font-medium text-slate-600 dark:text-slate-400">
+                    {displayTopic}
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-700">•</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                      selectedDifficulty === 'Easy'
+                        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
+                        : selectedDifficulty === 'Medium'
+                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20'
+                        : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/20'
+                    }`}
+                  >
+                    {selectedDifficulty}
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-700">•</span>
+                  <span className="text-slate-600 dark:text-slate-400 font-mono text-[11px]">
+                    {selectedLanguage}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsConfigExpanded(true)}
+                    className="px-2.5 py-1 rounded-xl text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    <span>Change Parameters</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span>Practice Configuration</span>
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+                      LeetCode-style structured problem generator
+                    </span>
+                    {activeProblem && (
+                      <button
+                        type="button"
+                        onClick={() => setIsConfigExpanded(false)}
+                        className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        Hide Parameters
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 relative z-20">
+                {/* Subject Dropdown */}
+                <FloatingDropdown
+                  id="subject-dropdown"
+                  label="Subject"
+                  icon={<Layers className="w-3.5 h-3.5 text-indigo-500" />}
+                  value={selectedSubject}
+                  options={[
+                    ...SUBJECTS.map((sub) => ({ value: sub, label: sub })),
+                    { value: '+ Custom Subject', label: '+ Custom Subject', isCustom: true },
+                  ]}
+                  onChange={(val) => handleSubjectChange(val as CodingSubject)}
+                  disabled={isGenerating}
+                />
+
+                {/* Topic Dropdown with Search and Custom Topic */}
+                <FloatingDropdown
+                  id="topic-dropdown"
+                  label="Topic"
+                  icon={<BookOpen className="w-3.5 h-3.5 text-indigo-500" />}
+                  value={selectedTopic}
+                  searchable={true}
+                  options={[
+                    ...currentTopics.map((top) => ({ value: top, label: top })),
+                    { value: 'Custom Topic', label: '+ Custom Topic', isCustom: true },
+                  ]}
+                  onChange={(val) => handleTopicDropdownChange(val)}
+                  disabled={isGenerating}
+                />
+
+                {/* Difficulty Dropdown */}
+                <FloatingDropdown
+                  id="difficulty-dropdown"
+                  label="Difficulty"
+                  icon={<Target className="w-3.5 h-3.5 text-indigo-500" />}
+                  value={selectedDifficulty}
+                  options={DIFFICULTIES.map((diff) => ({
+                    value: diff,
+                    label: diff,
+                    badge: diff === 'Easy' ? '🟢' : diff === 'Medium' ? '🟡' : '🔴',
+                  }))}
+                  onChange={(val) => setSelectedDifficulty(val as CodingDifficulty)}
+                  disabled={isGenerating}
+                />
+
+                {/* Language Dropdown */}
+                <FloatingDropdown
+                  id="language-dropdown"
+                  label="Language"
+                  icon={<Laptop className="w-3.5 h-3.5 text-indigo-500" />}
+                  value={selectedLanguage}
+                  options={availableLanguages.map((lang) => ({ value: lang, label: lang }))}
+                  onChange={(val) => handleLanguageChange(val as CodingLanguage)}
+                  disabled={isGenerating}
+                />
+              </div>
+
+              {/* Conditional Custom Subject Input Field */}
+              {isCustomSubjectSelected && (
+                <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-500/20 space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="flex items-center justify-between">
+                    <label
+                      htmlFor="custom-subject-input"
+                      className="text-xs font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5"
+                    >
+                      <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Custom Subject</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSubject('DSA');
+                        setCustomSubject('');
+                      }}
+                      className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      Switch back to standard dropdown
+                    </button>
+                  </div>
+
+                  <input
+                    id="custom-subject-input"
+                    type="text"
+                    value={customSubject}
+                    onChange={(e) => setCustomSubject(e.target.value)}
+                    placeholder="Enter the subject you want to practice"
+                    disabled={isGenerating}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/80 text-xs font-medium text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 shadow-xs"
+                  />
+
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="font-semibold">Examples:</span>
+                    {[
+                      'Cloud Computing',
+                      'Cybersecurity',
+                      'Blockchain',
+                      'DevOps',
+                      'Software Testing',
+                      'Machine Learning',
+                      'Aptitude',
+                    ].map((ex, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setCustomSubject(ex)}
+                        className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-slate-200 dark:border-slate-800 text-[10px] text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                      >
+                        {ex}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Conditional Custom Topic Input Field */}
+              {isCustomTopicSelected && (
+                <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-500/20 space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="flex items-center justify-between">
+                    <label
+                      htmlFor="custom-topic-input"
+                      className="text-xs font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5"
+                    >
+                      <Edit3 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Custom Topic / Concept</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTopic(currentTopics[0] || 'Arrays');
+                        setCustomTopic('');
+                      }}
+                      className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      Switch back to standard dropdown
+                    </button>
+                  </div>
+
+                  <input
+                    id="custom-topic-input"
+                    type="text"
+                    value={customTopic}
+                    onChange={(e) => setCustomTopic(e.target.value)}
+                    placeholder="Enter any topic or concept you want to practice"
+                    disabled={isGenerating}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/80 text-xs font-medium text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 shadow-xs"
+                  />
+
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="font-semibold">Examples:</span>
+                    {[
+                      'Monotonic Stack',
+                      'Prefix Sum',
+                      'Bit Manipulation',
+                      'Sliding Window',
+                      'Array frequency problems',
+                      'Graph shortest path',
+                    ].map((ex, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setCustomTopic(ex)}
+                        className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-slate-200 dark:border-slate-800 text-[10px] text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                      >
+                        {ex}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Row */}
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>
+                    Targeting:{' '}
+                    <strong className="text-slate-700 dark:text-slate-300">{selectedLanguage}</strong> •{' '}
+                    <strong className="text-slate-700 dark:text-slate-300">{displaySubject}</strong> •{' '}
+                    {displayTopic || 'Select or enter topic'} (
+                    {selectedDifficulty})
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  id="generate-problem-btn"
+                  onClick={handleGenerateProblem}
+                  disabled={isGenerating}
+                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Generating your problem...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4" />
+                      <span>Generate Problem</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+            {/* WORKSPACE CONTENT */}
+            {!activeProblem ? (
+              /* TOPIC-BASED QUESTION SERIES EXPLORER & DISCOVERY VIEW */
+              <TopicQuestionSeriesView
+                currentSubject={isCustomSubjectSelected ? ('DSA' as CodingSubject) : selectedSubject}
+                currentTopic={displayTopic}
+                currentDifficulty={selectedDifficulty}
+                currentLanguage={selectedLanguage}
+                onSubjectChange={handleSubjectChange}
+                onTopicChange={handleTopicDropdownChange}
+                onDifficultyChange={setSelectedDifficulty}
+                onLanguageChange={handleLanguageChange}
+                seriesItems={seriesItems}
+                topicProgress={topicProgress}
+                isLoadingSeries={isLoadingSeries}
+                onSelectProblem={handleSelectProblemForPractice}
+                onToggleSaveBookmark={handleToggleBookmark}
+                onGenerateCustomProblem={handleGenerateProblem}
+                isGeneratingAI={isGenerating}
+                onOpenSavedModal={() => setIsSavedModalOpen(true)}
+                savedCount={savedQuestions.length}
+              />
+            ) : (
+              <div className="flex-1 min-h-0 flex flex-col space-y-4">
+                {/* Active Problem Series Context Navigation Bar */}
+                <div className="p-3 sm:px-4 sm:py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                  {/* Left: Back to series button + breadcrumbs */}
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveProblem(null);
+                        setEvaluationResult(null);
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-slate-700/80 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Back to {displayTopic} Series</span>
+                    </button>
+
+                    <div className="hidden md:flex items-center gap-1.5 text-slate-400 dark:text-slate-500 font-medium">
+                      <span>{displaySubject}</span>
+                      <ChevronRight className="w-3 h-3" />
+                      <span className="text-slate-700 dark:text-slate-300 font-semibold">{displayTopic}</span>
+                      <ChevronRight className="w-3 h-3" />
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          selectedDifficulty === 'Easy'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : selectedDifficulty === 'Medium'
+                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                            : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
+                        {selectedDifficulty}
+                      </span>
+                    </div>
+
+                    {currentSeriesIndex !== -1 && (
+                      <span className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold text-[11px] border border-indigo-200/50 dark:border-indigo-800/40">
+                        Question {currentSeriesIndex + 1} of {seriesItems.length}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Right: Prev/Next Question Navigation & Bookmark Action */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleNavigateSeries('prev')}
+                      disabled={currentSeriesIndex <= 0}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                      title="Previous Question in Series"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Prev</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleNavigateSeries('next')}
+                      disabled={currentSeriesIndex === -1 || currentSeriesIndex >= seriesItems.length - 1}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                      title="Next Question in Series"
+                    >
+                      <span className="hidden sm:inline">Next</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => activeProblem && handleToggleBookmark(activeProblem)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
+                        isCurrentActiveSaved
+                          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                          : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                      title={isCurrentActiveSaved ? 'Question Saved' : 'Save Question'}
+                    >
+                      {isCurrentActiveSaved ? (
+                        <>
+                          <BookmarkCheck className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                          <span>Saved</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bookmark className="w-3.5 h-3.5" />
+                          <span>Save</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsSavedModalOpen(true)}
+                      className="p-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors cursor-pointer relative"
+                      title="View all saved questions"
+                    >
+                      <ListOrdered className="w-4 h-4" />
+                      {savedQuestions.length > 0 && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] font-extrabold flex items-center justify-center">
+                          {savedQuestions.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Mobile / Tablet View Switcher (<lg) */}
+                <div className="flex lg:hidden items-center justify-center p-1 bg-slate-200/60 dark:bg-slate-800/60 rounded-2xl max-w-sm mx-auto w-full">
+                  <button
+                    type="button"
+                    onClick={() => setMobileActiveView('problem')}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      mobileActiveView === 'problem'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>Problem Statement</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMobileActiveView('editor')}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      mobileActiveView === 'editor'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <FileCode className="w-4 h-4" />
+                    <span>Monaco Code Editor</span>
+                  </button>
+                </div>
+
+                {/* Split Grid (Desktop: Side by Side, Mobile: Conditional Display) */}
+                <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[580px] lg:h-[calc(100vh-190px)]">
+                  {/* Left Column: Problem Description, Editorial, Submissions */}
+                  <div
+                    className={`lg:col-span-5 h-full min-h-0 overflow-hidden ${
+                      mobileActiveView === 'problem' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
+                    }`}
+                  >
+                    <ProblemView
+                      problem={activeProblem}
+                      selectedLanguage={selectedLanguage}
+                      submissions={submissions}
+                      hasSubmitted={submissions.length > 0}
+                    />
+                  </div>
+
+                  {/* Right Column: Code Editor Workspace */}
+                  <div
+                    className={`lg:col-span-7 h-full min-h-0 overflow-hidden ${
+                      mobileActiveView === 'editor' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
+                    }`}
+                  >
+                    <CodeEditorWorkspace
+                      language={selectedLanguage}
+                      availableLanguages={availableLanguages}
+                      onLanguageChange={handleLanguageChange}
+                      code={currentCode}
+                      onCodeChange={setCurrentCode}
+                      problem={activeProblem}
+                      onRunCode={handleRunCode}
+                      onSubmitSolution={handleSubmitSolution}
+                      evaluationResult={evaluationResult}
+                      executionId={currentExecutionId}
+                      isRunning={isRunning}
+                      isSubmitting={isSubmitting}
+                      submissions={submissions}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+      </div>
+
+      {/* Saved Questions Modal */}
+      <SavedQuestionsModal
+        isOpen={isSavedModalOpen}
+        onClose={() => setIsSavedModalOpen(false)}
+        savedQuestions={savedQuestions}
+        onSelectProblem={(problem, lang) => {
+          setIsSavedModalOpen(false);
+          handleSelectProblemForPractice(problem, lang || selectedLanguage);
+        }}
+        onRemoveSaved={handleRemoveSavedQuestion}
+      />
+
+      {/* Achievement Unlocked Toast Notification */}
+      <AchievementToast
+        achievement={newlyUnlockedAchievement}
+        onClose={() => setNewlyUnlockedAchievement(null)}
+        onViewAchievements={handleViewAchievements}
+      />
+    </div>
+  );
+};
+
