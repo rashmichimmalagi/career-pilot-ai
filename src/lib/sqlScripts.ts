@@ -320,10 +320,55 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_placement_sessions_user_id ON public.placement_sessions(user_id);
 
--- 6. Storage Buckets
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('resumes', 'resumes', true)
-ON CONFLICT (id) DO NOTHING;
+-- 6. Storage Buckets & Storage RLS Policies
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'resumes',
+  'resumes',
+  true,
+  10485760,
+  ARRAY['application/pdf']::text[]
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = true,
+  file_size_limit = 10485760,
+  allowed_mime_types = ARRAY['application/pdf']::text[];
+
+DROP POLICY IF EXISTS "Authenticated users can upload own resumes" ON storage.objects;
+CREATE POLICY "Authenticated users can upload own resumes" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+DROP POLICY IF EXISTS "Authenticated users can view own resumes" ON storage.objects;
+CREATE POLICY "Authenticated users can view own resumes" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+DROP POLICY IF EXISTS "Authenticated users can update own resumes" ON storage.objects;
+CREATE POLICY "Authenticated users can update own resumes" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  )
+  WITH CHECK (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+DROP POLICY IF EXISTS "Authenticated users can delete own resumes" ON storage.objects;
+CREATE POLICY "Authenticated users can delete own resumes" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
 
 -- 7. Reload Supabase PostgREST schema cache
 NOTIFY pgrst, 'reload schema';

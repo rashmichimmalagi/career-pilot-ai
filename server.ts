@@ -324,7 +324,7 @@ function normalizeAnalysisObject(parsed: any): ResumeAnalysisResponse {
   };
 }
 
-async function startServer() {
+export function createApp(): express.Application {
   const app = express();
 
   // CORS and Preflight Middleware
@@ -6020,6 +6020,12 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
     });
   });
 
+  return app;
+}
+
+export const app: express.Application = createApp();
+
+async function startServer() {
   // Vite middleware in development vs Static serving in production
   const isProduction =
     process.env.NODE_ENV === 'production' ||
@@ -6071,6 +6077,8 @@ function serveStaticDist(app: express.Application) {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-});
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+  });
+}

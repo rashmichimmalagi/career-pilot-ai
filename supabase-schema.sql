@@ -80,17 +80,39 @@ CREATE TABLE IF NOT EXISTS public.resumes (
   id text PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   file_name text NOT NULL DEFAULT 'resume.pdf',
+  file_size numeric DEFAULT 0,
   target_role text DEFAULT '',
   resume_text text DEFAULT '',
+  file_url text DEFAULT '',
+  storage_path text DEFAULT '',
+  resume_type text DEFAULT 'uploaded',
+  is_ai_improved boolean DEFAULT false,
+  parent_resume_id text,
   analysis_result jsonb DEFAULT '{}'::jsonb,
+  improved_data jsonb DEFAULT '{}'::jsonb,
+  comparison_data jsonb DEFAULT '{}'::jsonb,
+  student_answers jsonb DEFAULT '[]'::jsonb,
+  structured_data jsonb DEFAULT '{}'::jsonb,
   is_current boolean DEFAULT true,
   version numeric DEFAULT 1,
   version_label text DEFAULT 'Version 1.0',
-  storage_path text DEFAULT '',
   ats_score numeric DEFAULT 0,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
+
+-- Ensure all extended columns exist if table was previously created
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS file_size numeric DEFAULT 0;
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS file_url text DEFAULT '';
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS resume_type text DEFAULT 'uploaded';
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS is_ai_improved boolean DEFAULT false;
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS parent_resume_id text;
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS improved_data jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS comparison_data jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS student_answers jsonb DEFAULT '[]'::jsonb;
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS structured_data jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS ats_score numeric DEFAULT 0;
+ALTER TABLE public.resumes ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
 ALTER TABLE public.resumes ENABLE ROW LEVEL SECURITY;
 
@@ -288,3 +310,66 @@ CREATE POLICY "Users can delete own mock interviews" ON public.mock_interviews
   FOR DELETE USING (auth.uid() = user_id);
 
 CREATE INDEX IF NOT EXISTS idx_mock_interviews_user_id ON public.mock_interviews(user_id);
+
+-- ==============================================================================
+-- 7. SUPABASE STORAGE BUCKET: 'resumes' & STORAGE RLS POLICIES
+-- ==============================================================================
+
+-- 1. Create or update the 'resumes' bucket
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'resumes',
+  'resumes',
+  true,
+  10485760, -- 10 MB per file limit
+  ARRAY['application/pdf']::text[]
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = true,
+  file_size_limit = 10485760,
+  allowed_mime_types = ARRAY['application/pdf']::text[];
+
+-- 2. Storage RLS Policies for 'resumes' bucket
+-- Authenticated users can upload (INSERT) their own resumes
+DROP POLICY IF EXISTS "Authenticated users can upload own resumes" ON storage.objects;
+CREATE POLICY "Authenticated users can upload own resumes" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Authenticated users can view/download (SELECT) their own resumes
+DROP POLICY IF EXISTS "Authenticated users can view own resumes" ON storage.objects;
+CREATE POLICY "Authenticated users can view own resumes" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Authenticated users can update/replace (UPDATE) their own resumes
+DROP POLICY IF EXISTS "Authenticated users can update own resumes" ON storage.objects;
+CREATE POLICY "Authenticated users can update own resumes" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  )
+  WITH CHECK (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Authenticated users can delete (DELETE) their own resumes
+DROP POLICY IF EXISTS "Authenticated users can delete own resumes" ON storage.objects;
+CREATE POLICY "Authenticated users can delete own resumes" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- 8. Reload Supabase PostgREST Schema Cache
+NOTIFY pgrst, 'reload schema';
+
