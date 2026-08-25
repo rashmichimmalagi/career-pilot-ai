@@ -373,15 +373,41 @@ export const cloudSyncService = {
     try {
       if (localData.resumes.length > 0) {
         for (const item of localData.resumes) {
+          const analysisObj = item.analysisResult as any;
+          const atsScore = Number(
+            analysisObj?.overall_score ??
+            analysisObj?.overallScore ??
+            analysisObj?.ats_score ??
+            analysisObj?.atsScore ??
+            0
+          ) || 0;
+
+          const analysisBundle = {
+            ...(item.analysisResult || {}),
+            _fileSize: item.fileSize,
+            _fileUrl: item.fileUrl,
+            _storagePath: item.storagePath,
+            _resumeType: item.resumeType,
+            _isAiImproved: item.isAiImproved,
+            _parentResumeId: item.parentResumeId,
+            _improvedData: item.improvedData,
+            _comparisonData: item.comparisonData,
+            _studentAnswers: item.studentAnswers,
+            _structuredData: item.structuredData,
+          };
+
           const payload = {
             id: item.id,
             user_id: userId,
-            file_name: item.fileName || 'Resume.pdf',
+            file_name: item.fileName || item.versionLabel || 'Resume.pdf',
             target_role: item.targetRole || 'Software Developer',
             resume_text: item.resumeText || '',
-            analysis_result: item.analysisResult || {},
+            analysis_result: analysisBundle,
+            ats_score: atsScore,
             is_current: item.isCurrent !== undefined ? item.isCurrent : true,
-            version: item.version || 1,
+            version: Number(item.version) || 1,
+            version_label: item.versionLabel || `Resume_v${item.version || 1}.pdf`,
+            storage_path: item.storagePath || '',
             created_at: item.createdAt || new Date().toISOString(),
             updated_at: item.updatedAt || new Date().toISOString(),
           };

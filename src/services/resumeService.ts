@@ -31,9 +31,12 @@ export interface GenerateImprovedResumeParams {
   initialAnalysis?: ResumeAnalysisResult | null;
 }
 
+// In-flight promise cache to prevent duplicate analysis requests
+const inFlightAnalysisPromises = new Map<string, Promise<ResumeAnalysisResult>>();
+
 export const resumeService = {
   /**
-   * Initial Resume Analysis against Target Role
+   * Initial Resume Analysis against Target Role with Deduplication & Extended Timeout
    */
   async analyzeResume(payload: ResumeAnalysisPayload): Promise<ResumeAnalysisResult> {
     console.log('[Resume Analyzer] AI analysis request started');
@@ -43,74 +46,93 @@ export const resumeService = {
     }
 
     const targetRole = payload.targetRole || 'Software Developer';
+    const dedupeKey = `${targetRole.trim().toLowerCase()}_${payload.resumeText.slice(0, 100)}_${payload.resumeText.length}`;
 
-    // Primary: Call Express backend endpoint
-    try {
-      const response = await fetchWithTimeout('/api/analyze-resume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        timeoutMs: 12000,
-        body: JSON.stringify({
+    // Return existing in-flight promise if one is already running
+    const existing = inFlightAnalysisPromises.get(dedupeKey);
+    if (existing) {
+      console.log('[Resume Analyzer] Reusing in-flight analysis request for dedupeKey:', dedupeKey);
+      return existing;
+    }
+
+    const analysisPromise = (async () => {
+      // Primary: Call Express backend endpoint with 45s timeout
+      try {
+        const response = await fetchWithTimeout('/api/analyze-resume', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          timeoutMs: 45000,
+          body: JSON.stringify({
+            resumeText: payload.resumeText,
+            targetRole,
+          }),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          if (json.success && json.data) {
+            const result: ResumeAnalysisResult = json.data;
+            if (
+              typeof result.overall_score === 'number' &&
+              typeof result.ats_score === 'number' &&
+              typeof result.role_match_score === 'number'
+            ) {
+              return result;
+            }
+          }
+        } else {
+          console.warn('[Resume Analyzer] Express endpoint returned status:', response.status);
+        }
+      } catch (apiErr) {
+        console.warn('[Resume Analyzer] Express /api/analyze-resume endpoint call failed, falling back to edge function:', apiErr);
+      }
+
+      // Fallback: Supabase Edge Function
+      const { data, error } = await supabase.functions.invoke('analyze-resume', {
+        body: {
           resumeText: payload.resumeText,
           targetRole,
-        }),
+        },
       });
 
-      if (response.ok) {
-        const json = await response.json();
-        if (json.success && json.data) {
-          const result: ResumeAnalysisResult = json.data;
-          if (
-            typeof result.overall_score === 'number' &&
-            typeof result.ats_score === 'number' &&
-            typeof result.role_match_score === 'number'
-          ) {
-            return result;
-          }
+      if (error) {
+        console.error('[Resume Analyzer] Edge Function invocation error:', error);
+        let errorMessage = error.message || '';
+        if (
+          errorMessage.includes('Failed to send a request') ||
+          errorMessage.includes('CORS') ||
+          errorMessage.includes('fetch')
+        ) {
+          errorMessage =
+            'Resume analysis service connection issue. Please ensure server is running.';
         }
+        throw new Error(
+          errorMessage || 'Resume analysis service is temporarily unavailable. Please try again.'
+        );
       }
-    } catch (apiErr) {
-      console.warn('[Resume Analyzer] Express /api/analyze-resume endpoint call failed, falling back to edge function:', apiErr);
-    }
 
-    // Fallback: Supabase Edge Function
-    const { data, error } = await supabase.functions.invoke('analyze-resume', {
-      body: {
-        resumeText: payload.resumeText,
-        targetRole,
-      },
-    });
+      if (!data) {
+        throw new Error('Unable to generate a valid resume analysis.');
+      }
 
-    if (error) {
-      console.error('[Resume Analyzer] Edge Function invocation error:', error);
-      let errorMessage = error.message || '';
+      const result: ResumeAnalysisResult = data.data || data;
       if (
-        errorMessage.includes('Failed to send a request') ||
-        errorMessage.includes('CORS') ||
-        errorMessage.includes('fetch')
+        typeof result.overall_score !== 'number' ||
+        typeof result.ats_score !== 'number' ||
+        typeof result.role_match_score !== 'number'
       ) {
-        errorMessage =
-          'Resume analysis service connection issue. Please ensure server is running.';
+        throw new Error('AI response validation failed: Numeric scores missing or invalid.');
       }
-      throw new Error(
-        errorMessage || 'Resume analysis service is temporarily unavailable. Please try again.'
-      );
-    }
 
-    if (!data) {
-      throw new Error('Unable to generate a valid resume analysis.');
-    }
+      return result;
+    })();
 
-    const result: ResumeAnalysisResult = data.data || data;
-    if (
-      typeof result.overall_score !== 'number' ||
-      typeof result.ats_score !== 'number' ||
-      typeof result.role_match_score !== 'number'
-    ) {
-      throw new Error('AI response validation failed: Numeric scores missing or invalid.');
+    inFlightAnalysisPromises.set(dedupeKey, analysisPromise);
+    try {
+      return await analysisPromise;
+    } finally {
+      inFlightAnalysisPromises.delete(dedupeKey);
     }
-
-    return result;
   },
 
   /**
@@ -576,29 +598,32 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           .order('version', { ascending: false });
 
         if (!error && Array.isArray(data)) {
-          databaseItems = data.map((row: any) => ({
-            id: row.id,
-            userId: row.user_id,
-            version: Number(row.version) || 1,
-            versionLabel: row.version_label || `Resume_v${row.version || 1}.pdf`,
-            fileName: row.file_name || row.version_label || `Resume_v${row.version || 1}.pdf`,
-            fileSize: row.file_size ? Number(row.file_size) : undefined,
-            isCurrent: Boolean(row.is_current),
-            targetRole: row.target_role || 'Software Developer',
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-            resumeText: row.resume_text || '',
-            fileUrl: row.file_url || undefined,
-            storagePath: row.storage_path || undefined,
-            resumeType: row.resume_type || (row.is_ai_improved ? 'ai_generated' : 'uploaded'),
-            isAiImproved: Boolean(row.is_ai_improved),
-            parentResumeId: row.parent_resume_id || undefined,
-            analysisResult: row.analysis_result || null,
-            improvedData: row.improved_data || null,
-            comparisonData: row.comparison_data || null,
-            studentAnswers: row.student_answers || undefined,
-            structuredData: row.structured_data || undefined,
-          }));
+          databaseItems = data.map((row: any) => {
+            const analysis = row.analysis_result || {};
+            return {
+              id: row.id,
+              userId: row.user_id,
+              version: Number(row.version) || 1,
+              versionLabel: row.version_label || `Resume_v${row.version || 1}.pdf`,
+              fileName: row.file_name || row.version_label || `Resume_v${row.version || 1}.pdf`,
+              fileSize: row.file_size ? Number(row.file_size) : (analysis._fileSize ? Number(analysis._fileSize) : undefined),
+              isCurrent: Boolean(row.is_current),
+              targetRole: row.target_role || 'Software Developer',
+              createdAt: row.created_at,
+              updatedAt: row.updated_at,
+              resumeText: row.resume_text || '',
+              fileUrl: row.file_url || analysis._fileUrl || undefined,
+              storagePath: row.storage_path || analysis._storagePath || undefined,
+              resumeType: row.resume_type || analysis._resumeType || (row.is_ai_improved || analysis._isAiImproved ? 'ai_generated' : 'uploaded'),
+              isAiImproved: Boolean(row.is_ai_improved || analysis._isAiImproved),
+              parentResumeId: row.parent_resume_id || analysis._parentResumeId || undefined,
+              analysisResult: analysis,
+              improvedData: row.improved_data || analysis._improvedData || null,
+              comparisonData: row.comparison_data || analysis._comparisonData || null,
+              studentAnswers: row.student_answers || analysis._studentAnswers || undefined,
+              structuredData: row.structured_data || analysis._structuredData || undefined,
+            };
+          });
 
           // Ensure exactly one resume is marked isCurrent if resumes exist
           const hasCurrent = databaseItems.some((r) => r.isCurrent);
@@ -658,28 +683,29 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           .maybeSingle();
 
         if (!error && data) {
+          const analysis = data.analysis_result || {};
           return {
             id: data.id,
             userId: data.user_id,
             version: Number(data.version) || 1,
-            versionLabel: data.version_label,
-            fileName: data.file_name,
-            fileSize: data.file_size ? Number(data.file_size) : undefined,
+            versionLabel: data.version_label || `Resume_v${data.version || 1}.pdf`,
+            fileName: data.file_name || data.version_label || `Resume_v${data.version || 1}.pdf`,
+            fileSize: data.file_size ? Number(data.file_size) : (analysis._fileSize ? Number(analysis._fileSize) : undefined),
             isCurrent: Boolean(data.is_current),
             targetRole: data.target_role || 'Software Developer',
             createdAt: data.created_at,
             updatedAt: data.updated_at,
             resumeText: data.resume_text || '',
-            fileUrl: data.file_url || undefined,
-            storagePath: data.storage_path || undefined,
-            resumeType: data.resume_type || (data.is_ai_improved ? 'ai_generated' : 'uploaded'),
-            isAiImproved: Boolean(data.is_ai_improved),
-            parentResumeId: data.parent_resume_id || undefined,
-            analysisResult: data.analysis_result || null,
-            improvedData: data.improved_data || null,
-            comparisonData: data.comparison_data || null,
-            studentAnswers: data.student_answers || undefined,
-            structuredData: data.structured_data || undefined,
+            fileUrl: data.file_url || analysis._fileUrl || undefined,
+            storagePath: data.storage_path || analysis._storagePath || undefined,
+            resumeType: data.resume_type || analysis._resumeType || (data.is_ai_improved || analysis._isAiImproved ? 'ai_generated' : 'uploaded'),
+            isAiImproved: Boolean(data.is_ai_improved || analysis._isAiImproved),
+            parentResumeId: data.parent_resume_id || analysis._parentResumeId || undefined,
+            analysisResult: analysis,
+            improvedData: data.improved_data || analysis._improvedData || null,
+            comparisonData: data.comparison_data || analysis._comparisonData || null,
+            studentAnswers: data.student_answers || analysis._studentAnswers || undefined,
+            structuredData: data.structured_data || analysis._structuredData || undefined,
           };
         }
       } catch (err) {
@@ -693,6 +719,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
 
   /**
    * Save or update a resume version
+   * Stores strictly the verified columns of public.resumes and bundles extended metadata in analysis_result JSONB
    */
   async saveResumeVersion(resume: ResumeVersionItem): Promise<ResumeVersionItem> {
     const effectiveUserId = resume.userId || 'guest';
@@ -716,26 +743,44 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
             .neq('id', resume.id);
         }
 
+        const analysisObj = updatedResume.analysisResult as any;
+        const atsScore = Number(
+          analysisObj?.overall_score ??
+          analysisObj?.overallScore ??
+          analysisObj?.ats_score ??
+          analysisObj?.atsScore ??
+          0
+        ) || 0;
+
+        // Bundle extended fields safely into analysis_result JSONB so no extra DB columns are required
+        const analysisBundle = {
+          ...(updatedResume.analysisResult || {}),
+          _fileSize: updatedResume.fileSize,
+          _fileUrl: updatedResume.fileUrl,
+          _storagePath: updatedResume.storagePath,
+          _resumeType: updatedResume.resumeType,
+          _isAiImproved: updatedResume.isAiImproved,
+          _parentResumeId: updatedResume.parentResumeId,
+          _improvedData: updatedResume.improvedData,
+          _comparisonData: updatedResume.comparisonData,
+          _studentAnswers: updatedResume.studentAnswers,
+          _structuredData: updatedResume.structuredData,
+        };
+
+        // Strictly valid columns in public.resumes
         const dbRow = {
           id: updatedResume.id,
           user_id: updatedResume.userId,
-          version: updatedResume.version,
-          version_label: updatedResume.versionLabel,
-          file_name: updatedResume.fileName,
-          file_size: updatedResume.fileSize || 0,
-          is_current: updatedResume.isCurrent,
+          file_name: updatedResume.fileName || updatedResume.versionLabel || 'resume.pdf',
           target_role: updatedResume.targetRole || 'Software Developer',
           resume_text: updatedResume.resumeText || '',
-          file_url: updatedResume.fileUrl || null,
-          storage_path: updatedResume.storagePath || null,
-          resume_type: updatedResume.resumeType,
-          is_ai_improved: Boolean(updatedResume.isAiImproved),
-          parent_resume_id: updatedResume.parentResumeId || null,
-          analysis_result: updatedResume.analysisResult || null,
-          improved_data: updatedResume.improvedData || null,
-          comparison_data: updatedResume.comparisonData || null,
-          student_answers: updatedResume.studentAnswers || null,
-          structured_data: updatedResume.structuredData || null,
+          analysis_result: analysisBundle,
+          ats_score: atsScore,
+          version: Number(updatedResume.version) || 1,
+          version_label: updatedResume.versionLabel || `Resume_v${updatedResume.version || 1}.pdf`,
+          is_current: Boolean(updatedResume.isCurrent),
+          storage_path: updatedResume.storagePath || '',
+          created_at: updatedResume.createdAt || now,
           updated_at: now,
         };
 
@@ -744,7 +789,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           .upsert(dbRow, { onConflict: 'id' });
 
         if (error) {
-          console.warn('[Resume Service] Supabase resume upsert warning:', error.message);
+          console.warn('[Resume Service] Supabase resume upsert warning:', error.message, error);
         }
       } catch (err) {
         console.warn('[Resume Service] Error syncing resume to Supabase:', err);
@@ -786,6 +831,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     analysis: ResumeAnalysisResult
   ): Promise<void> {
     const now = new Date().toISOString();
+    const atsScore = Number(analysis.overall_score ?? analysis.ats_score ?? 0) || 0;
 
     if (isSupabaseConfigured() && userId && userId !== 'guest') {
       try {
@@ -793,6 +839,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           .from('resumes')
           .update({
             analysis_result: analysis,
+            ats_score: atsScore,
             updated_at: now,
           })
           .eq('id', resumeId)
@@ -957,7 +1004,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     userId: string,
     resumeId: string,
     file: File
-  ): Promise<{ fileUrl?: string; storagePath?: string }> {
+  ): Promise<{ fileUrl?: string; storagePath?: string; error?: string }> {
     // 1. Always store the exact binary file in IndexedDB immediately
     try {
       await saveResumeBlob(resumeId, file);
@@ -970,7 +1017,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     }
 
     try {
-      const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const cleanFileName = (file.name || 'resume.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
       const storagePath = `${userId}/${resumeId}_${cleanFileName}`;
 
       const { data, error } = await supabase.storage
@@ -978,10 +1025,21 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
         .upload(storagePath, file, {
           cacheControl: '3600',
           upsert: true,
+          contentType: file.type && file.type !== '' ? file.type : 'application/pdf',
         });
 
       if (error) {
-        console.warn('[Resume Service] Supabase storage upload warning:', error.message);
+        console.warn('[Resume Service] Supabase storage upload warning:', {
+          message: error.message,
+          storagePath,
+          userId,
+          fileSize: file.size,
+          fileType: file.type,
+        });
+        return { error: error.message };
+      }
+
+      if (!data?.path) {
         return {};
       }
 
@@ -993,9 +1051,9 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
         fileUrl: publicData?.publicUrl,
         storagePath: data.path,
       };
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[Resume Service] Supabase storage upload exception:', err);
-      return {};
+      return { error: err?.message || 'Storage upload failed' };
     }
   },
 
