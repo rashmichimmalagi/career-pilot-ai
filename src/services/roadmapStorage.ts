@@ -1,4 +1,5 @@
 import { DailyRoadmapTask } from '../types/roadmap';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 const STORAGE_PREFIX = 'careerpilot_roadmap_';
 
@@ -14,9 +15,110 @@ export function getStoredDailyTasks(studentId: string): DailyRoadmapTask[] | nul
   }
 }
 
+export async function fetchRemoteRoadmapData(studentId: string): Promise<{
+  tasks: DailyRoadmapTask[] | null;
+  completedItemIds: string[];
+}> {
+  if (!isSupabaseConfigured() || !studentId || studentId === 'guest') {
+    return {
+      tasks: getStoredDailyTasks(studentId),
+      completedItemIds: getCompletedItemIds(studentId),
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('profile_data, career_goal')
+      .eq('id', studentId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[RoadmapStorage] Supabase fetch warning:', error.message);
+      return {
+        tasks: getStoredDailyTasks(studentId),
+        completedItemIds: getCompletedItemIds(studentId),
+      };
+    }
+
+    let remoteTasks: DailyRoadmapTask[] | null = null;
+    let remoteCompletedIds: string[] = [];
+
+    if (data?.profile_data?.roadmap_tasks && Array.isArray(data.profile_data.roadmap_tasks)) {
+      remoteTasks = data.profile_data.roadmap_tasks;
+    }
+    if (data?.profile_data?.completed_roadmap_items && Array.isArray(data.profile_data.completed_roadmap_items)) {
+      remoteCompletedIds = data.profile_data.completed_roadmap_items;
+    }
+
+    if (!remoteTasks && typeof data?.career_goal === 'string' && data.career_goal.startsWith('__CP_DATA__')) {
+      try {
+        const parsed = JSON.parse(data.career_goal.replace(/^__CP_DATA__/, ''));
+        if (parsed.roadmap_tasks && Array.isArray(parsed.roadmap_tasks)) {
+          remoteTasks = parsed.roadmap_tasks;
+        }
+        if (parsed.completed_roadmap_items && Array.isArray(parsed.completed_roadmap_items)) {
+          remoteCompletedIds = parsed.completed_roadmap_items;
+        }
+      } catch (_) {}
+    }
+
+    // Merge with local cache
+    const localTasks = getStoredDailyTasks(studentId);
+    const localCompleted = getCompletedItemIds(studentId);
+
+    const mergedCompleted = Array.from(new Set([...remoteCompletedIds, ...localCompleted]));
+    const finalTasks = remoteTasks && remoteTasks.length > 0 ? remoteTasks : localTasks;
+
+    if (finalTasks) {
+      localStorage.setItem(`${STORAGE_PREFIX}tasks_${studentId}`, JSON.stringify(finalTasks));
+    }
+    if (mergedCompleted.length > 0) {
+      localStorage.setItem(`${STORAGE_PREFIX}completed_items_${studentId}`, JSON.stringify(mergedCompleted));
+    }
+
+    return {
+      tasks: finalTasks,
+      completedItemIds: mergedCompleted,
+    };
+  } catch (err) {
+    console.warn('[RoadmapStorage] Remote fetch exception:', err);
+    return {
+      tasks: getStoredDailyTasks(studentId),
+      completedItemIds: getCompletedItemIds(studentId),
+    };
+  }
+}
+
 export function saveDailyTasks(studentId: string, tasks: DailyRoadmapTask[]): void {
   try {
     localStorage.setItem(`${STORAGE_PREFIX}tasks_${studentId}`, JSON.stringify(tasks));
+
+    if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('profile_data')
+            .eq('id', studentId)
+            .maybeSingle();
+
+          const currentMeta = data?.profile_data || {};
+          await supabase
+            .from('profiles')
+            .update({
+              profile_data: {
+                ...currentMeta,
+                roadmap_tasks: tasks,
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', studentId);
+        } catch (err) {
+          console.warn('[RoadmapStorage] Supabase tasks sync notice:', err);
+        }
+      })();
+    }
   } catch (err) {
     console.error('Error saving daily tasks:', err);
   }
@@ -76,6 +178,33 @@ export function toggleCompletedItemId(studentId: string, itemId: string): string
       updated = [...current, itemId];
     }
     localStorage.setItem(`${STORAGE_PREFIX}completed_items_${studentId}`, JSON.stringify(updated));
+
+    if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('profile_data')
+            .eq('id', studentId)
+            .maybeSingle();
+
+          const currentMeta = data?.profile_data || {};
+          await supabase
+            .from('profiles')
+            .update({
+              profile_data: {
+                ...currentMeta,
+                completed_roadmap_items: updated,
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', studentId);
+        } catch (err) {
+          console.warn('[RoadmapStorage] Supabase completed items sync notice:', err);
+        }
+      })();
+    }
+
     return updated;
   } catch (err) {
     console.error('Error toggling item status:', err);
@@ -89,6 +218,33 @@ export function markItemCompleted(studentId: string, itemId: string): string[] {
     if (!current.includes(itemId)) {
       const updated = [...current, itemId];
       localStorage.setItem(`${STORAGE_PREFIX}completed_items_${studentId}`, JSON.stringify(updated));
+
+      if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
+        (async () => {
+          try {
+            const { data } = await supabase
+              .from('profiles')
+              .select('profile_data')
+              .eq('id', studentId)
+              .maybeSingle();
+
+            const currentMeta = data?.profile_data || {};
+            await supabase
+              .from('profiles')
+              .update({
+                profile_data: {
+                  ...currentMeta,
+                  completed_roadmap_items: updated,
+                },
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', studentId);
+          } catch (err) {
+            console.warn('[RoadmapStorage] Supabase mark item sync notice:', err);
+          }
+        })();
+      }
+
       return updated;
     }
     return current;

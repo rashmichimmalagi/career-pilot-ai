@@ -15,8 +15,8 @@ import { resumeService } from './resumeService';
 import { codingService } from './codingService';
 import { getPlacementStats, getPlacementHistory, fetchPlacementHistory } from './placementStorage';
 import { interviewStorage } from './interviewStorage';
-import { getStudentTargets, getActiveStudentTarget } from './companyPrepStorage';
-import { getStoredDailyTasks, getCompletedItemIds } from './roadmapStorage';
+import { getStudentTargets, getActiveStudentTarget, fetchRemoteStudentTargets } from './companyPrepStorage';
+import { getStoredDailyTasks, getCompletedItemIds, fetchRemoteRoadmapData } from './roadmapStorage';
 import { calculateStreaks } from './achievementService';
 import { calculateProfileCompletion } from './profileService';
 
@@ -74,9 +74,7 @@ export async function getPerformanceAnalyticsSummary(
     placementSessionsRes,
     interviewReportsRes,
     companyTargetsRes,
-    activeTargetRes,
-    dailyRoadmapTasksRes,
-    completedRoadmapItemIdsRes,
+    roadmapDataRes,
   ] = await Promise.allSettled([
     Promise.resolve(resumeService.getLatestAnalysis(effectiveId)),
     Promise.resolve(resumeService.getUserResumes(effectiveId)),
@@ -84,10 +82,8 @@ export async function getPerformanceAnalyticsSummary(
     Promise.resolve(getPlacementStats(effectiveId)),
     fetchPlacementHistory(effectiveId),
     interviewStorage.fetchReports(effectiveId),
-    Promise.resolve(getStudentTargets(effectiveId)),
-    Promise.resolve(getActiveStudentTarget(effectiveId)),
-    Promise.resolve(getStoredDailyTasks(effectiveId)),
-    Promise.resolve(getCompletedItemIds(effectiveId)),
+    fetchRemoteStudentTargets(effectiveId),
+    fetchRemoteRoadmapData(effectiveId),
   ]);
 
   // Safely extract results
@@ -125,18 +121,17 @@ export async function getPerformanceAnalyticsSummary(
   const companyTargets =
     companyTargetsRes.status === 'fulfilled' && Array.isArray(companyTargetsRes.value)
       ? companyTargetsRes.value
-      : [];
+      : getStudentTargets(effectiveId);
   const activeTarget =
-    activeTargetRes.status === 'fulfilled' ? activeTargetRes.value : null;
-  const dailyRoadmapTasks =
-    dailyRoadmapTasksRes.status === 'fulfilled' && Array.isArray(dailyRoadmapTasksRes.value)
-      ? dailyRoadmapTasksRes.value
-      : [];
-  const completedRoadmapItemIds =
-    completedRoadmapItemIdsRes.status === 'fulfilled' &&
-    Array.isArray(completedRoadmapItemIdsRes.value)
-      ? completedRoadmapItemIdsRes.value
-      : [];
+    companyTargets.length > 0 ? getActiveStudentTarget(effectiveId) || companyTargets[0] : null;
+  
+  const roadmapData =
+    roadmapDataRes.status === 'fulfilled' && roadmapDataRes.value
+      ? roadmapDataRes.value
+      : { tasks: getStoredDailyTasks(effectiveId), completedItemIds: getCompletedItemIds(effectiveId) };
+  
+  const dailyRoadmapTasks = Array.isArray(roadmapData.tasks) ? roadmapData.tasks : [];
+  const completedRoadmapItemIds = Array.isArray(roadmapData.completedItemIds) ? roadmapData.completedItemIds : [];
 
   // Mentor interactions count from localStorage
   let mentorInteractionsCount = 0;

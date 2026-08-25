@@ -1,4 +1,5 @@
 import { StudentTargetCompany } from '../types/companyPrep';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 const STORAGE_PREFIX = 'careerpilot_company_targets_';
 const ACTIVE_TARGET_KEY = 'careerpilot_active_company_target_';
@@ -12,6 +13,52 @@ export function getStudentTargets(studentId: string = 'guest'): StudentTargetCom
   } catch (err) {
     console.error('[CompanyPrepStorage] Error loading targets:', err);
     return [];
+  }
+}
+
+export async function fetchRemoteStudentTargets(studentId: string = 'guest'): Promise<StudentTargetCompany[]> {
+  if (!isSupabaseConfigured() || !studentId || studentId === 'guest') {
+    return getStudentTargets(studentId);
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('profile_data, career_goal')
+      .eq('id', studentId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[CompanyPrepStorage] Supabase fetch warning:', error.message);
+      return getStudentTargets(studentId);
+    }
+
+    let remoteTargets: StudentTargetCompany[] = [];
+    if (data?.profile_data?.company_targets && Array.isArray(data.profile_data.company_targets)) {
+      remoteTargets = data.profile_data.company_targets;
+    } else if (typeof data?.career_goal === 'string' && data.career_goal.startsWith('__CP_DATA__')) {
+      try {
+        const parsed = JSON.parse(data.career_goal.replace(/^__CP_DATA__/, ''));
+        if (parsed.company_targets && Array.isArray(parsed.company_targets)) {
+          remoteTargets = parsed.company_targets;
+        }
+      } catch (_) {}
+    }
+
+    const localTargets = getStudentTargets(studentId);
+    // Merge remote and local
+    const mergedMap = new Map<string, StudentTargetCompany>();
+    remoteTargets.forEach((t) => mergedMap.set(t.id, t));
+    localTargets.forEach((t) => mergedMap.set(t.id, t));
+
+    const combined = Array.from(mergedMap.values());
+    if (combined.length > 0) {
+      localStorage.setItem(`${STORAGE_PREFIX}${studentId}`, JSON.stringify(combined));
+    }
+    return combined;
+  } catch (err) {
+    console.warn('[CompanyPrepStorage] Remote fetch exception:', err);
+    return getStudentTargets(studentId);
   }
 }
 
@@ -37,6 +84,34 @@ export function saveStudentTarget(
     localStorage.setItem(`${STORAGE_PREFIX}${studentId}`, JSON.stringify(updated));
     // Set as active target automatically
     setActiveTargetId(target.id, studentId);
+
+    // Sync to Supabase in background if authenticated
+    if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('profile_data')
+            .eq('id', studentId)
+            .maybeSingle();
+
+          const currentMeta = data?.profile_data || {};
+          await supabase
+            .from('profiles')
+            .update({
+              profile_data: {
+                ...currentMeta,
+                company_targets: updated,
+                active_target_id: target.id,
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', studentId);
+        } catch (err) {
+          console.warn('[CompanyPrepStorage] Supabase target sync notice:', err);
+        }
+      })();
+    }
   } catch (err) {
     console.error('[CompanyPrepStorage] Error saving target:', err);
   }
@@ -59,6 +134,33 @@ export function deleteStudentTarget(
       } else {
         localStorage.removeItem(`${ACTIVE_TARGET_KEY}${studentId}`);
       }
+    }
+
+    if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('profile_data')
+            .eq('id', studentId)
+            .maybeSingle();
+
+          const currentMeta = data?.profile_data || {};
+          await supabase
+            .from('profiles')
+            .update({
+              profile_data: {
+                ...currentMeta,
+                company_targets: updated,
+                active_target_id: updated.length > 0 ? updated[0].id : null,
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', studentId);
+        } catch (err) {
+          console.warn('[CompanyPrepStorage] Supabase target delete notice:', err);
+        }
+      })();
     }
   } catch (err) {
     console.error('[CompanyPrepStorage] Error deleting target:', err);

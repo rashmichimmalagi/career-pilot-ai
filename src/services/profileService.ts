@@ -242,42 +242,91 @@ export const profileService = {
       // 3. Extract direct columns
       const directFields: Partial<Profile> = {};
       const extendedKeys = [
-        'phone', 'degree', 'current_year', 'cgpa', 'target_companies', 'skills',
+        'full_name', 'email', 'usn', 'college_name', 'department', 'semester', 'graduation_year',
+        'target_role', 'phone', 'degree', 'current_year', 'cgpa', 'target_companies', 'skills',
         'technical_skills', 'tools_technologies', 'programming_languages', 'certifications',
         'linkedin_url', 'github_url', 'portfolio_url', 'bio', 'preparation_level',
         'preferred_language', 'preferred_domain', 'preferred_location', 'dsa_level',
-        'interview_experience', 'preferences'
+        'interview_experience', 'preferences', 'career_goal'
       ];
       for (const k of extendedKeys) {
-        if (data[k] !== undefined && data[k] !== null) {
+        if (data[k] !== undefined && data[k] !== null && data[k] !== '') {
           (directFields as any)[k] = data[k];
         }
       }
 
-      // 4. Merge: Supabase remote takes precedence for cross-device consistency, combined with local
-      const mergedExtended: Partial<Profile> = {
-        ...localExtended,
-        ...remoteMetadata,
-        ...directFields,
-      };
-
-      // 5. Update local cache with complete merged data
-      this.saveExtendedLocalProfile(userId, mergedExtended);
-
+      // 4. Merge: Supabase remote data takes priority for cross-device consistency, augmented by localExtended
       const mergedProfile: Profile = {
-        ...(data as Profile),
-        ...mergedExtended,
         id: userId,
-        full_name: data.full_name || localExtended.full_name || 'Student',
-        email: data.email || localExtended.email || '',
-        usn: data.usn || localExtended.usn || '',
-        college_name: data.college_name || localExtended.college_name || '',
-        department: data.department || localExtended.department || '',
-        semester: data.semester || localExtended.semester || '',
-        graduation_year: data.graduation_year || localExtended.graduation_year || '',
-        career_goal: cleanCareerGoal || localExtended.career_goal || '',
-        target_role: data.target_role || localExtended.target_role || '',
+        full_name: directFields.full_name || remoteMetadata.full_name || data.full_name || localExtended.full_name || 'Student',
+        email: directFields.email || remoteMetadata.email || data.email || localExtended.email || '',
+        avatar_url: data.avatar_url || remoteMetadata.avatar_url || localExtended.avatar_url || '',
+        usn: directFields.usn || remoteMetadata.usn || data.usn || localExtended.usn || '',
+        college_name: directFields.college_name || remoteMetadata.college_name || data.college_name || localExtended.college_name || '',
+        department: directFields.department || remoteMetadata.department || data.department || localExtended.department || '',
+        semester: directFields.semester || remoteMetadata.semester || data.semester || localExtended.semester || '',
+        graduation_year: directFields.graduation_year || remoteMetadata.graduation_year || data.graduation_year || localExtended.graduation_year || '',
+        target_role: directFields.target_role || remoteMetadata.target_role || data.target_role || localExtended.target_role || '',
+        career_goal: cleanCareerGoal || remoteMetadata.career_goal || localExtended.career_goal || '',
+        role: data.role || 'student',
+        phone: directFields.phone || remoteMetadata.phone || localExtended.phone || '',
+        degree: directFields.degree || remoteMetadata.degree || localExtended.degree || '',
+        current_year: directFields.current_year || remoteMetadata.current_year || localExtended.current_year || '',
+        cgpa: directFields.cgpa !== undefined && directFields.cgpa !== null ? directFields.cgpa : (remoteMetadata.cgpa !== undefined && remoteMetadata.cgpa !== null ? remoteMetadata.cgpa : localExtended.cgpa),
+        target_companies: (Array.isArray(directFields.target_companies) && directFields.target_companies.length > 0)
+          ? directFields.target_companies
+          : (Array.isArray(remoteMetadata.target_companies) && remoteMetadata.target_companies.length > 0)
+          ? remoteMetadata.target_companies
+          : (localExtended.target_companies || []),
+        skills: (Array.isArray(directFields.skills) && directFields.skills.length > 0)
+          ? directFields.skills
+          : (Array.isArray(remoteMetadata.skills) && remoteMetadata.skills.length > 0)
+          ? remoteMetadata.skills
+          : (localExtended.skills || []),
+        technical_skills: (Array.isArray(directFields.technical_skills) && directFields.technical_skills.length > 0)
+          ? directFields.technical_skills
+          : (Array.isArray(remoteMetadata.technical_skills) && remoteMetadata.technical_skills.length > 0)
+          ? remoteMetadata.technical_skills
+          : (localExtended.technical_skills || []),
+        tools_technologies: (Array.isArray(directFields.tools_technologies) && directFields.tools_technologies.length > 0)
+          ? directFields.tools_technologies
+          : (Array.isArray(remoteMetadata.tools_technologies) && remoteMetadata.tools_technologies.length > 0)
+          ? remoteMetadata.tools_technologies
+          : (localExtended.tools_technologies || []),
+        programming_languages: (Array.isArray(directFields.programming_languages) && directFields.programming_languages.length > 0)
+          ? directFields.programming_languages
+          : (Array.isArray(remoteMetadata.programming_languages) && remoteMetadata.programming_languages.length > 0)
+          ? remoteMetadata.programming_languages
+          : (localExtended.programming_languages || []),
+        certifications: (Array.isArray(directFields.certifications) && directFields.certifications.length > 0)
+          ? directFields.certifications
+          : (Array.isArray(remoteMetadata.certifications) && remoteMetadata.certifications.length > 0)
+          ? remoteMetadata.certifications
+          : (localExtended.certifications || []),
+        linkedin_url: directFields.linkedin_url || remoteMetadata.linkedin_url || localExtended.linkedin_url || '',
+        github_url: directFields.github_url || remoteMetadata.github_url || localExtended.github_url || '',
+        portfolio_url: directFields.portfolio_url || remoteMetadata.portfolio_url || localExtended.portfolio_url || '',
+        bio: directFields.bio || remoteMetadata.bio || localExtended.bio || '',
+        preparation_level: directFields.preparation_level || remoteMetadata.preparation_level || localExtended.preparation_level || '',
+        preferred_language: directFields.preferred_language || remoteMetadata.preferred_language || localExtended.preferred_language || '',
+        preferred_domain: directFields.preferred_domain || remoteMetadata.preferred_domain || localExtended.preferred_domain || '',
+        preferred_location: directFields.preferred_location || remoteMetadata.preferred_location || localExtended.preferred_location || '',
+        dsa_level: directFields.dsa_level || remoteMetadata.dsa_level || localExtended.dsa_level || '',
+        interview_experience: directFields.interview_experience || remoteMetadata.interview_experience || localExtended.interview_experience || '',
+        preferences: remoteMetadata.preferences || localExtended.preferences || {},
+        created_at: data.created_at || new Date().toISOString(),
+        updated_at: data.updated_at || new Date().toISOString(),
       };
+
+      // 5. Update local cache with complete authoritative merged data
+      this.saveExtendedLocalProfile(userId, mergedProfile);
+
+      console.log(`[ProfileService] Loaded authoritative profile for student ${userId}:`, {
+        fullName: mergedProfile.full_name,
+        targetRole: mergedProfile.target_role,
+        college: mergedProfile.college_name,
+        cgpa: mergedProfile.cgpa,
+      });
 
       return mergedProfile;
     } catch (err) {
@@ -294,6 +343,15 @@ export const profileService = {
    */
   buildProfileStoragePayload(userId: string, formData: Partial<Profile>) {
     const fullJson = {
+      full_name: formData.full_name || '',
+      email: formData.email || '',
+      avatar_url: formData.avatar_url || '',
+      usn: formData.usn || '',
+      college_name: formData.college_name || '',
+      department: formData.department || '',
+      semester: formData.semester || '',
+      graduation_year: formData.graduation_year || '',
+      target_role: formData.target_role || '',
       phone: formData.phone || '',
       degree: formData.degree || '',
       current_year: formData.current_year || '',
