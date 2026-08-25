@@ -4,6 +4,7 @@ import {
   PlacementAnswerRecord,
   TopicPerformance,
 } from '../types/placement';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 const STORAGE_PREFIX = 'careerpilot_placement_sessions_';
 
@@ -22,18 +23,127 @@ export function getPlacementHistory(studentId: string = 'guest'): PlacementTestS
   }
 }
 
+/**
+ * Fetch and sync placement sessions from Supabase for cross-device consistency
+ */
+export async function fetchPlacementHistory(studentId: string = 'guest'): Promise<PlacementTestSession[]> {
+  const local = getPlacementHistory(studentId);
+  if (!isSupabaseConfigured() || !studentId || studentId === 'guest') {
+    return local;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('placement_sessions')
+      .select('*')
+      .eq('user_id', studentId)
+      .order('completed_at', { ascending: false });
+
+    if (!error && Array.isArray(data)) {
+      const remoteSessions: PlacementTestSession[] = data.map((row: any) => {
+        if (row.session_data && typeof row.session_data === 'object') {
+          return row.session_data as PlacementTestSession;
+        }
+        return {
+          id: row.id,
+          studentId: row.user_id || studentId,
+          category: row.category || 'Technical',
+          subject: row.subject || row.category || 'General',
+          topic: row.topic || 'General',
+          difficulty: row.difficulty || 'Medium',
+          mode: row.mode || 'practice',
+          totalQuestions: row.total_questions || 10,
+          correctCount: row.correct_count || 0,
+          incorrectCount: row.incorrect_count || 0,
+          skippedCount: row.skipped_count || 0,
+          score: row.score || 0,
+          accuracy: row.accuracy || 0,
+          timeTakenSeconds: row.time_spent_seconds || row.time_taken_seconds || 0,
+          topicBreakdown: row.topic_breakdown || {},
+          questions: Array.isArray(row.questions) ? row.questions : [],
+          answers: row.answers && typeof row.answers === 'object' ? row.answers : {},
+          createdAt: row.created_at || new Date().toISOString(),
+          completedAt: row.completed_at || row.created_at || new Date().toISOString(),
+        } as PlacementTestSession;
+      });
+
+      const mergedMap = new Map<string, PlacementTestSession>();
+      for (const s of remoteSessions) {
+        mergedMap.set(s.id, s);
+      }
+      for (const l of local) {
+        if (!mergedMap.has(l.id)) {
+          mergedMap.set(l.id, l);
+          // Upload local session to cloud
+          (async () => {
+            try {
+              savePlacementSession(l, studentId);
+            } catch (_) {}
+          })();
+        }
+      }
+
+      const merged = Array.from(mergedMap.values());
+      merged.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+
+      localStorage.setItem(`${STORAGE_PREFIX}${studentId}`, JSON.stringify(merged));
+      return merged;
+    }
+  } catch (err) {
+    console.warn('[PlacementStorage] Error fetching remote sessions:', err);
+  }
+
+  return local;
+}
+
 export function savePlacementSession(
   session: PlacementTestSession,
   studentId: string = 'guest'
 ): void {
   try {
-    const current = getPlacementHistory(studentId);
+    const effectiveId = studentId || session.studentId || 'guest';
+    const current = getPlacementHistory(effectiveId);
     // Remove if duplicate id exists
     const filtered = current.filter((s) => s.id !== session.id);
     const updated = [session, ...filtered];
     // Keep up to 100 recent sessions
     const trimmed = updated.slice(0, 100);
-    localStorage.setItem(`${STORAGE_PREFIX}${studentId}`, JSON.stringify(trimmed));
+    localStorage.setItem(`${STORAGE_PREFIX}${effectiveId}`, JSON.stringify(trimmed));
+
+    // Asynchronous remote persistence to Supabase
+    if (isSupabaseConfigured() && effectiveId !== 'guest') {
+      (async () => {
+        try {
+          const dbPayload = {
+            id: session.id,
+            user_id: effectiveId,
+            category: session.category,
+            topic: session.topic,
+            difficulty: session.difficulty,
+            total_questions: session.totalQuestions,
+            correct_count: session.correctCount,
+            incorrect_count: session.incorrectCount,
+            skipped_count: session.skippedCount,
+            score: session.score,
+            accuracy: session.accuracy,
+            time_spent_seconds: session.timeTakenSeconds || (session as any).timeSpentSeconds || 0,
+            questions: session.questions,
+            answers: session.answers,
+            session_data: session,
+            completed_at: session.completedAt || new Date().toISOString(),
+            created_at: session.completedAt || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          await supabase.from('placement_sessions').upsert(dbPayload);
+        } catch (err) {
+          console.warn('[PlacementStorage] Remote save notice:', err);
+        }
+      })();
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('careerpilot_activity_updated', { detail: { studentId: effectiveId } }));
+    }
   } catch (err) {
     console.error('[PlacementStorage] Error saving session:', err);
   }

@@ -13,7 +13,7 @@ import {
 import { TopicInsightItem, RecentActivityItem } from '../types/preparationDashboard';
 import { resumeService } from './resumeService';
 import { codingService } from './codingService';
-import { getPlacementStats, getPlacementHistory } from './placementStorage';
+import { getPlacementStats, getPlacementHistory, fetchPlacementHistory } from './placementStorage';
 import { interviewStorage } from './interviewStorage';
 import { getStudentTargets, getActiveStudentTarget } from './companyPrepStorage';
 import { getStoredDailyTasks, getCompletedItemIds } from './roadmapStorage';
@@ -82,8 +82,8 @@ export async function getPerformanceAnalyticsSummary(
     Promise.resolve(resumeService.getUserResumes(effectiveId)),
     codingService.getSubmissions(effectiveId),
     Promise.resolve(getPlacementStats(effectiveId)),
-    Promise.resolve(getPlacementHistory(effectiveId)),
-    Promise.resolve(interviewStorage.getReports(effectiveId)),
+    fetchPlacementHistory(effectiveId),
+    interviewStorage.fetchReports(effectiveId),
     Promise.resolve(getStudentTargets(effectiveId)),
     Promise.resolve(getActiveStudentTarget(effectiveId)),
     Promise.resolve(getStoredDailyTasks(effectiveId)),

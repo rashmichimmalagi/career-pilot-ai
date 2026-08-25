@@ -222,19 +222,60 @@ export const profileService = {
         return null;
       }
 
-      // Merge Supabase base columns with any extended attributes
+      // 1. Extract metadata from profile_data if stored as JSONB
+      let remoteMetadata: Partial<Profile> = {};
+      if (data.profile_data && typeof data.profile_data === 'object') {
+        remoteMetadata = { ...data.profile_data };
+      }
+
+      // 2. Extract metadata if packed in career_goal envelope
+      let cleanCareerGoal = data.career_goal || '';
+      if (typeof data.career_goal === 'string' && data.career_goal.startsWith('__CP_DATA__')) {
+        try {
+          const raw = data.career_goal.replace(/^__CP_DATA__/, '');
+          const parsed = JSON.parse(raw);
+          remoteMetadata = { ...remoteMetadata, ...parsed };
+          cleanCareerGoal = parsed.career_goal || '';
+        } catch (_) {}
+      }
+
+      // 3. Extract direct columns
+      const directFields: Partial<Profile> = {};
+      const extendedKeys = [
+        'phone', 'degree', 'current_year', 'cgpa', 'target_companies', 'skills',
+        'technical_skills', 'tools_technologies', 'programming_languages', 'certifications',
+        'linkedin_url', 'github_url', 'portfolio_url', 'bio', 'preparation_level',
+        'preferred_language', 'preferred_domain', 'preferred_location', 'dsa_level',
+        'interview_experience', 'preferences'
+      ];
+      for (const k of extendedKeys) {
+        if (data[k] !== undefined && data[k] !== null) {
+          (directFields as any)[k] = data[k];
+        }
+      }
+
+      // 4. Merge: Supabase remote takes precedence for cross-device consistency, combined with local
+      const mergedExtended: Partial<Profile> = {
+        ...localExtended,
+        ...remoteMetadata,
+        ...directFields,
+      };
+
+      // 5. Update local cache with complete merged data
+      this.saveExtendedLocalProfile(userId, mergedExtended);
+
       const mergedProfile: Profile = {
         ...(data as Profile),
-        ...localExtended,
+        ...mergedExtended,
         id: userId,
-        full_name: data.full_name || localExtended.full_name || '',
+        full_name: data.full_name || localExtended.full_name || 'Student',
         email: data.email || localExtended.email || '',
         usn: data.usn || localExtended.usn || '',
         college_name: data.college_name || localExtended.college_name || '',
         department: data.department || localExtended.department || '',
         semester: data.semester || localExtended.semester || '',
         graduation_year: data.graduation_year || localExtended.graduation_year || '',
-        career_goal: data.career_goal || localExtended.career_goal || '',
+        career_goal: cleanCareerGoal || localExtended.career_goal || '',
         target_role: data.target_role || localExtended.target_role || '',
       };
 
@@ -246,6 +287,94 @@ export const profileService = {
       }
       return null;
     }
+  },
+
+  /**
+   * Helper to build safe storage envelope for Supabase
+   */
+  buildProfileStoragePayload(userId: string, formData: Partial<Profile>) {
+    const fullJson = {
+      phone: formData.phone || '',
+      degree: formData.degree || '',
+      current_year: formData.current_year || '',
+      cgpa: formData.cgpa || '',
+      target_companies: formData.target_companies || [],
+      skills: formData.skills || [],
+      technical_skills: formData.technical_skills || [],
+      tools_technologies: formData.tools_technologies || [],
+      programming_languages: formData.programming_languages || [],
+      certifications: formData.certifications || [],
+      linkedin_url: formData.linkedin_url || '',
+      github_url: formData.github_url || '',
+      portfolio_url: formData.portfolio_url || '',
+      bio: formData.bio || '',
+      preparation_level: formData.preparation_level || '',
+      preferred_language: formData.preferred_language || '',
+      preferred_domain: formData.preferred_domain || '',
+      preferred_location: formData.preferred_location || '',
+      dsa_level: formData.dsa_level || '',
+      interview_experience: formData.interview_experience || '',
+      preferences: formData.preferences || {},
+      career_goal: formData.career_goal || '',
+    };
+
+    const careerGoalEnvelope = `__CP_DATA__${JSON.stringify(fullJson)}`;
+
+    return {
+      baseRecord: {
+        id: userId,
+        full_name: formData.full_name,
+        email: formData.email,
+        avatar_url: formData.avatar_url || '',
+        usn: formData.usn,
+        college_name: formData.college_name,
+        department: formData.department,
+        semester: formData.semester,
+        graduation_year: formData.graduation_year,
+        career_goal: careerGoalEnvelope,
+        target_role: formData.target_role || '',
+        role: 'student',
+        updated_at: new Date().toISOString(),
+      },
+      fullRecord: {
+        id: userId,
+        full_name: formData.full_name,
+        email: formData.email,
+        avatar_url: formData.avatar_url || '',
+        usn: formData.usn,
+        college_name: formData.college_name,
+        department: formData.department,
+        semester: formData.semester,
+        graduation_year: formData.graduation_year,
+        career_goal: careerGoalEnvelope,
+        target_role: formData.target_role || '',
+        phone: formData.phone || null,
+        degree: formData.degree || null,
+        current_year: formData.current_year || null,
+        cgpa: formData.cgpa ? Number(formData.cgpa) : null,
+        target_companies: formData.target_companies || [],
+        skills: formData.skills || [],
+        technical_skills: formData.technical_skills || [],
+        tools_technologies: formData.tools_technologies || [],
+        programming_languages: formData.programming_languages || [],
+        certifications: formData.certifications || [],
+        linkedin_url: formData.linkedin_url || null,
+        github_url: formData.github_url || null,
+        portfolio_url: formData.portfolio_url || null,
+        bio: formData.bio || null,
+        preparation_level: formData.preparation_level || null,
+        preferred_language: formData.preferred_language || null,
+        preferred_domain: formData.preferred_domain || null,
+        preferred_location: formData.preferred_location || null,
+        dsa_level: formData.dsa_level || null,
+        interview_experience: formData.interview_experience || null,
+        preferences: formData.preferences || {},
+        profile_data: fullJson,
+        role: 'student',
+        updated_at: new Date().toISOString(),
+      },
+      fullJson,
+    };
   },
 
   /**
@@ -266,47 +395,26 @@ export const profileService = {
       return { profile: mockProfile, error: null };
     }
 
-    const baseProfileRecord = {
-      id: userId,
-      full_name: formData.full_name,
-      email: formData.email,
-      avatar_url: formData.avatar_url || '',
-      usn: formData.usn,
-      college_name: formData.college_name,
-      department: formData.department,
-      semester: formData.semester,
-      graduation_year: formData.graduation_year,
-      career_goal: formData.career_goal || '',
-      target_role: formData.target_role || '',
-      role: 'student',
-      updated_at: new Date().toISOString(),
-    };
+    const { baseRecord, fullRecord } = this.buildProfileStoragePayload(userId, formData);
 
     try {
-      // First attempt inserting all fields (if columns exist)
-      let insertPayload: Record<string, any> = { ...baseProfileRecord };
-      if (formData.phone) insertPayload.phone = formData.phone;
-      if (formData.degree) insertPayload.degree = formData.degree;
-      if (formData.current_year) insertPayload.current_year = formData.current_year;
-      if (formData.cgpa) insertPayload.cgpa = formData.cgpa;
-
+      // First attempt inserting full record with all columns
       const { data, error } = await supabase
         .from('profiles')
-        .insert([insertPayload])
+        .upsert([fullRecord])
         .select()
         .single();
 
       if (error) {
-        // Fallback to strict base columns in case schema doesn't have extended columns yet
+        // Fallback to base columns with envelope in career_goal
         const { data: baseData, error: baseErr } = await supabase
           .from('profiles')
-          .insert([baseProfileRecord])
+          .upsert([baseRecord])
           .select()
           .single();
 
         if (baseErr) {
-          console.error('[ProfileService] Error creating base profile in database:', baseErr);
-          // Return local profile so user is not blocked
+          console.error('[ProfileService] Error creating profile in database:', baseErr);
           const fallbackProfile: Profile = { id: userId, ...formData, role: 'student' };
           this.notifyProfileUpdated(fallbackProfile, userId);
           return { profile: fallbackProfile, error: null };
@@ -354,60 +462,22 @@ export const profileService = {
       return { profile: updatedMock, error: null };
     }
 
-    this.saveExtendedLocalProfile(userId, updates);
-
-    const baseKeys: (keyof Profile)[] = [
-      'full_name',
-      'email',
-      'avatar_url',
-      'usn',
-      'college_name',
-      'department',
-      'semester',
-      'graduation_year',
-      'career_goal',
-      'target_role',
-    ];
-
-    const sanitizedBaseUpdates: Record<string, any> = {};
-    for (const key of baseKeys) {
-      if (key in updates && updates[key] !== undefined) {
-        sanitizedBaseUpdates[key] = updates[key];
-      }
-    }
-    sanitizedBaseUpdates.updated_at = new Date().toISOString();
+    const currentExtended = { ...this.getExtendedLocalProfile(userId), ...updates };
+    const { baseRecord, fullRecord } = this.buildProfileStoragePayload(userId, currentExtended);
 
     try {
-      // Try full updates first
-      const fullUpdates: Record<string, any> = { ...sanitizedBaseUpdates };
-      if ('phone' in updates) fullUpdates.phone = updates.phone;
-      if ('degree' in updates) fullUpdates.degree = updates.degree;
-      if ('current_year' in updates) fullUpdates.current_year = updates.current_year;
-      if ('cgpa' in updates) fullUpdates.cgpa = updates.cgpa;
-      if ('preferred_domain' in updates) fullUpdates.preferred_domain = updates.preferred_domain;
-      if ('preferred_location' in updates) fullUpdates.preferred_location = updates.preferred_location;
-      if ('target_companies' in updates) fullUpdates.target_companies = updates.target_companies;
-      if ('technical_skills' in updates) fullUpdates.technical_skills = updates.technical_skills;
-      if ('programming_languages' in updates) fullUpdates.programming_languages = updates.programming_languages;
-      if ('tools_technologies' in updates) fullUpdates.tools_technologies = updates.tools_technologies;
-      if ('preparation_level' in updates) fullUpdates.preparation_level = updates.preparation_level;
-      if ('preferred_language' in updates) fullUpdates.preferred_language = updates.preferred_language;
-      if ('dsa_level' in updates) fullUpdates.dsa_level = updates.dsa_level;
-      if ('interview_experience' in updates) fullUpdates.interview_experience = updates.interview_experience;
-
+      // Try full upsert first
       const { data, error } = await supabase
         .from('profiles')
-        .update(fullUpdates)
-        .eq('id', userId)
+        .upsert(fullRecord)
         .select()
         .single();
 
       if (error) {
-        // Fallback to strict base columns
+        // Fallback to base columns upsert
         const { data: baseData, error: baseErr } = await supabase
           .from('profiles')
-          .update(sanitizedBaseUpdates)
-          .eq('id', userId)
+          .upsert(baseRecord)
           .select()
           .single();
 
@@ -422,8 +492,7 @@ export const profileService = {
             department: '',
             semester: '',
             graduation_year: '',
-            ...this.getExtendedLocalProfile(userId),
-            ...updates,
+            ...currentExtended,
           };
           this.notifyProfileUpdated(localMerged, userId);
           return { profile: localMerged, error: null };
@@ -431,8 +500,7 @@ export const profileService = {
 
         const merged: Profile = {
           ...(baseData as Profile),
-          ...this.getExtendedLocalProfile(userId),
-          ...updates,
+          ...currentExtended,
         };
         this.notifyProfileUpdated(merged, userId);
         return { profile: merged, error: null };
@@ -440,8 +508,7 @@ export const profileService = {
 
       const merged: Profile = {
         ...(data as Profile),
-        ...this.getExtendedLocalProfile(userId),
-        ...updates,
+        ...currentExtended,
       };
       this.notifyProfileUpdated(merged, userId);
       return { profile: merged, error: null };
@@ -456,8 +523,7 @@ export const profileService = {
         department: '',
         semester: '',
         graduation_year: '',
-        ...this.getExtendedLocalProfile(userId),
-        ...updates,
+        ...currentExtended,
       };
       this.notifyProfileUpdated(fallback, userId);
       return { profile: fallback, error: null };

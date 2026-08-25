@@ -539,11 +539,95 @@ export function getImmediateDeterministicPlan(
     weakAreas: [],
     strongAreas: [],
     recentActivitySummary: [],
+    roadmapProgress: {
+      isInitialized: false,
+      totalTasks: 0,
+      completedTasks: 0,
+    },
+    hasMeasuredData: {
+      hasOsRecord: false,
+      osScore: null,
+      hasArrayRecord: false,
+      arrayScore: null,
+    },
     profileCompletionPct: 50,
     totalActivitiesCount: 0,
   };
 
   return buildLocalDeterministicPlan(context, effectiveId, todayStr);
+}
+
+/**
+ * Update daily time budget instantly without requiring an external AI call
+ */
+export function updatePlanTimeBudget(
+  studentId: string = 'guest',
+  newMinutes: number,
+  profile?: any
+): StudyPlanData {
+  const effectiveId = studentId || 'guest';
+  const todayStr = new Date().toISOString().split('T')[0];
+  const storageKey = getPlanStorageKey(effectiveId, todayStr);
+
+  setDailyStudyTime(effectiveId, newMinutes);
+
+  let plan = getStoredStudyPlan(effectiveId);
+  if (!plan) {
+    plan = getImmediateDeterministicPlan(effectiveId, profile, newMinutes);
+  }
+
+  plan.dailyStudyTimeMinutes = newMinutes;
+
+  // Proportionally balance tasks to match new budget
+  const tasksCount = plan.tasks.length;
+  if (tasksCount > 0) {
+    if (newMinutes <= 30) {
+      // 30 min budget: Focus on top 2 tasks
+      plan.tasks = plan.tasks.map((task, idx) => {
+        if (idx === 0) return { ...task, estimatedMinutes: 20, isPriority: true };
+        if (idx === 1) return { ...task, estimatedMinutes: 10 };
+        return { ...task, estimatedMinutes: 10 };
+      });
+    } else if (newMinutes <= 60) {
+      // 60 min budget: 25m, 20m, 15m distribution
+      plan.tasks = plan.tasks.map((task, idx) => {
+        if (idx === 0) return { ...task, estimatedMinutes: 25, isPriority: true };
+        if (idx === 1) return { ...task, estimatedMinutes: 20 };
+        if (idx === 2) return { ...task, estimatedMinutes: 15 };
+        return { ...task, estimatedMinutes: 15 };
+      });
+    } else if (newMinutes <= 90) {
+      // 90 min budget: 35m, 30m, 25m distribution
+      plan.tasks = plan.tasks.map((task, idx) => {
+        if (idx === 0) return { ...task, estimatedMinutes: 35, isPriority: true };
+        if (idx === 1) return { ...task, estimatedMinutes: 30 };
+        if (idx === 2) return { ...task, estimatedMinutes: 25 };
+        return { ...task, estimatedMinutes: 20 };
+      });
+    } else if (newMinutes <= 120) {
+      // 120 min budget: 45m, 40m, 35m distribution
+      plan.tasks = plan.tasks.map((task, idx) => {
+        if (idx === 0) return { ...task, estimatedMinutes: 45, isPriority: true };
+        if (idx === 1) return { ...task, estimatedMinutes: 40 };
+        if (idx === 2) return { ...task, estimatedMinutes: 35 };
+        return { ...task, estimatedMinutes: 25 };
+      });
+    } else {
+      // 180+ min budget
+      plan.tasks = plan.tasks.map((task, idx) => {
+        if (idx === 0) return { ...task, estimatedMinutes: 60, isPriority: true };
+        if (idx === 1) return { ...task, estimatedMinutes: 50 };
+        if (idx === 2) return { ...task, estimatedMinutes: 40 };
+        return { ...task, estimatedMinutes: 30 };
+      });
+    }
+  }
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(plan));
+  } catch (_) {}
+
+  return plan;
 }
 
 // In-flight request deduplication map to prevent duplicate network calls

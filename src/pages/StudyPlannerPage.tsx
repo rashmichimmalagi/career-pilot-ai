@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   StudyPlanData,
@@ -8,8 +8,10 @@ import {
 import { PreparationDashboardData } from '../types/preparationDashboard';
 import {
   getTodayStudyPlan,
+  getStoredStudyPlan,
+  getImmediateDeterministicPlan,
+  updatePlanTimeBudget,
   updateTaskStatus,
-  setDailyStudyTime,
   getDailyStudyTime,
 } from '../services/studyPlannerService';
 import {
@@ -48,72 +50,109 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
   const { user, profile } = useAuth();
   const studentId = user?.id || 'guest';
 
-  const [plan, setPlan] = useState<StudyPlanData | null>(() => {
-    try {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const stored = localStorage.getItem(`careerpilot_study_plan_${studentId}_${todayStr}`);
-      if (stored) return JSON.parse(stored);
-    } catch (_) {}
-    return null;
-  });
-  const [loading, setLoading] = useState<boolean>(() => !plan);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [dashboardData, setDashboardData] = useState<PreparationDashboardData | null>(null);
+  // 1. Initial State: Load existing saved plan immediately without waiting for Gemini
   const [selectedTimeBudget, setSelectedTimeBudget] = useState<number>(() => getDailyStudyTime(studentId));
+  const [plan, setPlan] = useState<StudyPlanData>(() => {
+    return (
+      getStoredStudyPlan(studentId) ||
+      getImmediateDeterministicPlan(studentId, profile, getDailyStudyTime(studentId))
+    );
+  });
+
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [dashboardData, setDashboardData] = useState<PreparationDashboardData | null>(null);
   const [activeTab, setActiveTab] = useState<'today' | 'weekly'>('today');
 
-  const loadPlan = useCallback(
-    async (forceRefresh: boolean = false) => {
-      try {
-        if (forceRefresh || plan) {
-          setRefreshing(true);
-        } else {
-          setLoading(true);
-        }
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-        const { plan: newPlan, dashboardData: dashData } = await getTodayStudyPlan(
+  // Background non-blocking sync of authentic dashboard metrics on mount
+  useEffect(() => {
+    let isCancelled = false;
+
+    const syncInitialData = async () => {
+      try {
+        const { plan: syncedPlan, dashboardData: dashData } = await getTodayStudyPlan(
           studentId,
           profile,
-          forceRefresh
+          false // DO NOT force AI generation on page load
         );
+        if (!isCancelled) {
+          setPlan(syncedPlan);
+          setDashboardData(dashData);
+          if (syncedPlan.dailyStudyTimeMinutes) {
+            setSelectedTimeBudget(syncedPlan.dailyStudyTimeMinutes);
+          }
+        }
+      } catch (err) {
+        console.warn('[StudyPlannerPage] Background data sync:', err);
+      }
+    };
 
+    syncInitialData();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [studentId]);
+
+  // Clean up abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  // Explicit AI refresh initiated by student
+  const handleRefreshPlan = useCallback(async () => {
+    if (refreshing) return; // Deduplicate concurrent clicks
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setRefreshing(true);
+    setRefreshError(null);
+
+    try {
+      const { plan: newPlan, dashboardData: dashData } = await getTodayStudyPlan(
+        studentId,
+        profile,
+        true, // forceRefresh
+        { signal: controller.signal, timeoutMs: 7000 }
+      );
+
+      if (!controller.signal.aborted) {
         setPlan(newPlan);
         setDashboardData(dashData);
         if (newPlan.dailyStudyTimeMinutes) {
           setSelectedTimeBudget(newPlan.dailyStudyTimeMinutes);
         }
-      } catch (err) {
-        console.error('Failed to load study plan:', err);
-      } finally {
-        setLoading(false);
+        setRefreshError(null);
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        return;
+      }
+      console.error('[StudyPlannerPage] Refresh plan error:', err);
+      setRefreshError('Unable to refresh recommendations right now. Your current plan remains active.');
+    } finally {
+      if (!controller.signal.aborted) {
         setRefreshing(false);
       }
-    },
-    [studentId, profile, plan]
-  );
+    }
+  }, [studentId, profile, refreshing]);
 
-  useEffect(() => {
-    loadPlan(false);
-  }, [loadPlan]);
-
-  // Handle time budget changes
-  const handleTimeBudgetChange = async (minutes: number) => {
+  // Handle time budget change instantly without an external AI call
+  const handleTimeBudgetChange = (minutes: number) => {
     setSelectedTimeBudget(minutes);
-    setDailyStudyTime(studentId, minutes);
-    // Refresh plan with the new time budget
-    setRefreshing(true);
-    try {
-      const { plan: newPlan, dashboardData: dashData } = await getTodayStudyPlan(
-        studentId,
-        profile,
-        true
-      );
-      setPlan(newPlan);
-      setDashboardData(dashData);
-    } catch (err) {
-      console.error('Failed to update time budget plan:', err);
-    } finally {
-      setRefreshing(false);
+    const updatedPlan = updatePlanTimeBudget(studentId, minutes, profile);
+    if (updatedPlan) {
+      setPlan({ ...updatedPlan });
     }
   };
 
@@ -255,15 +294,6 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
     return 'CareerPilot Practice';
   };
 
-  // Listen to window focus or storage updates to refresh without full reload
-  useEffect(() => {
-    const handleFocus = () => {
-      loadPlan(false);
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [loadPlan]);
-
   // Calculate today's completion stats
   const totalTasks = plan?.tasks.length || 0;
   const completedTasks = plan?.tasks.filter((t) => t.status === 'completed').length || 0;
@@ -296,22 +326,6 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
   const dsaProficiency = profile?.dsa_level?.trim() || 'Not set';
 
   const isBrandNewStudent = (plan?.totalActivitiesCount || 0) === 0 && (!dashboardData || dashboardData.totalActivitiesCount === 0);
-
-  if (loading) {
-    return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center gap-4 py-16 px-4">
-        <div className="relative flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-500/10 dark:bg-indigo-500/20 border border-indigo-500/30">
-          <RotateCw className="w-6 h-6 text-indigo-600 dark:text-indigo-400 animate-spin" />
-        </div>
-        <div className="text-center">
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">Curating Your AI Study Plan</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
-            Analyzing your performance data, weak areas, and target role benchmarks...
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
@@ -377,10 +391,10 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
                 Daily Time Budget
               </span>
               <button
-                onClick={() => loadPlan(true)}
+                onClick={handleRefreshPlan}
                 disabled={refreshing}
                 title="Fetch latest performance data and regenerate plan"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/70 transition-colors disabled:opacity-50 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/70 transition-colors disabled:opacity-75 cursor-pointer"
               >
                 <RotateCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
                 <span>{refreshing ? 'Updating your plan...' : 'Refresh Plan'}</span>
@@ -399,7 +413,6 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
                 <button
                   key={opt.val}
                   onClick={() => handleTimeBudgetChange(opt.val)}
-                  disabled={refreshing}
                   className={`py-1 rounded-lg text-xs font-bold transition-all text-center cursor-pointer ${
                     selectedTimeBudget === opt.val
                       ? 'bg-indigo-600 text-white shadow-xs'
@@ -417,6 +430,32 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
           </div>
         </div>
       </div>
+
+      {/* ========================================================
+          ERROR / TIMEOUT NOTIFICATION BANNER (NON-BLOCKING)
+      ======================================================== */}
+      {refreshError && (
+        <div className="bg-amber-500/10 border border-amber-500/30 dark:bg-amber-950/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-200">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>{refreshError}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleRefreshPlan}
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold transition-colors cursor-pointer"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => setRefreshError(null)}
+              className="px-2.5 py-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-semibold cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================
           2. METRICS & PROGRESS HIGHLIGHTS GRID
@@ -659,10 +698,18 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
               <div className="p-2.5 rounded-xl bg-indigo-600 text-white shrink-0 shadow-xs">
                 <Sparkles className="w-4 h-4" />
               </div>
-              <div className="space-y-1">
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Welcome to Your AI Placement Copilot
-                </h4>
+              <div className="space-y-1 w-full">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Welcome to Your AI Placement Copilot
+                  </h4>
+                  {refreshing && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 animate-pulse">
+                      <RotateCw className="w-3 h-3 animate-spin" />
+                      Updating recommendations...
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs sm:text-sm text-indigo-700 dark:text-indigo-300 font-semibold leading-relaxed">
                   Your personalized plan will become more accurate as you practice.
                 </p>
@@ -676,10 +723,18 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
               <div className="p-2 rounded-xl bg-indigo-500 text-white shrink-0 shadow-xs">
                 <Sparkles className="w-4 h-4" />
               </div>
-              <div className="space-y-1">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
-                  AI Strategic Plan Summary
-                </h4>
+              <div className="space-y-1 w-full">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                    AI Strategic Plan Summary
+                  </h4>
+                  {refreshing && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 animate-pulse">
+                      <RotateCw className="w-3 h-3 animate-spin" />
+                      Updating recommendations...
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
                   {plan.aiSummary}
                 </p>

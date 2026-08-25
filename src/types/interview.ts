@@ -143,16 +143,18 @@ export interface MockInterviewReport {
   problem_solving_score?: number;
   communicationScore: number; // 0 - 100
   communication_score?: number;
-  verdict?: 'Excellent' | 'Strong Pass' | 'Pass with Recommendations' | 'Needs Practice';
+  verdict?: 'Excellent' | 'Strong Pass' | 'Pass with Recommendations' | 'Needs Practice' | 'PASS' | 'NEEDS_WORK' | string;
   strengths: string[];
   areasForImprovement: string[];
   areas_to_improve?: string[];
   aiRecommendations: string[];
+  ai_recommendations?: string[];
   recommendation?: string;
   scoreCalculationDetails?: ScoreCalculationDetails;
   questions: InterviewQuestion[];
-  answers: Record<number, string>;
+  answers: Record<number, string> | any[];
   questionEvaluations: QuestionEvaluationResult[];
+  question_evaluations?: QuestionEvaluationResult[] | any[];
   completedAt: string;
   completed_at?: string;
   formattedDate: string;

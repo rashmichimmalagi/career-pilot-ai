@@ -1358,7 +1358,7 @@ export const codingService = {
 
     // 1. Instant local persistence for zero-latency UI response
     try {
-      const stored = JSON.parse(localStorage.getItem(key) || '[]');
+      const stored: CodingSubmission[] = JSON.parse(localStorage.getItem(key) || '[]');
       const updated = [formattedSubmission, ...stored.filter((s: any) => s.id !== formattedSubmission.id)];
       localStorage.setItem(key, JSON.stringify(updated));
     } catch (_) {}
@@ -1371,21 +1371,38 @@ export const codingService = {
     // 2. Parallel remote persistence (Supabase + Backend API concurrently)
     const remoteTasks: Promise<any>[] = [];
 
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && uId && uId !== 'guest') {
       remoteTasks.push(
         (async () => {
           try {
-            const { data, error } = await supabase
-              .from('coding_submissions')
-              .insert([formattedSubmission])
-              .select()
-              .single();
+            const dbPayload = {
+              id: formattedSubmission.id,
+              user_id: uId,
+              problem_id: String(formattedSubmission.problem_id || formattedSubmission.id),
+              problem_title: String(formattedSubmission.problem_title || 'Coding Problem'),
+              difficulty: String(formattedSubmission.difficulty || 'Medium'),
+              language: String(formattedSubmission.language || 'Python'),
+              code: String(formattedSubmission.submitted_code || formattedSubmission.code || ''),
+              status: String(formattedSubmission.status || 'accepted'),
+              score: typeof formattedSubmission.score === 'number' ? formattedSubmission.score : (formattedSubmission.status === 'accepted' ? 100 : 0),
+              pass_rate: typeof formattedSubmission.pass_rate === 'number' ? formattedSubmission.pass_rate : 100,
+              time_complexity: formattedSubmission.ai_feedback?.timeComplexity || (formattedSubmission.ai_feedback as any)?.complexity?.currentTime || formattedSubmission.time_complexity || null,
+              space_complexity: formattedSubmission.ai_feedback?.spaceComplexity || (formattedSubmission.ai_feedback as any)?.complexity?.currentSpace || formattedSubmission.space_complexity || null,
+              execution_time_ms: Number(formattedSubmission.runtime_ms || formattedSubmission.execution_time || 0),
+              memory_used_kb: Number(formattedSubmission.memory_kb || formattedSubmission.memory_used || 0),
+              created_at: formattedSubmission.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
 
-            if (!error && data) {
-              formattedSubmission.id = data.id || formattedSubmission.id;
+            const { error } = await supabase
+              .from('coding_submissions')
+              .upsert(dbPayload);
+
+            if (error) {
+              console.warn('[CodingService] Supabase submission upsert notice:', error.message);
             }
           } catch (err) {
-            console.warn('Error saving submission to Supabase:', err);
+            console.warn('[CodingService] Error saving submission to Supabase:', err);
           }
         })()
       );
@@ -1402,6 +1419,11 @@ export const codingService = {
 
     // Run remote saves in parallel without throwing
     Promise.allSettled(remoteTasks).catch(() => {});
+
+    // Notify activity updated
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('careerpilot_activity_updated', { detail: { studentId: uId } }));
+    }
 
     return formattedSubmission;
   },
@@ -1420,13 +1442,13 @@ export const codingService = {
     // 2. Parallel remote saves
     const tasks: Promise<any>[] = [];
 
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && userId && userId !== 'guest') {
       tasks.push(
         (async () => {
           try {
             const { data, error } = await supabase
               .from('coding_problems')
-              .insert([{ ...problem, user_id: userId }])
+              .upsert([{ ...problem, user_id: userId }])
               .select()
               .single();
 
@@ -1542,16 +1564,19 @@ export const codingService = {
 
     const requestPromise = (async () => {
       const resultsMap = new Map<string, CodingSubmission>();
+      const localKey = `careerpilot_subs_${effectiveUserId}`;
+      const localList: CodingSubmission[] = [];
 
-      // 3. Immediately load from localStorage for speed
+      // 3. Immediately load from localStorage for instant display
       try {
-        const key = `careerpilot_subs_${effectiveUserId}`;
-        const stored: CodingSubmission[] = JSON.parse(localStorage.getItem(key) || '[]');
+        const stored: CodingSubmission[] = JSON.parse(localStorage.getItem(localKey) || '[]');
         if (Array.isArray(stored)) {
           for (const s of stored) {
-            if (s && s.id) {
+            if (s && (s.id || s.problem_id)) {
+              const itemKey = s.id || `loc_${s.problem_id}_${s.created_at}`;
+              localList.push(s);
               if (!problemId || s.problem_id === problemId) {
-                resultsMap.set(s.id, s);
+                resultsMap.set(itemKey, s);
               }
             }
           }
@@ -1560,9 +1585,10 @@ export const codingService = {
 
       // 4. Run remote queries (Supabase & Backend API) in PARALLEL
       const remoteQueries: Promise<any>[] = [];
+      const supabaseFetchedIds = new Set<string>();
 
       // Supabase Query
-      if (isSupabaseConfigured()) {
+      if (isSupabaseConfigured() && effectiveUserId !== 'guest') {
         remoteQueries.push(
           (async () => {
             try {
@@ -1578,12 +1604,32 @@ export const codingService = {
 
               const { data, error } = await query;
               if (!error && Array.isArray(data)) {
-                for (const s of data) {
-                  resultsMap.set(s.id, s as CodingSubmission);
+                for (const raw of data) {
+                  const mapped: CodingSubmission = {
+                    id: raw.id,
+                    user_id: raw.user_id,
+                    problem_id: raw.problem_id,
+                    problem_title: raw.problem_title || 'Coding Problem',
+                    difficulty: raw.difficulty || 'Medium',
+                    language: raw.language || 'Python',
+                    code: raw.code || raw.submitted_code || '',
+                    status: raw.status || 'accepted',
+                    score: typeof raw.score === 'number' ? raw.score : 100,
+                    pass_rate: typeof raw.pass_rate === 'number' ? raw.pass_rate : 100,
+                    time_complexity: raw.time_complexity || undefined,
+                    space_complexity: raw.space_complexity || undefined,
+                    runtime_ms: raw.execution_time_ms || raw.runtime_ms || 0,
+                    memory_kb: raw.memory_used_kb || raw.memory_kb || 0,
+                    subject: raw.subject || undefined,
+                    topic: raw.topic || undefined,
+                    created_at: raw.created_at,
+                  };
+                  resultsMap.set(mapped.id, mapped);
+                  supabaseFetchedIds.add(mapped.id);
                 }
               }
             } catch (err) {
-              console.warn('Error fetching submissions from Supabase:', err);
+              console.warn('[CodingService] Error fetching submissions from Supabase:', err);
             }
           })()
         );
@@ -1621,12 +1667,49 @@ export const codingService = {
         return timeB - timeA;
       });
 
-      // Update cache
+      // Update local storage cache with complete merged data
+      try {
+        if (effectiveUserId !== 'guest') {
+          localStorage.setItem(localKey, JSON.stringify(allSubmissions));
+        }
+      } catch (_) {}
+
+      // Update in-memory cache
       cachedSubmissions = {
         key: reqKey,
         data: allSubmissions,
         timestamp: Date.now(),
       };
+
+      // Background: Sync any local submissions to Supabase that were missing in Supabase
+      if (isSupabaseConfigured() && effectiveUserId !== 'guest' && localList.length > 0) {
+        const missingInSupabase = localList.filter((s) => s && s.id && !supabaseFetchedIds.has(s.id));
+        if (missingInSupabase.length > 0) {
+          (async () => {
+            try {
+              const rows = missingInSupabase.map((s) => ({
+                id: s.id,
+                user_id: effectiveUserId,
+                problem_id: String(s.problem_id || s.id),
+                problem_title: String(s.problem_title || 'Coding Problem'),
+                difficulty: String(s.difficulty || 'Medium'),
+                language: String(s.language || 'Python'),
+                code: String(s.submitted_code || s.code || ''),
+                status: String(s.status || 'accepted'),
+                score: typeof s.score === 'number' ? s.score : (s.status === 'accepted' ? 100 : 0),
+                pass_rate: typeof s.pass_rate === 'number' ? s.pass_rate : 100,
+                time_complexity: s.ai_feedback?.timeComplexity || (s.ai_feedback as any)?.complexity?.currentTime || s.time_complexity || null,
+                space_complexity: s.ai_feedback?.spaceComplexity || (s.ai_feedback as any)?.complexity?.currentSpace || s.space_complexity || null,
+                execution_time_ms: Number(s.runtime_ms || s.execution_time || 0),
+                memory_used_kb: Number(s.memory_kb || s.memory_used || 0),
+                created_at: s.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }));
+              await supabase.from('coding_submissions').upsert(rows);
+            } catch (_) {}
+          })();
+        }
+      }
 
       return allSubmissions;
     })();

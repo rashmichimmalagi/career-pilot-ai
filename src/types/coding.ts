@@ -107,6 +107,7 @@ export interface AIEvaluationFeedback {
   optimalApproach: string;
   suggestions: string[];
   summary: string;
+  complexity?: string;
   bestPractices?: string[];
 }
 
@@ -142,6 +143,7 @@ export interface CodingSubmission {
   status_text?: string;
   result?: string;
   score?: number;
+  pass_rate?: number;
   test_cases_passed?: number;
   test_cases_failed?: number;
   total_test_cases?: number;
@@ -149,6 +151,8 @@ export interface CodingSubmission {
   execution_time?: number;
   memory_kb?: number;
   memory_used?: number;
+  time_complexity?: string;
+  space_complexity?: string;
   ai_feedback?: AIEvaluationFeedback;
   problem_data?: CodingProblem;
   created_at?: string;

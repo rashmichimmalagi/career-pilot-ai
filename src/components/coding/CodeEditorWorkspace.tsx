@@ -360,11 +360,11 @@ export const CodeEditorWorkspace: React.FC<CodeEditorWorkspaceProps> = React.mem
     formatOnPaste: false,
     formatOnType: true,
     scrollbar: {
-      vertical: 'auto' as const,
+      vertical: 'visible' as const,
       horizontal: 'auto' as const,
-      verticalScrollbarSize: 12,
+      verticalScrollbarSize: 14,
       horizontalScrollbarSize: 10,
-      verticalSliderSize: 12,
+      verticalSliderSize: 14,
       horizontalSliderSize: 10,
       verticalHasArrows: false,
       horizontalHasArrows: false,
@@ -375,9 +375,9 @@ export const CodeEditorWorkspace: React.FC<CodeEditorWorkspaceProps> = React.mem
     },
     mouseWheelScrollSensitivity: 1,
     fixedOverflowWidgets: true,
-    overviewRulerLanes: 0,
-    hideCursorInOverviewRuler: true,
-    overviewRulerBorder: false,
+    overviewRulerLanes: 2,
+    hideCursorInOverviewRuler: false,
+    overviewRulerBorder: true,
   }), [fontSizeNumber]);
 
   const handleCopyCode = () => {

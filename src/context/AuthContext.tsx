@@ -14,6 +14,9 @@ import {
   signOutUser
 } from '../lib/supabase';
 import { profileService } from '../services/profileService';
+import { interviewStorage } from '../services/interviewStorage';
+import { codingService } from '../services/codingService';
+import { fetchPlacementHistory } from '../services/placementStorage';
 import { Profile } from '../types/database';
 import { Toast, ToastData } from '../components/common/Toast';
 
@@ -100,6 +103,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const fetchProfileForUser = useCallback(async (userId: string) => {
     setProfileLoading(true);
     try {
+      // Trigger background synchronization of coding submissions, interview reports, and placement tests
+      if (userId && userId !== 'guest') {
+        Promise.allSettled([
+          interviewStorage.fetchReports(userId),
+          codingService.getSubmissions(userId, undefined, true),
+          fetchPlacementHistory(userId),
+        ]).then(() => {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('careerpilot_activity_updated', { detail: { studentId: userId } }));
+          }
+        }).catch(() => {});
+      }
+
       const userProfile = await profileService.getProfile(userId);
       setProfile(userProfile);
       return userProfile;
