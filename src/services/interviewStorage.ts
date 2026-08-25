@@ -82,45 +82,49 @@ export const interviewStorage = {
       if (isSupabaseConfigured() && effectiveStudentId && effectiveStudentId !== 'guest') {
         (async () => {
           try {
+            const rawType = (normalized.subject || 'technical').toLowerCase();
+            const normalizedType = rawType.includes('hr') || rawType.includes('behavioral') ? 'hr' : 'technical';
+            const overallScore = normalized.overall_score || 0;
+            const techScore = normalized.technical_score || 0;
+            const commScore = normalized.communication_score || 0;
+            const probScore = normalized.problem_solving_score || 0;
+
             const dbPayload = {
               id: normalized.id,
               user_id: effectiveStudentId,
-              student_id: effectiveStudentId,
-              target_role: normalized.subject || 'Software Engineer',
-              subject: normalized.subject,
-              topic: normalized.topic,
-              custom_topic: normalized.custom_topic,
-              language: normalized.language,
-              interview_type: normalized.subject?.toLowerCase().includes('hr') ? 'HR' : 'Technical',
-              difficulty: normalized.difficulty || 'Medium',
-              started_at: normalized.completed_at || new Date().toISOString(),
-              completed_at: normalized.completed_at || new Date().toISOString(),
-              duration_seconds: 600,
-              overall_score: normalized.overall_score || 0,
-              technical_accuracy_score: normalized.technical_score || 0,
-              technical_score: normalized.technical_score || 0,
-              communication_score: normalized.communication_score || 0,
-              problem_solving_score: normalized.problem_solving_score || 0,
+              interview_type: normalizedType,
+              topic: normalized.topic || 'General',
+              subject: normalized.subject || 'Technical Interview',
+              overall_score: overallScore,
+              technical_score: techScore,
+              technical_accuracy_score: techScore,
+              communication_score: commScore,
+              problem_solving_score: probScore,
               confidence_score: 80,
-              verdict: normalized.verdict,
-              strengths: normalized.strengths,
-              improvements: normalized.areas_to_improve,
-              areas_to_improve: normalized.areas_to_improve,
-              ai_recommendations: normalized.ai_recommendations,
+              verdict: normalized.verdict || (overallScore >= 70 ? 'PASS' : 'NEEDS_WORK'),
+              strengths: normalized.strengths || [],
+              improvements: normalized.areas_to_improve || [],
+              areas_to_improve: normalized.areas_to_improve || [],
+              ai_recommendations: normalized.ai_recommendations || [],
               detailed_feedback: normalized.recommendation || '',
               answers_evaluated: normalized.answered_count || 0,
               question_count: normalized.question_count || 0,
               answered_count: normalized.answered_count || 0,
               skipped_count: normalized.skipped_count || 0,
-              questions: normalized.questions,
-              answers: normalized.answers,
-              question_evaluations: normalized.question_evaluations,
+              questions: normalized.questions || [],
+              answers: Array.isArray(normalized.answers)
+                ? normalized.answers
+                : normalized.answers && typeof normalized.answers === 'object'
+                ? Object.values(normalized.answers)
+                : [],
+              question_evaluations: normalized.question_evaluations || [],
               full_report: normalized,
               created_at: normalized.completed_at || new Date().toISOString(),
+              completed_at: normalized.completed_at || new Date().toISOString(),
               updated_at: new Date().toISOString(),
             };
 
-            await supabase.from('mock_interviews').upsert(dbPayload);
+            await supabase.from('mock_interviews').upsert(dbPayload, { onConflict: 'id' });
           } catch (err) {
             console.warn('[InterviewStorage] Error persisting to Supabase:', err);
           }

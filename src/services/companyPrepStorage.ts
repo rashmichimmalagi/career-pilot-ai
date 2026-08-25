@@ -22,11 +22,27 @@ export async function fetchRemoteStudentTargets(studentId: string = 'guest'): Pr
   }
 
   try {
-    const { data, error } = await supabase
+    let data: any = null;
+    let error: any = null;
+
+    const initialRes = await supabase
       .from('profiles')
       .select('profile_data, career_goal')
       .eq('id', studentId)
       .maybeSingle();
+
+    if (initialRes.error && (initialRes.error.code === '42703' || initialRes.error.message?.includes('profile_data'))) {
+      const fallbackRes = await supabase
+        .from('profiles')
+        .select('career_goal')
+        .eq('id', studentId)
+        .maybeSingle();
+      data = fallbackRes.data;
+      error = fallbackRes.error;
+    } else {
+      data = initialRes.data;
+      error = initialRes.error;
+    }
 
     if (error) {
       console.warn('[CompanyPrepStorage] Supabase fetch warning:', error.message);
@@ -89,24 +105,45 @@ export function saveStudentTarget(
     if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
       (async () => {
         try {
-          const { data } = await supabase
-            .from('profiles')
-            .select('profile_data')
-            .eq('id', studentId)
-            .maybeSingle();
-
-          const currentMeta = data?.profile_data || {};
-          await supabase
+          // 1. Try updating profile_data directly
+          const { error: updateErr } = await supabase
             .from('profiles')
             .update({
               profile_data: {
-                ...currentMeta,
                 company_targets: updated,
                 active_target_id: target.id,
               },
               updated_at: new Date().toISOString(),
             })
             .eq('id', studentId);
+
+          if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('profile_data'))) {
+            // 2. Fallback: pack inside career_goal envelope
+            const { data: prof } = await supabase
+              .from('profiles')
+              .select('career_goal')
+              .eq('id', studentId)
+              .maybeSingle();
+
+            let existingEnv: any = {};
+            if (prof?.career_goal && typeof prof.career_goal === 'string' && prof.career_goal.startsWith('__CP_DATA__')) {
+              try {
+                existingEnv = JSON.parse(prof.career_goal.replace(/^__CP_DATA__/, ''));
+              } catch (_) {}
+            }
+            const envelope = '__CP_DATA__' + JSON.stringify({
+              ...existingEnv,
+              company_targets: updated,
+              active_target_id: target.id,
+            });
+            await supabase
+              .from('profiles')
+              .update({
+                career_goal: envelope,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', studentId);
+          }
         } catch (err) {
           console.warn('[CompanyPrepStorage] Supabase target sync notice:', err);
         }
@@ -139,24 +176,43 @@ export function deleteStudentTarget(
     if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
       (async () => {
         try {
-          const { data } = await supabase
-            .from('profiles')
-            .select('profile_data')
-            .eq('id', studentId)
-            .maybeSingle();
-
-          const currentMeta = data?.profile_data || {};
-          await supabase
+          const { error: updateErr } = await supabase
             .from('profiles')
             .update({
               profile_data: {
-                ...currentMeta,
                 company_targets: updated,
                 active_target_id: updated.length > 0 ? updated[0].id : null,
               },
               updated_at: new Date().toISOString(),
             })
             .eq('id', studentId);
+
+          if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('profile_data'))) {
+            const { data: prof } = await supabase
+              .from('profiles')
+              .select('career_goal')
+              .eq('id', studentId)
+              .maybeSingle();
+
+            let existingEnv: any = {};
+            if (prof?.career_goal && typeof prof.career_goal === 'string' && prof.career_goal.startsWith('__CP_DATA__')) {
+              try {
+                existingEnv = JSON.parse(prof.career_goal.replace(/^__CP_DATA__/, ''));
+              } catch (_) {}
+            }
+            const envelope = '__CP_DATA__' + JSON.stringify({
+              ...existingEnv,
+              company_targets: updated,
+              active_target_id: updated.length > 0 ? updated[0].id : null,
+            });
+            await supabase
+              .from('profiles')
+              .update({
+                career_goal: envelope,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', studentId);
+          }
         } catch (err) {
           console.warn('[CompanyPrepStorage] Supabase target delete notice:', err);
         }

@@ -29,6 +29,7 @@ import { PerformanceInsightsSection } from '../components/dashboard/PerformanceI
 import { RecentActivitySection } from '../components/dashboard/RecentActivitySection';
 import { AIRecommendationCard } from '../components/dashboard/AIRecommendationCard';
 import { SendTestEmailCard } from '../components/common/SendTestEmailCard';
+import { PersistenceDiagnosticModal } from '../components/dashboard/PersistenceDiagnosticModal';
 import { runPersistenceDiagnostics, CareerPilotDiagnosticReport } from '../services/diagnosticService';
 
 // React Error Boundary for isolated error handling
@@ -140,8 +141,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       loadDashboard();
     };
 
+    const handleOpenDiagnosticsEvent = () => {
+      handleRunDiagnostics();
+    };
+
     window.addEventListener('careerpilot_profile_updated', handleDataUpdate);
     window.addEventListener('careerpilot_activity_updated', handleDataUpdate);
+    window.addEventListener('open-persistence-diagnostics', handleOpenDiagnosticsEvent);
     window.addEventListener('storage', handleDataUpdate);
     window.addEventListener('focus', handleDataUpdate);
     document.addEventListener('visibilitychange', () => {
@@ -153,6 +159,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     return () => {
       window.removeEventListener('careerpilot_profile_updated', handleDataUpdate);
       window.removeEventListener('careerpilot_activity_updated', handleDataUpdate);
+      window.removeEventListener('open-persistence-diagnostics', handleOpenDiagnosticsEvent);
       window.removeEventListener('storage', handleDataUpdate);
       window.removeEventListener('focus', handleDataUpdate);
     };
@@ -200,6 +207,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              id="dashboard-inspect-diagnostics-btn"
+              onClick={handleRunDiagnostics}
+              disabled={isDiagRunning}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors shadow-xs cursor-pointer"
+              title="Inspect Supabase Cloud Persistence & Data State"
+            >
+              <Activity className={`w-3.5 h-3.5 ${isDiagRunning ? 'animate-spin' : ''}`} />
+              <span>{isDiagRunning ? 'Checking...' : 'Inspect Diagnostics'}</span>
+            </button>
+
             <button
               onClick={() => onNavigate('study-planner')}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-600 text-white transition-all shadow-xs cursor-pointer"
@@ -438,125 +456,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       </div>
 
       {/* Persistence & Sync Diagnostics Modal */}
-      {showDiagModal && diagReport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
-                  <Activity className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                    CareerPilot Persistence Diagnostics
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Live Supabase Database & Auth State Inspection
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowDiagModal(false)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Diagnostic Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800/80 space-y-1">
-                <div className="text-slate-400 font-medium">Environment</div>
-                <div className="font-bold text-slate-800 dark:text-slate-200">{diagReport.environment}</div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800/80 space-y-1">
-                <div className="text-slate-400 font-medium">Auth User ID</div>
-                <div className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate" title={diagReport.authenticatedUserId || 'None'}>
-                  {diagReport.authenticatedUserId || 'Unauthenticated'}
-                </div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800/80 space-y-1">
-                <div className="text-slate-400 font-medium">Authenticated Email</div>
-                <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
-                  {diagReport.authenticatedEmail || 'N/A'}
-                </div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800/80 space-y-1">
-                <div className="text-slate-400 font-medium">Overall Persistence Status</div>
-                <div className={`font-bold uppercase tracking-wider text-[11px] ${
-                  diagReport.overallStatus === 'healthy'
-                    ? 'text-emerald-600 dark:text-emerald-400'
-                    : diagReport.overallStatus === 'degraded'
-                    ? 'text-amber-600 dark:text-amber-400'
-                    : 'text-rose-600 dark:text-rose-400'
-                }`}>
-                  {diagReport.overallStatus}
-                </div>
-              </div>
-            </div>
-
-            {/* Table-by-Table Verification */}
-            <div className="space-y-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Supabase Tables & Records Count
-              </h4>
-              <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden text-xs">
-                {diagReport.modules.map((m) => (
-                  <div key={m.table} className="p-3 flex items-center justify-between bg-white dark:bg-slate-900">
-                    <div className="space-y-0.5">
-                      <div className="font-bold text-slate-800 dark:text-slate-200">{m.module}</div>
-                      <div className="font-mono text-[10px] text-slate-400">Table: {m.table}</div>
-                      {m.errorDetails && (
-                        <div className="text-[10px] text-rose-500 dark:text-rose-400">{m.errorDetails}</div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                        {m.count} records
-                      </span>
-                      {m.status === 'ok' ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                      ) : m.status === 'empty' ? (
-                        <span className="text-[10px] text-amber-500 font-semibold px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/50">Empty</span>
-                      ) : (
-                        <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {diagReport.warnings.length > 0 && (
-              <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/50 space-y-1">
-                <div className="text-xs font-bold text-amber-900 dark:text-amber-300">Diagnostic Warnings</div>
-                <ul className="text-xs text-amber-700 dark:text-amber-400 list-disc list-inside space-y-0.5">
-                  {diagReport.warnings.map((w, idx) => (
-                    <li key={idx}>{w}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                onClick={() => {
-                  handleRunDiagnostics();
-                }}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors cursor-pointer"
-              >
-                Re-test Connection
-              </button>
-              <button
-                onClick={() => setShowDiagModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PersistenceDiagnosticModal
+        isOpen={showDiagModal}
+        onClose={() => setShowDiagModal(false)}
+        report={diagReport}
+        isLoading={isDiagRunning}
+        onRefresh={handleRunDiagnostics}
+      />
 
       {/* Edit Profile Modal */}
       {isEditProfileOpen && (

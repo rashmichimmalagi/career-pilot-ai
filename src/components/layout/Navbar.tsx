@@ -21,6 +21,7 @@ import {
   Info,
   HelpCircle,
   Calendar,
+  Activity,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
@@ -502,6 +503,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
                           <Info className="w-4 h-4 text-slate-400 shrink-0" />
                           <span>About Platform</span>
                         </button>
+
+                        <button
+                          type="button"
+                          id="nav-inspect-diagnostics-btn"
+                          onClick={() => {
+                            setMoreMenuOpen(false);
+                            if (currentPage !== 'dashboard' && currentPage !== 'profile') {
+                              onNavigate('dashboard');
+                            }
+                            window.dispatchEvent(new CustomEvent('open-persistence-diagnostics'));
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 font-bold transition-colors cursor-pointer"
+                        >
+                          <Activity className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                          <span>Inspect Diagnostics</span>
+                        </button>
                       </div>
                     </div>
                   )}
@@ -914,6 +931,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
               >
                 <Map className="w-4 h-4 text-indigo-500" />
                 <span>Career Roadmap</span>
+              </button>
+
+              <button
+                type="button"
+                id="mobile-inspect-diagnostics-btn"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  if (currentPage !== 'dashboard' && currentPage !== 'profile') {
+                    onNavigate('dashboard');
+                  }
+                  window.dispatchEvent(new CustomEvent('open-persistence-diagnostics'));
+                }}
+                className="w-full text-left py-2 px-3 rounded-lg flex items-center gap-2 font-bold cursor-pointer text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
+              >
+                <Activity className="w-4 h-4 text-indigo-500" />
+                <span>Inspect Diagnostics</span>
               </button>
             </div>
           )}

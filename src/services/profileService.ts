@@ -181,11 +181,28 @@ export const profileService = {
     }
 
     try {
-      const { data, error } = await supabase
+      let data: any = null;
+      let error: any = null;
+
+      const fullRes = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
+
+      if (fullRes.error && (fullRes.error.code === '42703' || fullRes.error.message?.includes('profile_data'))) {
+        // Fallback to basic columns if extended columns/profile_data don't exist yet
+        const basicRes = await supabase
+          .from('profiles')
+          .select('id, full_name, email, usn, college_name, department, semester, graduation_year, career_goal, target_role, updated_at')
+          .eq('id', userId)
+          .maybeSingle();
+        data = basicRes.data;
+        error = basicRes.error;
+      } else {
+        data = fullRes.data;
+        error = fullRes.error;
+      }
 
       if (error) {
         console.warn('[ProfileService] Database query notice:', error.message);

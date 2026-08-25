@@ -27,11 +27,27 @@ export async function fetchRemoteRoadmapData(studentId: string): Promise<{
   }
 
   try {
-    const { data, error } = await supabase
+    let data: any = null;
+    let error: any = null;
+
+    const initialRes = await supabase
       .from('profiles')
       .select('profile_data, career_goal')
       .eq('id', studentId)
       .maybeSingle();
+
+    if (initialRes.error && (initialRes.error.code === '42703' || initialRes.error.message?.includes('profile_data'))) {
+      const fallbackRes = await supabase
+        .from('profiles')
+        .select('career_goal')
+        .eq('id', studentId)
+        .maybeSingle();
+      data = fallbackRes.data;
+      error = fallbackRes.error;
+    } else {
+      data = initialRes.data;
+      error = initialRes.error;
+    }
 
     if (error) {
       console.warn('[RoadmapStorage] Supabase fetch warning:', error.message);
@@ -97,23 +113,41 @@ export function saveDailyTasks(studentId: string, tasks: DailyRoadmapTask[]): vo
     if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
       (async () => {
         try {
-          const { data } = await supabase
-            .from('profiles')
-            .select('profile_data')
-            .eq('id', studentId)
-            .maybeSingle();
-
-          const currentMeta = data?.profile_data || {};
-          await supabase
+          const { error: updateErr } = await supabase
             .from('profiles')
             .update({
               profile_data: {
-                ...currentMeta,
                 roadmap_tasks: tasks,
               },
               updated_at: new Date().toISOString(),
             })
             .eq('id', studentId);
+
+          if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('profile_data'))) {
+            const { data: prof } = await supabase
+              .from('profiles')
+              .select('career_goal')
+              .eq('id', studentId)
+              .maybeSingle();
+
+            let existingEnv: any = {};
+            if (prof?.career_goal && typeof prof.career_goal === 'string' && prof.career_goal.startsWith('__CP_DATA__')) {
+              try {
+                existingEnv = JSON.parse(prof.career_goal.replace(/^__CP_DATA__/, ''));
+              } catch (_) {}
+            }
+            const envelope = '__CP_DATA__' + JSON.stringify({
+              ...existingEnv,
+              roadmap_tasks: tasks,
+            });
+            await supabase
+              .from('profiles')
+              .update({
+                career_goal: envelope,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', studentId);
+          }
         } catch (err) {
           console.warn('[RoadmapStorage] Supabase tasks sync notice:', err);
         }
@@ -182,23 +216,41 @@ export function toggleCompletedItemId(studentId: string, itemId: string): string
     if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
       (async () => {
         try {
-          const { data } = await supabase
-            .from('profiles')
-            .select('profile_data')
-            .eq('id', studentId)
-            .maybeSingle();
-
-          const currentMeta = data?.profile_data || {};
-          await supabase
+          const { error: updateErr } = await supabase
             .from('profiles')
             .update({
               profile_data: {
-                ...currentMeta,
                 completed_roadmap_items: updated,
               },
               updated_at: new Date().toISOString(),
             })
             .eq('id', studentId);
+
+          if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('profile_data'))) {
+            const { data: prof } = await supabase
+              .from('profiles')
+              .select('career_goal')
+              .eq('id', studentId)
+              .maybeSingle();
+
+            let existingEnv: any = {};
+            if (prof?.career_goal && typeof prof.career_goal === 'string' && prof.career_goal.startsWith('__CP_DATA__')) {
+              try {
+                existingEnv = JSON.parse(prof.career_goal.replace(/^__CP_DATA__/, ''));
+              } catch (_) {}
+            }
+            const envelope = '__CP_DATA__' + JSON.stringify({
+              ...existingEnv,
+              completed_roadmap_items: updated,
+            });
+            await supabase
+              .from('profiles')
+              .update({
+                career_goal: envelope,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', studentId);
+          }
         } catch (err) {
           console.warn('[RoadmapStorage] Supabase completed items sync notice:', err);
         }
@@ -222,23 +274,41 @@ export function markItemCompleted(studentId: string, itemId: string): string[] {
       if (isSupabaseConfigured() && studentId && studentId !== 'guest') {
         (async () => {
           try {
-            const { data } = await supabase
-              .from('profiles')
-              .select('profile_data')
-              .eq('id', studentId)
-              .maybeSingle();
-
-            const currentMeta = data?.profile_data || {};
-            await supabase
+            const { error: updateErr } = await supabase
               .from('profiles')
               .update({
                 profile_data: {
-                  ...currentMeta,
                   completed_roadmap_items: updated,
                 },
                 updated_at: new Date().toISOString(),
               })
               .eq('id', studentId);
+
+            if (updateErr && (updateErr.code === '42703' || updateErr.message?.includes('profile_data'))) {
+              const { data: prof } = await supabase
+                .from('profiles')
+                .select('career_goal')
+                .eq('id', studentId)
+                .maybeSingle();
+
+              let existingEnv: any = {};
+              if (prof?.career_goal && typeof prof.career_goal === 'string' && prof.career_goal.startsWith('__CP_DATA__')) {
+                try {
+                  existingEnv = JSON.parse(prof.career_goal.replace(/^__CP_DATA__/, ''));
+                } catch (_) {}
+              }
+              const envelope = '__CP_DATA__' + JSON.stringify({
+                ...existingEnv,
+                completed_roadmap_items: updated,
+              });
+              await supabase
+                .from('profiles')
+                .update({
+                  career_goal: envelope,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', studentId);
+            }
           } catch (err) {
             console.warn('[RoadmapStorage] Supabase mark item sync notice:', err);
           }
