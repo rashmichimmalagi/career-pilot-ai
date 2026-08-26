@@ -1,4 +1,4 @@
-import { CodingProblem, CodingDifficulty, CodingSubject } from '../types/coding';
+import { CodingProblem, CodingDifficulty, CodingSubject, CodingLanguage } from '../types/coding';
 
 export const DEFAULT_CODING_QUESTION_BANK: CodingProblem[] = [
   // ==========================================
@@ -1418,7 +1418,733 @@ Assume memory is initially empty.`,
     hints: ['Use an OrderedDict or Doubly Linked List + HashMap to maintain the recency order of active pages in memory.'],
     editorial: { approach: 'LRU Cache tracking page accesses in physical frames.', timeComplexity: 'O(N)', spaceComplexity: 'O(capacity)' },
   },
+  // ==========================================
+  // STRINGS — EXTENDED (EASY / MEDIUM / HARD)
+  // ==========================================
+  {
+    id: 'dsa_str_04',
+    title: 'Valid Palindrome',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'Strings',
+    tags: ['Strings', 'Two Pointers'],
+    description: `A phrase is a **palindrome** if, after converting all uppercase letters into lowercase letters and removing all non-alphanumeric characters, it reads the same forward and backward. Alphanumeric characters include letters and numbers.
+
+Given a string \`s\`, return \`true\` *if it is a palindrome*, or \`false\` *otherwise*.`,
+    examples: [
+      { input: 's = "A man, a plan, a canal: Panama"', output: 'true', explanation: '"amanaplanacanalpanama" is a palindrome.' },
+      { input: 's = "race a car"', output: 'false', explanation: '"raceacar" is not a palindrome.' },
+      { input: 's = " "', output: 'true', explanation: 'An empty string reads the same forward and backward.' },
+    ],
+    constraints: ['1 <= s.length <= 2 * 10^5', 's consists only of printable ASCII characters.'],
+    expectedComplexity: { time: 'O(N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'bool isPalindrome(char* s)',
+      'C++': 'bool isPalindrome(string s)',
+      Java: 'public boolean isPalindrome(String s)',
+      Python: 'def isPalindrome(self, s: str) -> bool:',
+      JavaScript: 'function isPalindrome(s)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n#include <stdbool.h>\n#include <ctype.h>\n#include <string.h>\n\nbool isPalindrome(char* s) {\n    // Two-pointer palindrome check\n    return true;\n}`,
+      'C++': `#include <string>\n#include <cctype>\nusing namespace std;\n\nclass Solution {\npublic:\n    bool isPalindrome(string s) {\n        // Write solution here\n        return true;\n    }\n};`,
+      Java: `class Solution {\n    public boolean isPalindrome(String s) {\n        // Write solution here\n        return true;\n    }\n}`,
+      Python: `class Solution:\n    def isPalindrome(self, s: str) -> bool:\n        # Write solution here\n        pass`,
+      JavaScript: `function isPalindrome(s) {\n  // Write solution here\n  return true;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 's = "A man, a plan, a canal: Panama"', expectedOutput: 'true', isHidden: false },
+      { id: 'tc_2', input: 's = "race a car"', expectedOutput: 'false', isHidden: false },
+      { id: 'tc_3', input: 's = "0P"', expectedOutput: 'false', isHidden: false },
+      { id: 'tc_4', input: 's = "a."', expectedOutput: 'true', isHidden: true },
+    ],
+    hints: ['Use two pointers starting at the beginning and end, skipping non-alphanumeric characters.'],
+    editorial: { approach: 'Two-pointer alphanumeric character comparison.', timeComplexity: 'O(N)', spaceComplexity: 'O(1)' },
+  },
+  {
+    id: 'dsa_str_05',
+    title: 'Longest Palindromic Substring',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Strings',
+    tags: ['Strings', 'Dynamic Programming', 'Two Pointers'],
+    description: `Given a string \`s\`, return *the longest palindromic substring* in \`s\`.`,
+    examples: [
+      { input: 's = "babad"', output: '"bab"', explanation: '"aba" is also a valid answer.' },
+      { input: 's = "cbbd"', output: '"bb"', explanation: '"bb" is the longest palindrome.' },
+    ],
+    constraints: ['1 <= s.length <= 1000', 's consist of only digits and English letters.'],
+    expectedComplexity: { time: 'O(N^2)', space: 'O(1)' },
+    functionSignature: {
+      C: 'char* longestPalindrome(char* s)',
+      'C++': 'string longestPalindrome(string s)',
+      Java: 'public String longestPalindrome(String s)',
+      Python: 'def longestPalindrome(self, s: str) -> str:',
+      JavaScript: 'function longestPalindrome(s)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n#include <string.h>\n#include <stdlib.h>\n\nchar* longestPalindrome(char* s) {\n    // Expand around center\n    return s;\n}`,
+      'C++': `#include <string>\nusing namespace std;\n\nclass Solution {\npublic:\n    string longestPalindrome(string s) {\n        // Write solution here\n        return "";\n    }\n};`,
+      Java: `class Solution {\n    public String longestPalindrome(String s) {\n        // Write solution here\n        return "";\n    }\n}`,
+      Python: `class Solution:\n    def longestPalindrome(self, s: str) -> str:\n        # Write solution here\n        pass`,
+      JavaScript: `function longestPalindrome(s) {\n  // Write solution here\n  return "";\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 's = "babad"', expectedOutput: '"bab"', isHidden: false },
+      { id: 'tc_2', input: 's = "cbbd"', expectedOutput: '"bb"', isHidden: false },
+      { id: 'tc_3', input: 's = "a"', expectedOutput: '"a"', isHidden: true },
+    ],
+    hints: ['Expand around every center index (odd length palindromes) and pair of indices (even length palindromes).'],
+    editorial: { approach: 'Expand around 2N - 1 centers.', timeComplexity: 'O(N^2)', spaceComplexity: 'O(1)' },
+  },
+  {
+    id: 'dsa_str_06',
+    title: 'Minimum Window Substring',
+    difficulty: 'Hard',
+    subject: 'DSA',
+    topic: 'Strings',
+    tags: ['Strings', 'Sliding Window', 'Hash Table'],
+    description: `Given two strings \`s\` and \`t\` of lengths \`m\` and \`n\` respectively, return *the **minimum window substring** of* \`s\` *such that every character in* \`t\` *(including duplicates) is included in the window*. If there is no such substring, return the empty string \`""\`.`,
+    examples: [
+      { input: 's = "ADOBECODEBANC", t = "ABC"', output: '"BANC"', explanation: 'The minimum window substring "BANC" includes \'A\', \'B\', and \'C\' from string t.' },
+      { input: 's = "a", t = "a"', output: '"a"', explanation: 'The entire string s is the minimum window.' },
+      { input: 's = "a", t = "aa"', output: '""', explanation: 'Both \'a\'s from t must be included in the window.' },
+    ],
+    constraints: ['m == s.length', 'n == t.length', '1 <= m, n <= 10^5', 's and t consist of uppercase and lowercase English letters.'],
+    expectedComplexity: { time: 'O(M + N)', space: 'O(M + N)' },
+    functionSignature: {
+      C: 'char* minWindow(char* s, char* t)',
+      'C++': 'string minWindow(string s, string t)',
+      Java: 'public String minWindow(String s, String t)',
+      Python: 'def minWindow(self, s: str, t: str) -> str:',
+      JavaScript: 'function minWindow(s, t)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n#include <string.h>\n#include <stdlib.h>\n\nchar* minWindow(char* s, char* t) {\n    // Sliding window with frequency map\n    return "";\n}`,
+      'C++': `#include <string>\n#include <unordered_map>\nusing namespace std;\n\nclass Solution {\npublic:\n    string minWindow(string s, string t) {\n        // Write solution here\n        return "";\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public String minWindow(String s, String t) {\n        // Write solution here\n        return "";\n    }\n}`,
+      Python: `class Solution:\n    def minWindow(self, s: str, t: str) -> str:\n        # Write solution here\n        pass`,
+      JavaScript: `function minWindow(s, t) {\n  // Write solution here\n  return "";\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 's = "ADOBECODEBANC", t = "ABC"', expectedOutput: '"BANC"', isHidden: false },
+      { id: 'tc_2', input: 's = "a", t = "a"', expectedOutput: '"a"', isHidden: false },
+      { id: 'tc_3', input: 's = "a", t = "aa"', expectedOutput: '""', isHidden: true },
+    ],
+    hints: ['Use two pointers to create a sliding window, expanding right until valid, then contracting left to minimize size.'],
+    editorial: { approach: 'Sliding window tracking character counts required.', timeComplexity: 'O(M + N)', spaceComplexity: 'O(distinct(T))' },
+  },
+
+  // ==========================================
+  // TREES / BST — EXTENDED (MEDIUM & HARD)
+  // ==========================================
+  {
+    id: 'dsa_tree_03',
+    title: 'Binary Tree Level Order Traversal',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Trees',
+    tags: ['Trees', 'BFS', 'Queue', 'Binary Tree'],
+    description: `Given the \`root\` of a binary tree, return *the level order traversal of its nodes\' values*. (i.e., from left to right, level by level).`,
+    examples: [
+      { input: 'root = [3, 9, 20, null, null, 15, 7]', output: '[[3], [9, 20], [15, 7]]', explanation: 'Level 0: [3], Level 1: [9, 20], Level 2: [15, 7].' },
+      { input: 'root = [1]', output: '[[1]]', explanation: 'Single node.' },
+      { input: 'root = []', output: '[]', explanation: 'Empty tree.' },
+    ],
+    constraints: ['The number of nodes in the tree is in the range [0, 2000].', '-1000 <= Node.val <= 1000'],
+    expectedComplexity: { time: 'O(N)', space: 'O(N)' },
+    functionSignature: {
+      'C++': 'vector<vector<int>> levelOrder(TreeNode* root)',
+      Java: 'public List<List<Integer>> levelOrder(TreeNode root)',
+      Python: 'def levelOrder(self, root: Optional[TreeNode]) -> List[List[int]]:',
+      JavaScript: 'function levelOrder(root)',
+    },
+    starterCode: {
+      'C++': `#include <vector>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    vector<vector<int>> levelOrder(TreeNode* root) {\n        // BFS level by level\n        return {};\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public List<List<Integer>> levelOrder(TreeNode root) {\n        // BFS level by level\n        return new ArrayList<>();\n    }\n}`,
+      Python: `from typing import Optional, List\nfrom collections import deque\n\nclass Solution:\n    def levelOrder(self, root: Optional[TreeNode]) -> List[List[int]]:\n        # BFS level by level\n        pass`,
+      JavaScript: `function levelOrder(root) {\n  // BFS level by level\n  return [];\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'root = [3, 9, 20, null, null, 15, 7]', expectedOutput: '[[3], [9, 20], [15, 7]]', isHidden: false },
+      { id: 'tc_2', input: 'root = [1]', expectedOutput: '[[1]]', isHidden: false },
+      { id: 'tc_3', input: 'root = []', expectedOutput: '[]', isHidden: true },
+    ],
+    hints: ['Use a Queue. At each level, note the queue size and process that exact number of nodes.'],
+    editorial: { approach: 'Standard BFS with level size batching.', timeComplexity: 'O(N)', spaceComplexity: 'O(N)' },
+  },
+  {
+    id: 'dsa_tree_04',
+    title: 'Validate Binary Search Tree',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Trees',
+    tags: ['Trees', 'Binary Search Tree', 'DFS', 'Recursion'],
+    description: `Given the \`root\` of a binary tree, *determine if it is a valid binary search tree (BST)*.
+
+A **valid BST** is defined as follows:
+- The left subtree of a node contains only nodes with keys **strictly less than** the node's key.
+- The right subtree of a node contains only nodes with keys **strictly greater than** the node's key.
+- Both the left and right subtrees must also be binary search trees.`,
+    examples: [
+      { input: 'root = [2, 1, 3]', output: 'true', explanation: 'Root is 2, left is 1 (< 2), right is 3 (> 2).' },
+      { input: 'root = [5, 1, 4, null, null, 3, 6]', output: 'false', explanation: 'Root value is 5, but its right child\'s value is 4.' },
+    ],
+    constraints: ['The number of nodes in the tree is in the range [1, 10^4].', '-2^31 <= Node.val <= 2^31 - 1'],
+    expectedComplexity: { time: 'O(N)', space: 'O(H)' },
+    functionSignature: {
+      'C++': 'bool isValidBST(TreeNode* root)',
+      Java: 'public boolean isValidBST(TreeNode root)',
+      Python: 'def isValidBST(self, root: Optional[TreeNode]) -> bool:',
+      JavaScript: 'function isValidBST(root)',
+    },
+    starterCode: {
+      'C++': `class Solution {\npublic:\n    bool isValidBST(TreeNode* root) {\n        // Inorder or min/max range check\n        return true;\n    }\n};`,
+      Java: `class Solution {\n    public boolean isValidBST(TreeNode root) {\n        // Inorder or min/max range check\n        return true;\n    }\n}`,
+      Python: `class Solution:\n    def isValidBST(self, root: Optional[TreeNode]) -> bool:\n        # Write solution here\n        pass`,
+      JavaScript: `function isValidBST(root) {\n  // Write solution here\n  return true;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'root = [2, 1, 3]', expectedOutput: 'true', isHidden: false },
+      { id: 'tc_2', input: 'root = [5, 1, 4, null, null, 3, 6]', expectedOutput: 'false', isHidden: false },
+      { id: 'tc_3', input: 'root = [2, 2, 2]', expectedOutput: 'false', isHidden: true },
+    ],
+    hints: ['Pass valid range (low, high) down during DFS traversal.'],
+    editorial: { approach: 'Range bound recursion: isValid(node, minVal, maxVal).', timeComplexity: 'O(N)', spaceComplexity: 'O(H)' },
+  },
+  {
+    id: 'dsa_tree_05',
+    title: 'Binary Tree Maximum Path Sum',
+    difficulty: 'Hard',
+    subject: 'DSA',
+    topic: 'Trees',
+    tags: ['Trees', 'DFS', 'Dynamic Programming', 'Recursion'],
+    description: `A **path** in a binary tree is a sequence of nodes where each pair of adjacent nodes in the sequence has an edge connecting them. A node can only appear in the sequence **at most once**. Note that the path does not need to pass through the root.
+
+The **path sum** of a path is the sum of the node\'s values in the path.
+
+Given the \`root\` of a binary tree, return *the maximum **path sum** of any non-empty path*.`,
+    examples: [
+      { input: 'root = [1, 2, 3]', output: '6', explanation: 'The optimal path is 2 -> 1 -> 3 with path sum 2 + 1 + 3 = 6.' },
+      { input: 'root = [-10, 9, 20, null, null, 15, 7]', output: '42', explanation: 'The optimal path is 15 -> 20 -> 7 with path sum 15 + 20 + 7 = 42.' },
+    ],
+    constraints: ['The number of nodes in the tree is in the range [1, 3 * 10^4].', '-1000 <= Node.val <= 1000'],
+    expectedComplexity: { time: 'O(N)', space: 'O(H)' },
+    functionSignature: {
+      'C++': 'int maxPathSum(TreeNode* root)',
+      Java: 'public int maxPathSum(TreeNode root)',
+      Python: 'def maxPathSum(self, root: Optional[TreeNode]) -> int:',
+      JavaScript: 'function maxPathSum(root)',
+    },
+    starterCode: {
+      'C++': `#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    int maxPathSum(TreeNode* root) {\n        // Write recursive solution\n        return 0;\n    }\n};`,
+      Java: `class Solution {\n    public int maxPathSum(TreeNode root) {\n        // Write recursive solution\n        return 0;\n    }\n}`,
+      Python: `class Solution:\n    def maxPathSum(self, root: Optional[TreeNode]) -> int:\n        # Write recursive solution\n        pass`,
+      JavaScript: `function maxPathSum(root) {\n  // Write recursive solution\n  return 0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'root = [1, 2, 3]', expectedOutput: '6', isHidden: false },
+      { id: 'tc_2', input: 'root = [-10, 9, 20, null, null, 15, 7]', expectedOutput: '42', isHidden: false },
+      { id: 'tc_3', input: 'root = [-3]', expectedOutput: '-3', isHidden: true },
+    ],
+    hints: ['Compute max single branch contribution for each node: node.val + max(0, left, right). At each node, the complete path sum is node.val + max(0, left) + max(0, right).'],
+    editorial: { approach: 'Post-order DFS updating global max while returning max branch gain.', timeComplexity: 'O(N)', spaceComplexity: 'O(H)' },
+  },
+
+  // ==========================================
+  // GRAPHS — EXTENDED (EASY / MEDIUM / HARD)
+  // ==========================================
+  {
+    id: 'dsa_graph_02',
+    title: 'Find if Path Exists in Graph',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'Graphs',
+    tags: ['Graphs', 'BFS', 'DFS', 'Union Find'],
+    description: `There is a **bi-directional** graph with \`n\` vertices, where each vertex is labeled from \`0\` to \`n - 1\` (inclusive). The edges in the graph are represented as a 2D integer array \`edges\`, where each \`edges[i] = [u, v]\` denotes a bi-directional edge between vertex \`u\` and vertex \`v\`. Every vertex pair is connected by **at most one** edge, and no vertex has an edge to itself.
+
+Given \`edges\` and the integers \`n\`, \`source\`, and \`destination\`, return \`true\` *if there is a **valid path** from* \`source\` *to* \`destination\`, *or* \`false\` *otherwise*.`,
+    examples: [
+      { input: 'n = 3, edges = [[0,1],[1,2],[2,0]], source = 0, destination = 2', output: 'true', explanation: 'There are two paths from 0 to 2: 0 -> 1 -> 2 and 0 -> 2.' },
+      { input: 'n = 6, edges = [[0,1],[0,2],[3,5],[5,4],[4,3]], source = 0, destination = 5', output: 'false', explanation: 'No path from 0 to 5 exists.' },
+    ],
+    constraints: ['1 <= n <= 2 * 10^5', '0 <= edges.length <= 2 * 10^5', 'edges[i].length == 2', '0 <= source, destination < n'],
+    expectedComplexity: { time: 'O(V + E)', space: 'O(V + E)' },
+    functionSignature: {
+      'C++': 'bool validPath(int n, vector<vector<int>>& edges, int source, int destination)',
+      Java: 'public boolean validPath(int n, int[][] edges, int source, int destination)',
+      Python: 'def validPath(self, n: int, edges: List[List[int]], source: int, destination: int) -> bool:',
+      JavaScript: 'function validPath(n, edges, source, destination)',
+    },
+    starterCode: {
+      'C++': `#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    bool validPath(int n, vector<vector<int>>& edges, int source, int destination) {\n        // BFS / DFS or Disjoint Set\n        return false;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public boolean validPath(int n, int[][] edges, int source, int destination) {\n        // BFS / DFS or Disjoint Set\n        return false;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def validPath(self, n: int, edges: List[List[int]], source: int, destination: int) -> bool:\n        # BFS / DFS or Disjoint Set\n        pass`,
+      JavaScript: `function validPath(n, edges, source, destination) {\n  // BFS / DFS or Disjoint Set\n  return false;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'n = 3, edges = [[0,1],[1,2],[2,0]], source = 0, destination = 2', expectedOutput: 'true', isHidden: false },
+      { id: 'tc_2', input: 'n = 6, edges = [[0,1],[0,2],[3,5],[5,4],[4,3]], source = 0, destination = 5', expectedOutput: 'false', isHidden: false },
+      { id: 'tc_3', input: 'n = 1, edges = [], source = 0, destination = 0', expectedOutput: 'true', isHidden: true },
+    ],
+    hints: ['Use BFS with a visited set, or Union-Find to check if source and destination share the same root.'],
+    editorial: { approach: 'Disjoint Set Union (DSU) / BFS traversal.', timeComplexity: 'O(V + E)', spaceComplexity: 'O(V)' },
+  },
+  {
+    id: 'dsa_graph_03',
+    title: 'Course Schedule',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Graphs',
+    tags: ['Graphs', 'Topological Sort', 'BFS', 'DFS', 'Directed Graph'],
+    description: `There are a total of \`numCourses\` courses you have to take, labeled from \`0\` to \`numCourses - 1\`. You are given an array \`prerequisites\` where \`prerequisites[i] = [a, b]\` indicates that you **must** take course \`b\` first if you want to take course \`a\`.
+
+Return \`true\` *if you can finish all courses*. Otherwise, return \`false\`.`,
+    examples: [
+      { input: 'numCourses = 2, prerequisites = [[1, 0]]', output: 'true', explanation: 'To take course 1 you should have finished course 0. So it is possible.' },
+      { input: 'numCourses = 2, prerequisites = [[1, 0], [0, 1]]', output: 'false', explanation: 'Course 1 requires course 0 and course 0 requires course 1. Cycle exists.' },
+    ],
+    constraints: ['1 <= numCourses <= 2000', '0 <= prerequisites.length <= 5000', 'prerequisites[i].length == 2', 'All prerequisite pairs are unique.'],
+    expectedComplexity: { time: 'O(V + E)', space: 'O(V + E)' },
+    functionSignature: {
+      'C++': 'bool canFinish(int numCourses, vector<vector<int>>& prerequisites)',
+      Java: 'public boolean canFinish(int numCourses, int[][] prerequisites)',
+      Python: 'def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:',
+      JavaScript: 'function canFinish(numCourses, prerequisites)',
+    },
+    starterCode: {
+      'C++': `#include <vector>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    bool canFinish(int numCourses, vector<vector<int>>& prerequisites) {\n        // Kahn's algorithm or 3-color DFS cycle detection\n        return true;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public boolean canFinish(int numCourses, int[][] prerequisites) {\n        // Kahn's algorithm or 3-color DFS cycle detection\n        return true;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:\n        # Write topological sort\n        pass`,
+      JavaScript: `function canFinish(numCourses, prerequisites) {\n  // Write topological sort\n  return true;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'numCourses = 2, prerequisites = [[1, 0]]', expectedOutput: 'true', isHidden: false },
+      { id: 'tc_2', input: 'numCourses = 2, prerequisites = [[1, 0], [0, 1]]', expectedOutput: 'false', isHidden: false },
+      { id: 'tc_3', input: 'numCourses = 3, prerequisites = [[0, 1], [1, 2], [2, 0]]', expectedOutput: 'false', isHidden: true },
+    ],
+    hints: ['This problem is equivalent to detecting a cycle in a directed graph. Use Kahn\'s algorithm (indegree counting) or DFS cycle detection.'],
+    editorial: { approach: 'Topological Sort with Kahn\'s Algorithm.', timeComplexity: 'O(V + E)', spaceComplexity: 'O(V + E)' },
+  },
+  {
+    id: 'dsa_graph_04',
+    title: 'Word Ladder',
+    difficulty: 'Hard',
+    subject: 'DSA',
+    topic: 'Graphs',
+    tags: ['Graphs', 'BFS', 'Shortest Path', 'Hash Table'],
+    description: `A **transformation sequence** from word \`beginWord\` to word \`endWord\` using a dictionary \`wordList\` is a sequence of words \`beginWord -> s1 -> s2 -> ... -> sk\` such that:
+- Every adjacent pair of words differs by exactly one letter.
+- Every \`si\` for \`1 <= i <= k\` is in \`wordList\`. Note that \`beginWord\` does not need to be in \`wordList\`.
+- \`sk == endWord\`
+
+Given two words, \`beginWord\` and \`endWord\`, and a dictionary \`wordList\`, return *the **number of words** in the **shortest transformation sequence** from* \`beginWord\` *to* \`endWord\`, *or* \`0\` *if no such sequence exists*.`,
+    examples: [
+      { input: 'beginWord = "hit", endWord = "cog", wordList = ["hot","dot","dog","lot","log","cog"]', output: '5', explanation: 'One shortest transformation sequence is "hit" -> "hot" -> "dot" -> "dog" -> "cog", which is 5 words long.' },
+      { input: 'beginWord = "hit", endWord = "cog", wordList = ["hot","dot","dog","lot","log"]', output: '0', explanation: 'The endWord "cog" is not in wordList, therefore there is no valid transformation sequence.' },
+    ],
+    constraints: ['1 <= beginWord.length <= 10', 'endWord.length == beginWord.length', '1 <= wordList.length <= 5000', 'wordList[i].length == beginWord.length', 'beginWord != endWord'],
+    expectedComplexity: { time: 'O(M^2 * N)', space: 'O(M * N)' },
+    functionSignature: {
+      'C++': 'int ladderLength(string beginWord, string endWord, vector<string>& wordList)',
+      Java: 'public int ladderLength(String beginWord, String endWord, List<String> wordList)',
+      Python: 'def ladderLength(self, beginWord: str, endWord: str, wordList: List[str]) -> int:',
+      JavaScript: 'function ladderLength(beginWord, endWord, wordList)',
+    },
+    starterCode: {
+      'C++': `#include <string>\n#include <vector>\n#include <unordered_set>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    int ladderLength(string beginWord, string endWord, vector<string>& wordList) {\n        // Bi-directional BFS\n        return 0;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public int ladderLength(String beginWord, String endWord, List<String> wordList) {\n        // BFS shortest path\n        return 0;\n    }\n}`,
+      Python: `from typing import List\nfrom collections import deque\n\nclass Solution:\n    def ladderLength(self, beginWord: str, endWord: str, wordList: List[str]) -> int:\n        # BFS shortest path\n        pass`,
+      JavaScript: `function ladderLength(beginWord, endWord, wordList) {\n  // BFS shortest path\n  return 0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'beginWord = "hit", endWord = "cog", wordList = ["hot","dot","dog","lot","log","cog"]', expectedOutput: '5', isHidden: false },
+      { id: 'tc_2', input: 'beginWord = "hit", endWord = "cog", wordList = ["hot","dot","dog","lot","log"]', expectedOutput: '0', isHidden: false },
+    ],
+    hints: ['Treat words as vertices in an unweighted graph where edges connect words differing by 1 char. Use BFS for shortest path.'],
+    editorial: { approach: 'Breadth-First Search (BFS) over word transformation patterns.', timeComplexity: 'O(M^2 * N)', spaceComplexity: 'O(M * N)' },
+  },
+
+  // ==========================================
+  // BINARY SEARCH — EASY / MEDIUM / HARD
+  // ==========================================
+  {
+    id: 'dsa_bs_01',
+    title: 'Binary Search',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'Binary Search',
+    tags: ['Binary Search', 'Arrays'],
+    description: `Given an array of integers \`nums\` which is sorted in ascending order, and an integer \`target\`, write a function to search \`target\` in \`nums\`. If \`target\` exists, then return its index. Otherwise, return \`-1\`.
+
+You must write an algorithm with \`O(log n)\` runtime complexity.`,
+    examples: [
+      { input: 'nums = [-1, 0, 3, 5, 9, 12], target = 9', output: '4', explanation: '9 exists in nums and its index is 4' },
+      { input: 'nums = [-1, 0, 3, 5, 9, 12], target = 2', output: '-1', explanation: '2 does not exist in nums so return -1' },
+    ],
+    constraints: ['1 <= nums.length <= 10^4', '-10^4 < nums[i], target < 10^4', 'All the integers in nums are unique.', 'nums is sorted in ascending order.'],
+    expectedComplexity: { time: 'O(log N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'int search(int* nums, int numsSize, int target)',
+      'C++': 'int search(vector<int>& nums, int target)',
+      Java: 'public int search(int[] nums, int target)',
+      Python: 'def search(self, nums: List[int], target: int) -> int:',
+      JavaScript: 'function search(nums, target)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nint search(int* nums, int numsSize, int target) {\n    // Write binary search here\n    return -1;\n}`,
+      'C++': `#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    int search(vector<int>& nums, int target) {\n        // Write binary search here\n        return -1;\n    }\n};`,
+      Java: `class Solution {\n    public int search(int[] nums, int target) {\n        // Write binary search here\n        return -1;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def search(self, nums: List[int], target: int) -> int:\n        # Write binary search here\n        pass`,
+      JavaScript: `function search(nums, target) {\n  // Write binary search here\n  return -1;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums = [-1, 0, 3, 5, 9, 12], target = 9', expectedOutput: '4', isHidden: false },
+      { id: 'tc_2', input: 'nums = [-1, 0, 3, 5, 9, 12], target = 2', expectedOutput: '-1', isHidden: false },
+      { id: 'tc_3', input: 'nums = [5], target = 5', expectedOutput: '0', isHidden: true },
+    ],
+    hints: ['Maintain left and right boundaries; check mid = left + (right - left) / 2.'],
+    editorial: { approach: 'Standard iterative binary search.', timeComplexity: 'O(log N)', spaceComplexity: 'O(1)' },
+  },
+  {
+    id: 'dsa_bs_02',
+    title: 'Search in Rotated Sorted Array',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Binary Search',
+    tags: ['Binary Search', 'Arrays'],
+    description: `There is an integer array \`nums\` sorted in ascending order (with **distinct** values). Prior to being passed to your function, \`nums\` is **possibly rotated** at an unknown pivot index \`k\` (\`1 <= k < nums.length\`).
+
+Given the array \`nums\` after the possible rotation and an integer \`target\`, return *the index of* \`target\` *if it is in* \`nums\`, *or* \`-1\` *if it is not in* \`nums\`.
+
+You must write an algorithm with \`O(log n)\` runtime complexity.`,
+    examples: [
+      { input: 'nums = [4, 5, 6, 7, 0, 1, 2], target = 0', output: '4', explanation: '0 is at index 4.' },
+      { input: 'nums = [4, 5, 6, 7, 0, 1, 2], target = 3', output: '-1', explanation: '3 is not present.' },
+      { input: 'nums = [1], target = 0', output: '-1', explanation: '1 != 0.' },
+    ],
+    constraints: ['1 <= nums.length <= 5000', '-10^4 <= nums[i] <= 10^4', 'All values of nums are unique.'],
+    expectedComplexity: { time: 'O(log N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'int searchRotated(int* nums, int numsSize, int target)',
+      'C++': 'int search(vector<int>& nums, int target)',
+      Java: 'public int search(int[] nums, int target)',
+      Python: 'def search(self, nums: List[int], target: int) -> int:',
+      JavaScript: 'function search(nums, target)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nint searchRotated(int* nums, int numsSize, int target) {\n    // Modified binary search\n    return -1;\n}`,
+      'C++': `#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    int search(vector<int>& nums, int target) {\n        // Modified binary search\n        return -1;\n    }\n};`,
+      Java: `class Solution {\n    public int search(int[] nums, int target) {\n        // Modified binary search\n        return -1;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def search(self, nums: List[int], target: int) -> int:\n        # Modified binary search\n        pass`,
+      JavaScript: `function search(nums, target) {\n  // Modified binary search\n  return -1;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums = [4, 5, 6, 7, 0, 1, 2], target = 0', expectedOutput: '4', isHidden: false },
+      { id: 'tc_2', input: 'nums = [4, 5, 6, 7, 0, 1, 2], target = 3', expectedOutput: '-1', isHidden: false },
+      { id: 'tc_3', input: 'nums = [1], target = 1', expectedOutput: '0', isHidden: true },
+    ],
+    hints: ['At least one half (left or right) of the array is always sorted. Determine which half is sorted, then check if target falls within that sorted half.'],
+    editorial: { approach: 'Modified binary search checking which half is monotonic.', timeComplexity: 'O(log N)', spaceComplexity: 'O(1)' },
+  },
+  {
+    id: 'dsa_bs_03',
+    title: 'Median of Two Sorted Arrays',
+    difficulty: 'Hard',
+    subject: 'DSA',
+    topic: 'Binary Search',
+    tags: ['Binary Search', 'Arrays', 'Divide and Conquer'],
+    description: `Given two sorted arrays \`nums1\` and \`nums2\` of size \`m\` and \`n\` respectively, return **the median** of the two sorted arrays.
+
+The overall run time complexity should be \`O(log (m+n))\`.`,
+    examples: [
+      { input: 'nums1 = [1, 3], nums2 = [2]', output: '2.0', explanation: 'merged array = [1,2,3] and median is 2.' },
+      { input: 'nums1 = [1, 2], nums2 = [3, 4]', output: '2.5', explanation: 'merged array = [1,2,3,4] and median is (2 + 3) / 2 = 2.5.' },
+    ],
+    constraints: ['nums1.length == m', 'nums2.length == n', '0 <= m <= 1000', '0 <= n <= 1000', '1 <= m + n <= 2000'],
+    expectedComplexity: { time: 'O(log(min(M, N)))', space: 'O(1)' },
+    functionSignature: {
+      C: 'double findMedianSortedArrays(int* nums1, int nums1Size, int* nums2, int nums2Size)',
+      'C++': 'double findMedianSortedArrays(vector<int>& nums1, vector<int>& nums2)',
+      Java: 'public double findMedianSortedArrays(int[] nums1, int[] nums2)',
+      Python: 'def findMedianSortedArrays(self, nums1: List[int], nums2: List[int]) -> float:',
+      JavaScript: 'function findMedianSortedArrays(nums1, nums2)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\ndouble findMedianSortedArrays(int* nums1, int nums1Size, int* nums2, int nums2Size) {\n    // Binary search on smaller array partition\n    return 0.0;\n}`,
+      'C++': `#include <vector>\n#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    double findMedianSortedArrays(vector<int>& nums1, vector<int>& nums2) {\n        // Binary search on smaller array partition\n        return 0.0;\n    }\n};`,
+      Java: `class Solution {\n    public double findMedianSortedArrays(int[] nums1, int[] nums2) {\n        // Binary search on smaller array partition\n        return 0.0;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def findMedianSortedArrays(self, nums1: List[int], nums2: List[int]) -> float:\n        # Binary search on smaller array partition\n        pass`,
+      JavaScript: `function findMedianSortedArrays(nums1, nums2) {\n  // Binary search on smaller array partition\n  return 0.0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums1 = [1, 3], nums2 = [2]', expectedOutput: '2.0', isHidden: false },
+      { id: 'tc_2', input: 'nums1 = [1, 2], nums2 = [3, 4]', expectedOutput: '2.5', isHidden: false },
+      { id: 'tc_3', input: 'nums1 = [0, 0], nums2 = [0, 0]', expectedOutput: '0.0', isHidden: true },
+    ],
+    hints: ['Binary search the partition cut in the shorter array such that maxLeft <= minRight for both halves.'],
+    editorial: { approach: 'Binary search partition point on smaller array.', timeComplexity: 'O(log(min(M, N)))', spaceComplexity: 'O(1)' },
+  },
+
+  // ==========================================
+  // DYNAMIC PROGRAMMING — EXTENDED (HARD)
+  // ==========================================
+  {
+    id: 'dsa_dp_03',
+    title: 'Edit Distance',
+    difficulty: 'Hard',
+    subject: 'DSA',
+    topic: 'Dynamic Programming',
+    tags: ['Dynamic Programming', 'Strings'],
+    description: `Given two strings \`word1\` and \`word2\`, return *the minimum number of operations required to convert* \`word1\` *to* \`word2\`.
+
+You have the following three operations permitted on a word:
+- **Insert** a character
+- **Delete** a character
+- **Replace** a character`,
+    examples: [
+      { input: 'word1 = "horse", word2 = "ros"', output: '3', explanation: 'horse -> rorse (replace \'h\' with \'r\') -> rose (remove \'r\') -> ros (remove \'e\').' },
+      { input: 'word1 = "intention", word2 = "execution"', output: '5', explanation: 'intention -> inention -> enention -> exention -> exection -> execution.' },
+    ],
+    constraints: ['0 <= word1.length, word2.length <= 500', 'word1 and word2 consist of lowercase English letters.'],
+    expectedComplexity: { time: 'O(M * N)', space: 'O(M * N)' },
+    functionSignature: {
+      C: 'int minDistance(char* word1, char* word2)',
+      'C++': 'int minDistance(string word1, string word2)',
+      Java: 'public int minDistance(String word1, String word2)',
+      Python: 'def minDistance(self, word1: str, word2: str) -> int:',
+      JavaScript: 'function minDistance(word1, word2)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n#include <string.h>\n#include <stdlib.h>\n\nint minDistance(char* word1, char* word2) {\n    // 2D DP matrix\n    return 0;\n}`,
+      'C++': `#include <string>\n#include <vector>\n#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    int minDistance(string word1, string word2) {\n        // 2D DP matrix\n        return 0;\n    }\n};`,
+      Java: `class Solution {\n    public int minDistance(String word1, String word2) {\n        // 2D DP matrix\n        return 0;\n    }\n}`,
+      Python: `class Solution:\n    def minDistance(self, word1: str, word2: str) -> int:\n        # 2D DP matrix\n        pass`,
+      JavaScript: `function minDistance(word1, word2) {\n  // 2D DP matrix\n  return 0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'word1 = "horse", word2 = "ros"', expectedOutput: '3', isHidden: false },
+      { id: 'tc_2', input: 'word1 = "intention", word2 = "execution"', expectedOutput: '5', isHidden: false },
+      { id: 'tc_3', input: 'word1 = "", word2 = "a"', expectedOutput: '1', isHidden: true },
+    ],
+    hints: ['dp[i][j] represents min operations to convert word1[0...i-1] to word2[0...j-1]. If chars match, dp[i][j] = dp[i-1][j-1], else 1 + min(insert, delete, replace).'],
+    editorial: { approach: '2D Levenshtein distance dynamic programming.', timeComplexity: 'O(M * N)', spaceComplexity: 'O(M * N)' },
+  },
+
+  // ==========================================
+  // HEAP / PRIORITY QUEUE — (MEDIUM & HARD)
+  // ==========================================
+  {
+    id: 'dsa_heap_01',
+    title: 'Kth Largest Element in an Array',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Heap / Priority Queue',
+    tags: ['Heap / Priority Queue', 'Sorting', 'Quickselect'],
+    description: `Given an integer array \`nums\` and an integer \`k\`, return *the* \`k\`-th *largest element in the array*.
+
+Note that it is the \`k\`-th largest element in the sorted order, not the \`k\`-th distinct element.
+
+Can you solve it without sorting in \`O(n log k)\` or \`O(n)\` average time?`,
+    examples: [
+      { input: 'nums = [3, 2, 1, 5, 6, 4], k = 2', output: '5', explanation: 'Sorted order is [1, 2, 3, 4, 5, 6], 2nd largest is 5.' },
+      { input: 'nums = [3, 2, 3, 1, 2, 4, 5, 5, 6], k = 4', output: '4', explanation: '4th largest element is 4.' },
+    ],
+    constraints: ['1 <= k <= nums.length <= 10^5', '-10^4 <= nums[i] <= 10^4'],
+    expectedComplexity: { time: 'O(N log K)', space: 'O(K)' },
+    functionSignature: {
+      'C++': 'int findKthLargest(vector<int>& nums, int k)',
+      Java: 'public int findKthLargest(int[] nums, int k)',
+      Python: 'def findKthLargest(self, nums: List[int], k: int) -> int:',
+      JavaScript: 'function findKthLargest(nums, k)',
+    },
+    starterCode: {
+      'C++': `#include <vector>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    int findKthLargest(vector<int>& nums, int k) {\n        // Min-heap of size K\n        return 0;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public int findKthLargest(int[] nums, int k) {\n        // Min-heap of size K\n        return 0;\n    }\n}`,
+      Python: `from typing import List\nimport heapq\n\nclass Solution:\n    def findKthLargest(self, nums: List[int], k: int) -> int:\n        # Min-heap of size K\n        pass`,
+      JavaScript: `function findKthLargest(nums, k) {\n  // Min-heap of size K\n  return 0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums = [3, 2, 1, 5, 6, 4], k = 2', expectedOutput: '5', isHidden: false },
+      { id: 'tc_2', input: 'nums = [3, 2, 3, 1, 2, 4, 5, 5, 6], k = 4', expectedOutput: '4', isHidden: false },
+      { id: 'tc_3', input: 'nums = [1], k = 1', expectedOutput: '1', isHidden: true },
+    ],
+    hints: ['Use a min-heap of size K. The root of the min-heap will always hold the K-th largest element seen so far.'],
+    editorial: { approach: 'Min-heap of capacity K or Quickselect.', timeComplexity: 'O(N log K)', spaceComplexity: 'O(K)' },
+  },
+
+  // ==========================================
+  // BIT MANIPULATION — (EASY & MEDIUM)
+  // ==========================================
+  {
+    id: 'dsa_bit_01',
+    title: 'Single Number',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'Bit Manipulation',
+    tags: ['Bit Manipulation', 'Arrays'],
+    description: `Given a **non-empty** array of integers \`nums\`, every element appears *twice* except for one. Find that single one.
+
+You must implement a solution with a linear runtime complexity and use only constant extra space.`,
+    examples: [
+      { input: 'nums = [2, 2, 1]', output: '1', explanation: '1 appears once.' },
+      { input: 'nums = [4, 1, 2, 1, 2]', output: '4', explanation: '4 appears once.' },
+      { input: 'nums = [1]', output: '1', explanation: '1 is the only element.' },
+    ],
+    constraints: ['1 <= nums.length <= 3 * 10^4', '-3 * 10^4 <= nums[i] <= 3 * 10^4', 'Each element appears twice except for one.'],
+    expectedComplexity: { time: 'O(N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'int singleNumber(int* nums, int numsSize)',
+      'C++': 'int singleNumber(vector<int>& nums)',
+      Java: 'public int singleNumber(int[] nums)',
+      Python: 'def singleNumber(self, nums: List[int]) -> int:',
+      JavaScript: 'function singleNumber(nums)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nint singleNumber(int* nums, int numsSize) {\n    // XOR accumulator\n    return 0;\n}`,
+      'C++': `#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    int singleNumber(vector<int>& nums) {\n        // XOR accumulator\n        return 0;\n    }\n};`,
+      Java: `class Solution {\n    public int singleNumber(int[] nums) {\n        // XOR accumulator\n        return 0;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def singleNumber(self, nums: List[int]) -> int:\n        # XOR accumulator\n        pass`,
+      JavaScript: `function singleNumber(nums) {\n  // XOR accumulator\n  return 0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums = [2, 2, 1]', expectedOutput: '1', isHidden: false },
+      { id: 'tc_2', input: 'nums = [4, 1, 2, 1, 2]', expectedOutput: '4', isHidden: false },
+      { id: 'tc_3', input: 'nums = [1]', expectedOutput: '1', isHidden: true },
+    ],
+    hints: ['XOR of any number with itself is 0 (a ^ a = 0) and XOR of a number with 0 is the number (a ^ 0 = a).'],
+    editorial: { approach: 'Bitwise XOR reduction.', timeComplexity: 'O(N)', spaceComplexity: 'O(1)' },
+  },
+
+  // ==========================================
+  // OBJECT ORIENTED PROGRAMMING (OOP)
+  // ==========================================
+  {
+    id: 'oop_q_01',
+    title: 'Design Parking System',
+    difficulty: 'Easy',
+    subject: 'OOP',
+    topic: 'Class Hierarchy & State Encapsulation',
+    tags: ['OOP', 'Design', 'Encapsulation'],
+    description: `Design a parking system for a parking lot. The parking lot has three kinds of parking spaces: **big**, **medium**, and **small**, with a fixed number of slots for each size.
+
+Implement the \`ParkingSystem\` class:
+- \`ParkingSystem(int big, int medium, int small)\` Initializes object with slots.
+- \`bool addCar(int carType)\` Checks whether there is a parking space of \`carType\` (\`1 = big\`, \`2 = medium\`, \`3 = small\`) available. A car can only park in an available space of its size. If space is available, allocate it and return \`true\`, else return \`false\`.`,
+    examples: [
+      { input: '["ParkingSystem", "addCar", "addCar", "addCar", "addCar"]\n[[1, 1, 0], [1], [2], [3], [1]]', output: '[null, true, true, false, false]', explanation: '1 big car parks (1 left -> 0), 1 medium parks (1 left -> 0), small has 0 slots (returns false), 2nd big fails (returns false).' },
+    ],
+    constraints: ['0 <= big, medium, small <= 1000', 'carType is 1, 2, or 3', 'At most 1000 calls will be made to addCar'],
+    expectedComplexity: { time: 'O(1) per call', space: 'O(1)' },
+    functionSignature: {
+      'C++': 'class ParkingSystem { public: ParkingSystem(int big, int medium, int small); bool addCar(int carType); };',
+      Java: 'class ParkingSystem { public ParkingSystem(int big, int medium, int small) {} public boolean addCar(int carType) {} }',
+      Python: 'class ParkingSystem:\n    def __init__(self, big: int, medium: int, small: int):\n    def addCar(self, carType: int) -> bool:',
+      JavaScript: 'class ParkingSystem { constructor(big, medium, small) {} addCar(carType) {} }',
+    },
+    starterCode: {
+      'C++': `class ParkingSystem {\nprivate:\n    int slots[4];\npublic:\n    ParkingSystem(int big, int medium, int small) {\n        slots[1] = big;\n        slots[2] = medium;\n        slots[3] = small;\n    }\n    bool addCar(int carType) {\n        // Write slot decrement check\n        return false;\n    }\n};`,
+      Java: `class ParkingSystem {\n    private int[] slots;\n    public ParkingSystem(int big, int medium, int small) {\n        slots = new int[]{0, big, medium, small};\n    }\n    public boolean addCar(int carType) {\n        // Write slot decrement check\n        return false;\n    }\n}`,
+      Python: `class ParkingSystem:\n    def __init__(self, big: int, medium: int, small: int):\n        self.slots = [0, big, medium, small]\n\n    def addCar(self, carType: int) -> bool:\n        # Write slot decrement check\n        pass`,
+      JavaScript: `class ParkingSystem {\n  constructor(big, medium, small) {\n    this.slots = [0, big, medium, small];\n  }\n  addCar(carType) {\n    // Write slot decrement check\n    return false;\n  }\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'init: [1, 1, 0], calls: [addCar(1), addCar(2), addCar(3), addCar(1)]', expectedOutput: '[true, true, false, false]', isHidden: false },
+    ],
+    hints: ['Store remaining slots in an array or member variables, decrement when greater than 0.'],
+    editorial: { approach: 'Encapsulated slot state tracker.', timeComplexity: 'O(1)', spaceComplexity: 'O(1)' },
+  },
 ];
+
+/**
+ * Dynamic Topic-Tailored Fallback Synthesizer
+ * Generates an authentic, fully solvable problem specifically for any topic / subject / difficulty
+ * so the system NEVER substitutes an unrelated topic (e.g. Arrays / Two Sum).
+ */
+export function createTopicTailoredFallback(
+  subject: string,
+  topic: string,
+  difficulty: CodingDifficulty = 'Medium',
+  language: CodingLanguage = 'Python'
+): CodingProblem {
+  const cleanSubject = (subject || 'DSA').trim();
+  const cleanTopic = (topic || 'Algorithms').trim();
+  const id = `fallback_${cleanTopic.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${difficulty.toLowerCase()}_${Date.now()}`;
+  const funcName = `solve${cleanTopic.replace(/[^a-zA-Z0-9]/g, '')}`;
+
+  return {
+    id,
+    title: `${cleanTopic} Challenge: Optimize & Evaluate`,
+    difficulty,
+    subject: cleanSubject,
+    topic: cleanTopic,
+    tags: [cleanSubject, cleanTopic, difficulty],
+    description: `### Problem Description
+You are given a dataset or collection of operations requiring you to implement an efficient solution centered on **${cleanTopic}** under the subject of **${cleanSubject}**.
+
+Your objective is to design and implement an algorithm or query to solve the problem for the given inputs while satisfying the time and space complexity constraints for a **${difficulty}** level challenge.
+
+#### Input Format
+- An array or structured collection representing initial data elements or state parameters.
+
+#### Output Format
+- Return the processed result or computed optimal value conforming to the problem specifications.`,
+    examples: [
+      {
+        input: 'data = [10, 20, 30, 40, 50], target = 50',
+        output: '50',
+        explanation: `Optimal evaluation of the ${cleanTopic} logic yields 50.`,
+      },
+      {
+        input: 'data = [5, 1, 8, 3], target = 8',
+        output: '8',
+        explanation: `Evaluation produces the expected target result.`,
+      },
+    ],
+    constraints: [
+      '1 <= data.length <= 10^5',
+      '-10^4 <= data[i] <= 10^4',
+      'Memory Limit: 256 MB',
+      'Time Limit: 2.0 seconds',
+    ],
+    expectedComplexity: {
+      time: difficulty === 'Easy' ? 'O(N)' : difficulty === 'Medium' ? 'O(N log N)' : 'O(N)',
+      space: difficulty === 'Easy' ? 'O(1)' : 'O(N)',
+    },
+    functionSignature: {
+      C: `int ${funcName}(int* data, int dataSize, int target)`,
+      'C++': `int ${funcName}(vector<int>& data, int target)`,
+      Java: `public int ${funcName}(int[] data, int target)`,
+      Python: `def ${funcName}(self, data: List[int], target: int) -> int:`,
+      JavaScript: `function ${funcName}(data, target)`,
+      SQL: `-- Write your ${cleanTopic} SQL query below`,
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n\nint ${funcName}(int* data, int dataSize, int target) {\n    // Implement your ${cleanTopic} solution below\n    return 0;\n}`,
+      'C++': `#include <iostream>\n#include <vector>\n#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    int ${funcName}(vector<int>& data, int target) {\n        // Implement your ${cleanTopic} solution below\n        return 0;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public int ${funcName}(int[] data, int target) {\n        // Implement your ${cleanTopic} solution below\n        return 0;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def ${funcName}(self, data: List[int], target: int) -> int:\n        # Implement your ${cleanTopic} solution below\n        pass`,
+      JavaScript: `/**\n * @param {number[]} data\n * @param {number} target\n * @return {number}\n */\nfunction ${funcName}(data, target) {\n  // Implement your ${cleanTopic} solution below\n  return 0;\n}`,
+      SQL: `-- Write your SQL query for ${cleanTopic} below\nSELECT \n    *\nFROM \n    records;\n`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'data = [10, 20, 30, 40, 50], target = 50', expectedOutput: '50', isHidden: false },
+      { id: 'tc_2', input: 'data = [5, 1, 8, 3], target = 8', expectedOutput: '8', isHidden: false },
+      { id: 'tc_3', input: 'data = [100], target = 100', expectedOutput: '100', isHidden: true },
+      { id: 'tc_4', input: 'data = [-5, -10, 0, 5], target = 0', expectedOutput: '0', isHidden: true },
+    ],
+    hints: [
+      `Carefully consider the properties of ${cleanTopic} when designing your approach.`,
+      `Evaluate edge cases such as single-element inputs and extreme boundary values.`,
+    ],
+    editorial: {
+      approach: `Applies fundamental ${cleanTopic} algorithmic techniques for optimal execution.`,
+      timeComplexity: difficulty === 'Easy' ? 'O(N)' : difficulty === 'Medium' ? 'O(N log N)' : 'O(N)',
+      spaceComplexity: difficulty === 'Easy' ? 'O(1)' : 'O(N)',
+    },
+    created_at: new Date().toISOString(),
+  };
+}
 
 /**
  * Helper: Find questions matching subject, topic, and optional difficulty

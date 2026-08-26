@@ -429,21 +429,45 @@ export const cloudSyncService = {
       if (localData.codingSubmissions.length > 0) {
         for (const sub of localData.codingSubmissions) {
           const submissionId = sub.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          const totalTC = typeof sub.total_test_cases === 'number' && sub.total_test_cases > 0
+            ? sub.total_test_cases
+            : 5;
+          let passedTC = typeof sub.test_cases_passed === 'number'
+            ? Math.max(0, Math.min(sub.test_cases_passed, totalTC))
+            : (sub.status?.toLowerCase() === 'accepted' ? totalTC : 0);
+
+          let status = (sub.status || '').toLowerCase().trim();
+          if (passedTC === totalTC && totalTC > 0) {
+            status = 'accepted';
+          } else {
+            if (status === 'accepted' || !status) {
+              status = 'wrong_answer';
+            }
+          }
+          const statusText = status === 'accepted' ? 'Accepted' : (sub.status_text || sub.statusText || 'Wrong Answer');
+
           const payload = {
             id: submissionId,
             user_id: userId,
             problem_id: String(sub.problem_id || sub.problemId || submissionId),
             problem_title: sub.problem_title || sub.problemTitle || 'Coding Problem',
             language: sub.language || 'javascript',
-            code: sub.code || '',
-            status: sub.status || 'Accepted',
-            status_text: sub.status_text || sub.statusText || 'Accepted',
-            test_cases_passed: typeof sub.test_cases_passed === 'number' ? sub.test_cases_passed : 1,
-            total_test_cases: typeof sub.total_test_cases === 'number' ? sub.total_test_cases : 1,
-            execution_time_ms: typeof sub.execution_time_ms === 'number' ? sub.execution_time_ms : 45,
+            code: sub.code || sub.submitted_code || '',
+            status: status,
+            status_text: statusText,
+            test_cases_passed: passedTC,
+            total_test_cases: totalTC,
+            execution_time_ms: typeof sub.execution_time_ms === 'number' ? sub.execution_time_ms : (typeof sub.runtime_ms === 'number' ? sub.runtime_ms : 45),
+            runtime_ms: typeof sub.runtime_ms === 'number' ? sub.runtime_ms : (typeof sub.execution_time_ms === 'number' ? sub.execution_time_ms : 45),
+            memory_kb: typeof sub.memory_kb === 'number' ? sub.memory_kb : 14200,
+            memory_used_kb: typeof sub.memory_used_kb === 'number' ? sub.memory_used_kb : 14200,
+            time_complexity: sub.time_complexity || '',
+            space_complexity: sub.space_complexity || '',
             topic: sub.topic || sub.subject || 'DSA',
             difficulty: sub.difficulty || 'Medium',
-            submitted_at: sub.submitted_at || sub.submittedAt || new Date().toISOString(),
+            ai_feedback: sub.ai_feedback || {},
+            submitted_at: sub.submitted_at || sub.submittedAt || sub.created_at || new Date().toISOString(),
+            created_at: sub.created_at || sub.submitted_at || new Date().toISOString(),
           };
 
           const { error } = await supabase.from('coding_submissions').upsert(payload, { onConflict: 'id' });

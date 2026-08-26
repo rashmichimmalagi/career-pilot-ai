@@ -517,7 +517,11 @@ export function calculateAchievements(
 
   if (Array.isArray(submissions)) {
     for (const sub of submissions) {
-      if (sub.status?.toLowerCase() === 'accepted') {
+      const totalTC = typeof sub.total_test_cases === 'number' && sub.total_test_cases > 0 ? sub.total_test_cases : 5;
+      const passedTC = typeof sub.test_cases_passed === 'number' ? sub.test_cases_passed : (sub.status === 'accepted' ? totalTC : 0);
+      const isAccepted = sub.status?.toLowerCase() === 'accepted' && passedTC === totalTC && totalTC > 0;
+
+      if (isAccepted) {
         const pId = sub.problem_id || sub.problem_title || sub.id;
         if (pId && !uniqueSolvedProblemIds.has(pId)) {
           uniqueSolvedProblemIds.add(pId);

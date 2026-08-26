@@ -86,15 +86,47 @@ export const CareerRoadmapPage: React.FC<CareerRoadmapPageProps> = ({ onNavigate
   };
 
   const handleToggleItem = (itemId: string) => {
-    toggleCompletedItemId(studentId, itemId);
-    // Reload state to reflect updated completion status
-    loadRoadmap();
+    const updatedCompletedIds = toggleCompletedItemId(studentId, itemId);
+    setAnalysis((prev) => {
+      if (!prev) return prev;
+      const updatedPhases = prev.phases.map((phase) => {
+        const updatedItems = phase.items.map((it) => ({
+          ...it,
+          isCompleted: updatedCompletedIds.includes(it.id),
+        }));
+        const completedCount = updatedItems.filter((it) => it.isCompleted).length;
+        const percent = updatedItems.length > 0 ? Math.round((completedCount / updatedItems.length) * 100) : 0;
+        return {
+          ...phase,
+          items: updatedItems,
+          completionPercentage: percent,
+          status: (percent === 100 ? 'completed' : percent > 0 ? 'current' : 'upcoming') as 'completed' | 'current' | 'upcoming',
+        };
+      });
+      const nextAnalysis = {
+        ...prev,
+        phases: updatedPhases,
+      };
+      try {
+        localStorage.setItem(`careerpilot_roadmap_cache_${studentId}`, JSON.stringify(nextAnalysis));
+      } catch (_) {}
+      return nextAnalysis;
+    });
   };
 
   const handleToggleDailyTask = (taskId: string) => {
-    toggleStoredTask(studentId, taskId);
-    // Reload state
-    loadRoadmap();
+    const updatedTasks = toggleStoredTask(studentId, taskId);
+    setAnalysis((prev) => {
+      if (!prev) return prev;
+      const nextAnalysis = {
+        ...prev,
+        dailyTasks: updatedTasks,
+      };
+      try {
+        localStorage.setItem(`careerpilot_roadmap_cache_${studentId}`, JSON.stringify(nextAnalysis));
+      } catch (_) {}
+      return nextAnalysis;
+    });
   };
 
   // Safe navigation with complete query string builder and explicit source context

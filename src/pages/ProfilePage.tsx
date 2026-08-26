@@ -37,8 +37,6 @@ import { EditAcademicModal } from '../components/profile/EditAcademicModal';
 import { EditPlacementFocusModal } from '../components/profile/EditPlacementFocusModal';
 import { EditPreparationProfileModal } from '../components/profile/EditPreparationProfileModal';
 import { SendTestEmailCard } from '../components/common/SendTestEmailCard';
-import { PersistenceDiagnosticModal } from '../components/dashboard/PersistenceDiagnosticModal';
-import { runPersistenceDiagnostics, CareerPilotDiagnosticReport } from '../services/diagnosticService';
 
 interface ProfilePageProps {
   onNavigate: (page: string) => void;
@@ -52,22 +50,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
   const [isPreparationModalOpen, setIsPreparationModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'academic' | 'career' | 'skills' | 'security'>('overview');
   const [isSaving, setIsSaving] = useState(false);
-  const [diagReport, setDiagReport] = useState<CareerPilotDiagnosticReport | null>(null);
-  const [isDiagRunning, setIsDiagRunning] = useState(false);
-  const [showDiagModal, setShowDiagModal] = useState(false);
-
-  const handleRunDiagnostics = async () => {
-    setIsDiagRunning(true);
-    try {
-      const report = await runPersistenceDiagnostics();
-      setDiagReport(report);
-      setShowDiagModal(true);
-    } catch (err: any) {
-      console.error('Failed to run diagnostics:', err);
-    } finally {
-      setIsDiagRunning(false);
-    }
-  };
 
   const studentId = user?.id || profile?.id || '';
 
@@ -82,16 +64,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
       setLocalProfile({ ...profile });
     }
   }, [profile]);
-
-  useEffect(() => {
-    const handleOpenDiag = () => {
-      handleRunDiagnostics();
-    };
-    window.addEventListener('open-persistence-diagnostics', handleOpenDiag);
-    return () => {
-      window.removeEventListener('open-persistence-diagnostics', handleOpenDiag);
-    };
-  }, []);
 
   const completion: ProfileCompletionStatus = calculateProfileCompletion(profile || (localProfile as ProfileFormData));
 
@@ -817,27 +789,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                     Active
                   </span>
                 </div>
-
-                {/* Cloud Persistence & Supabase Synchronization Diagnostics */}
-                <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-800/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                      <Activity className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Cloud Persistence Diagnostics</span>
-                      <p className="text-[11px] text-slate-500">Verify Supabase tables, records count, and cross-device sync status</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleRunDiagnostics}
-                    disabled={isDiagRunning}
-                    className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors cursor-pointer inline-flex items-center gap-1.5 shrink-0"
-                  >
-                    <Activity className={`w-3.5 h-3.5 ${isDiagRunning ? 'animate-spin' : ''}`} />
-                    <span>{isDiagRunning ? 'Checking...' : 'Run Diagnostics'}</span>
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -847,15 +798,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
         )}
 
       </div>
-
-      {/* Persistence Diagnostics Modal */}
-      <PersistenceDiagnosticModal
-        isOpen={showDiagModal}
-        onClose={() => setShowDiagModal(false)}
-        report={diagReport}
-        isLoading={isDiagRunning}
-        onRefresh={handleRunDiagnostics}
-      />
 
       {/* Focused Academic Info Modal */}
       {isAcademicModalOpen && (

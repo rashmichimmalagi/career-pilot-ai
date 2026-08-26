@@ -87,16 +87,22 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
   const { user, profile, showToast } = useAuth();
   const effectiveUserId = profile?.id || user?.id || 'guest';
 
-  // Resume Versioning State
-  const [resumes, setResumes] = useState<ResumeVersionItem[]>([]);
-  const [activeResumeId, setActiveResumeId] = useState<string | null>(null);
+  // Resume Versioning State - initialized synchronously from cache
+  const initialCachedResumes = React.useMemo(() => {
+    return resumeService.getCachedUserResumes(effectiveUserId);
+  }, [effectiveUserId]);
+
+  const initialCurrentResume = initialCachedResumes.find((r) => r.isCurrent) || initialCachedResumes[0] || null;
+
+  const [resumes, setResumes] = useState<ResumeVersionItem[]>(initialCachedResumes);
+  const [activeResumeId, setActiveResumeId] = useState<string | null>(initialCurrentResume?.id || null);
   const [isLoadingResumes, setIsLoadingResumes] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewingResume, setViewingResume] = useState<ResumeVersionItem | null>(null);
 
   // Active Analysis State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [targetRole, setTargetRole] = useState<string>('Software Developer');
+  const [targetRole, setTargetRole] = useState<string>(initialCurrentResume?.targetRole || 'Software Developer');
   const [customRoleInput, setCustomRoleInput] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -117,15 +123,23 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
   }, []);
 
   // Resume Data State
-  const [extractedResumeText, setExtractedResumeText] = useState<string>('');
-  const [analysisResult, setAnalysisResult] = useState<ResumeAnalysisResult | null>(null);
+  const [extractedResumeText, setExtractedResumeText] = useState<string>(initialCurrentResume?.resumeText || '');
+  const [analysisResult, setAnalysisResult] = useState<ResumeAnalysisResult | null>(initialCurrentResume?.analysisResult || null);
 
   // Improvement Flow State
-  const [flowState, setFlowState] = useState<FlowState>('idle');
+  const [flowState, setFlowState] = useState<FlowState>(() => {
+    if (initialCurrentResume?.improvedData && initialCurrentResume?.comparisonData) {
+      return 'improved_view';
+    }
+    if (initialCurrentResume?.analysisResult) {
+      return 'analyzed';
+    }
+    return 'idle';
+  });
   const [improvementQuestions, setImprovementQuestions] = useState<ResumeImprovementQuestion[]>([]);
-  const [studentAnswers, setStudentAnswers] = useState<ResumeQuestionAnswer[]>([]);
-  const [improvedResumeData, setImprovedResumeData] = useState<ImprovedResumeResponse | null>(null);
-  const [comparisonData, setComparisonData] = useState<ResumeBeforeAfterComparison | null>(null);
+  const [studentAnswers, setStudentAnswers] = useState<ResumeQuestionAnswer[]>(initialCurrentResume?.studentAnswers || []);
+  const [improvedResumeData, setImprovedResumeData] = useState<ImprovedResumeResponse | null>(initialCurrentResume?.improvedData || null);
+  const [comparisonData, setComparisonData] = useState<ResumeBeforeAfterComparison | null>(initialCurrentResume?.comparisonData || null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [activeTab, setActiveTab] = useState<'improved' | 'original'>('improved');
 

@@ -2,8 +2,9 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
+import { DEFAULT_CODING_QUESTION_BANK, getQuestionsForTopic, createTopicTailoredFallback } from './src/data/codingQuestionBank';
 
 dotenv.config();
 
@@ -23,16 +24,37 @@ function getGemini(): { client: GoogleGenAI | null; error: string | null } {
   if (!geminiClient) {
     geminiClient = new GoogleGenAI({
       apiKey: apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
     });
   }
   return { client: geminiClient, error: null };
 }
 
 const SUPPORTED_MODELS = [
-  'gemini-3.7-flash',
   'gemini-3.1-flash-lite',
   'gemini-flash-latest',
+  'gemini-3.7-flash',
 ];
+
+const modelCooldownMap = new Map<string, number>();
+
+function isModelInCooldown(modelName: string): boolean {
+  const expiry = modelCooldownMap.get(modelName);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    modelCooldownMap.delete(modelName);
+    return false;
+  }
+  return true;
+}
+
+function setModelCooldown(modelName: string, durationMs: number = 60000) {
+  modelCooldownMap.set(modelName, Date.now() + durationMs);
+}
 
 interface GenerateResilienceOptions {
   config?: any;
@@ -71,17 +93,26 @@ async function generateContentWithResilience(
   options: GenerateResilienceOptions = {}
 ): Promise<{ response: any; usedModel: string }> {
   const label = options.label || 'Gemini Service';
-  const perAttemptTimeout = options.timeoutMs ?? 12000;
+  const perAttemptTimeout = options.timeoutMs ?? 7500;
   let lastError: any = null;
 
-  for (let mIdx = 0; mIdx < SUPPORTED_MODELS.length; mIdx++) {
-    const modelName = SUPPORTED_MODELS[mIdx];
-    const maxAttempts = options.maxAttemptsPerModel ?? 2;
+  // Filter out models currently in cooldown due to quota exhaustion, or try all if all in cooldown
+  const activeModels = SUPPORTED_MODELS.filter((m) => !isModelInCooldown(m));
+  const modelsToTry = activeModels.length > 0 ? activeModels : SUPPORTED_MODELS;
+
+  for (let mIdx = 0; mIdx < modelsToTry.length; mIdx++) {
+    const modelName = modelsToTry[mIdx];
+    const maxAttempts = options.maxAttemptsPerModel ?? 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         console.log(`[${label}] Invoking model ${modelName} (attempt ${attempt}/${maxAttempts})...`);
         const configPayload = options.config ? { ...options.config } : undefined;
+
+        // Strip thinkingConfig if the target model is not a Gemini 3 model
+        if (configPayload && !modelName.startsWith('gemini-3.')) {
+          delete configPayload.thinkingConfig;
+        }
 
         const response = await withTimeout(
           ai.models.generateContent({
@@ -100,17 +131,31 @@ async function generateContentWithResilience(
       } catch (err: any) {
         lastError = err;
         const errorMsg = err?.message || String(err);
-        const isDemandSpike =
+        const isQuotaExceeded =
+          errorMsg.includes('429') ||
+          errorMsg.includes('RESOURCE_EXHAUSTED') ||
+          errorMsg.includes('ResourceExhausted') ||
+          errorMsg.includes('Quota exceeded') ||
+          errorMsg.includes('quota') ||
+          errorMsg.includes('rate-limit') ||
+          errorMsg.includes('limit: 20');
+
+        const isDemandSpikeOrTimeout =
           errorMsg.includes('503') ||
           errorMsg.includes('high demand') ||
           errorMsg.includes('UNAVAILABLE') ||
-          errorMsg.includes('ResourceExhausted') ||
-          errorMsg.includes('timed out') ||
-          errorMsg.includes('429');
+          errorMsg.includes('timed out');
 
-        if (isDemandSpike) {
-          console.info(`[${label}] Model ${modelName} temporary demand spike or timeout, automatically switching to high-availability model in pool...`);
-          break; // Break inner retry loop to immediately try the next model without waiting!
+        if (isQuotaExceeded) {
+          console.info(`[${label}] Model ${modelName} hit quota/rate limits. Placing on 3-minute cooldown and switching model immediately...`);
+          setModelCooldown(modelName, 180000); // 3-minute cooldown
+          break; // Break inner retry loop to immediately try next model!
+        }
+
+        if (isDemandSpikeOrTimeout) {
+          console.info(`[${label}] Model ${modelName} temporary demand spike or timeout, switching to next high-availability model in pool...`);
+          setModelCooldown(modelName, 30000); // 30-second cooldown
+          break; // Break inner retry loop to immediately try next model!
         }
 
         console.warn(`[${label}] Model "${modelName}" attempt ${attempt} notice:`, errorMsg);
@@ -131,6 +176,7 @@ async function generateContentWithResilience(
         responseSchema: undefined,
         responseMimeType: 'application/json',
       };
+      delete simplifiedConfig.thinkingConfig;
       const response = await withTimeout(
         ai.models.generateContent({
           model: 'gemini-3.1-flash-lite',
@@ -2208,21 +2254,79 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
       });
     }
 
-    const { subject = 'DSA', topic = 'Arrays', difficulty = 'Medium', language = 'Python', targetCompany, targetRole } = req.body || {};
+    const {
+      subject = 'DSA',
+      topic = 'Arrays',
+      difficulty = 'Medium',
+      language = 'Python',
+      targetCompany,
+      targetRole,
+      solvedProblemIds = [],
+      solvedTitles = [],
+    } = req.body || {};
 
     const cleanSubject = typeof subject === 'string' && subject.trim() && subject !== '+ Custom Subject' ? subject.trim() : 'DSA';
     const cleanTopic = typeof topic === 'string' && topic.trim() && topic !== 'Custom Topic' ? topic.trim() : 'Arrays';
     const cleanCompany = typeof targetCompany === 'string' && targetCompany.trim() ? targetCompany.trim() : '';
     const cleanRole = typeof targetRole === 'string' && targetRole.trim() ? targetRole.trim() : '';
 
-    console.log(`[Coding Arena] Incoming problem generation request: subject="${cleanSubject}", topic="${cleanTopic}", difficulty="${difficulty}", language="${language}", company="${cleanCompany}", role="${cleanRole}"`);
+    const solvedIdSet = new Set<string>((Array.isArray(solvedProblemIds) ? solvedProblemIds : []).map(String));
+    const solvedTitleSet = new Set<string>((Array.isArray(solvedTitles) ? solvedTitles : []).map((t) => String(t).trim().toLowerCase()));
+
+    const isProblemAlreadySolved = (p: any): boolean => {
+      if (!p) return false;
+      if (p.id && solvedIdSet.has(String(p.id))) return true;
+      if (p.title && solvedTitleSet.has(String(p.title).trim().toLowerCase())) return true;
+      return false;
+    };
+
+    // Helper: Select an authentic unsolved curated question from the question bank or generate topic-tailored fallback
+    const getCuratedUnsolvedFallback = () => {
+      // 1. Unsolved in exact subject, topic, and difficulty
+      const exactPool = getQuestionsForTopic(cleanSubject, cleanTopic, difficulty);
+      const unsolvedExact = exactPool.filter((p) => !isProblemAlreadySolved(p));
+      if (unsolvedExact.length > 0) {
+        return unsolvedExact[Math.floor(Math.random() * unsolvedExact.length)];
+      }
+
+      // 2. Unsolved in exact subject and topic across any difficulty
+      const topicPool = getQuestionsForTopic(cleanSubject, cleanTopic);
+      const unsolvedTopic = topicPool.filter((p) => !isProblemAlreadySolved(p));
+      if (unsolvedTopic.length > 0) {
+        return unsolvedTopic[0];
+      }
+
+      // 3. Fallback: Generate a dedicated problem specifically tailored for this topic & subject & difficulty
+      // This strictly prevents cross-topic contamination (e.g. returning Arrays/Two Sum for Strings or Trees)
+      return createTopicTailoredFallback(cleanSubject, cleanTopic, difficulty, language);
+    };
+
+    console.log(`[Coding Arena] Incoming problem generation request: subject="${cleanSubject}", topic="${cleanTopic}", difficulty="${difficulty}", language="${language}", company="${cleanCompany}", role="${cleanRole}", solvedCount=${solvedIdSet.size}`);
 
     const { client: ai, error: configError } = getGemini();
+
+    // If AI is not configured, immediately return curated unsolved problem
     if (!ai || configError) {
-      return res.status(503).json({
-        success: false,
-        stage: 'AI configuration',
-        error: configError || 'AI service is not configured.',
+      console.warn('[Coding Arena] AI client not configured. Serving curated unsolved problem.');
+      const fallbackProb = getCuratedUnsolvedFallback();
+      const sanitizedStarterCode: Record<string, string> = {};
+      const supportedLangs = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
+      const rawStarterCodes = fallbackProb.starterCode || fallbackProb.starter_templates || {};
+      for (const lang of supportedLangs) {
+        const rawCode = rawStarterCodes[lang];
+        const sig = fallbackProb.functionSignature?.[lang];
+        sanitizedStarterCode[lang] = sanitizeStarterCode(rawCode, lang, fallbackProb.title, sig);
+      }
+      const finalFallback = {
+        ...fallbackProb,
+        starterCode: sanitizedStarterCode,
+        starter_templates: sanitizedStarterCode,
+      };
+      savedProblemsStore.set(finalFallback.id, finalFallback);
+      return res.json({
+        success: true,
+        data: finalFallback,
+        isFallback: true,
       });
     }
 
@@ -2233,7 +2337,7 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [SQL / RELATIONAL QUERIES]
 1. The problem MUST be a database querying or relational table problem.
 2. The problem description MUST define explicit table schemas (table names, column names, data types, and sample rows).
-3. The student's task must be to write a query (or equivalent data transformation) solving the relational problem (e.g. JOINs, filtering with WHERE, aggregations with GROUP BY / HAVING, ORDER BY, subqueries).
+3. The student's task must be to write a query solving the relational problem (e.g. JOINs, filtering with WHERE, aggregations with GROUP BY / HAVING, ORDER BY).
 4. For SQL language, starter code MUST be an empty query template:
 -- Write your SQL query below
 SELECT 
@@ -2242,36 +2346,29 @@ FROM
     <table>;`;
     } else if (subjectUpper === 'DBMS') {
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [DBMS / DATABASE MANAGEMENT SYSTEMS]
-1. The problem MUST test core DBMS principles (e.g. Normalization 1NF/2NF/3NF/BCNF, functional dependencies, candidate keys, transaction conflict serializability, ACID property verification, indexing / B-Tree simulation).
+1. The problem MUST test core DBMS principles (e.g. Normalization 1NF/2NF/3NF/BCNF, functional dependencies, candidate keys, transaction conflict serializability, ACID property verification).
 2. Ground the problem in concrete relational schema structures or relational dependencies.`;
     } else if (subjectUpper === 'OPERATING SYSTEMS') {
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [OPERATING SYSTEMS]
-1. The problem MUST test core OS algorithms and mechanisms (e.g. CPU process scheduling like FCFS/SJF/Round Robin/Priority, page replacement algorithms like FIFO/LRU/Optimal, deadlock detection / Banker's algorithm, semaphore / mutex synchronization logic, or memory allocation).`;
+1. The problem MUST test core OS algorithms and mechanisms (e.g. CPU process scheduling like FCFS/SJF/Round Robin/Priority, page replacement algorithms like FIFO/LRU/Optimal, deadlock detection / Banker's algorithm, semaphore / mutex synchronization logic).`;
     } else if (subjectUpper === 'COMPUTER NETWORKS') {
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [COMPUTER NETWORKS]
-1. The problem MUST test networking concepts (e.g. IPv4/IPv6 CIDR subnetting and host calculation, packet header parsing, checksum calculation, network routing algorithms like Dijkstra / Bellman-Ford, TCP window flow control, or socket firewall packet filtering).`;
+1. The problem MUST test networking concepts (e.g. IPv4/IPv6 CIDR subnetting, packet header parsing, checksum calculation, network routing algorithms, TCP window flow control).`;
     } else if (subjectUpper === 'OOP') {
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [OBJECT ORIENTED PROGRAMMING]
-1. The problem MUST test OOP design principles (e.g. encapsulation, polymorphism, inheritance, class hierarchy design, design patterns like Factory/Observer/Singleton/Strategy, or domain object simulation).`;
+1. The problem MUST test OOP design principles (e.g. encapsulation, polymorphism, inheritance, class hierarchy design, design patterns like Factory/Observer/Singleton/Strategy).`;
     } else if (subjectUpper === 'SYSTEM DESIGN') {
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [SYSTEM DESIGN]
-1. The problem MUST test system design components (e.g. Rate Limiting algorithms like Token Bucket / Leaky Bucket, LRU/LFU cache eviction, Consistent Hashing ring placement, Distributed ID generation, or capacity / throughput calculation).`;
+1. The problem MUST test system design components (e.g. Rate Limiting algorithms like Token Bucket / Leaky Bucket, LRU/LFU cache eviction, Consistent Hashing ring placement).`;
     } else if (subjectUpper === 'WEB DEVELOPMENT') {
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [WEB DEVELOPMENT]
-1. The problem MUST test web domain logic (e.g. URL query string parsing and serialization, Cookie string decoding, HTML tag nesting / sanitization, REST API route matching, or client-side event queue simulation).`;
+1. The problem MUST test web domain logic (e.g. URL query string parsing and serialization, Cookie string decoding, HTML tag nesting / sanitization, REST API route matching).`;
     } else if (['JAVA', 'PYTHON', 'C/C++', 'JAVASCRIPT'].includes(subjectUpper)) {
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [${cleanSubject} PROGRAMMING & STANDARD LIBRARY]
 1. The problem MUST test language idiomatic problem solving, standard data structures, and algorithmic logic in ${cleanSubject}.`;
     } else {
-      // Custom Subject
       subjectContract = `EXPLICIT SUBJECT CONTRACT: [CUSTOM SUBJECT: ${cleanSubject}]
-1. The problem MUST be an authentic algorithmic or data manipulation problem grounded in real-world ${cleanSubject} domain concepts.
-2. For example:
-   - If Cloud Computing: VM resource allocation, instance quota monitoring, cluster auto-scaling thresholds, container task scheduling.
-   - If Cybersecurity: network packet filtering, firewall rule precedence, intrusion detection signature matching, cryptographic token verification, port scan detection.
-   - If DevOps: CI/CD pipeline dependency DAG resolution, deployment canary traffic routing, container log aggregation.
-   - If Machine Learning: cosine similarity, vector distance calculation, confusion matrix metrics (precision/recall), gradient step calculation.
-   - If Aptitude: logical deduction puzzles, numerical reasoning, probability/permutation algorithmic calculations.`;
+1. The problem MUST be an authentic algorithmic or data manipulation problem grounded in real-world ${cleanSubject} domain concepts.`;
     }
 
     // Build Explicit Difficulty Contract
@@ -2280,42 +2377,22 @@ FROM
 
     if (difficulty === 'Easy') {
       difficultyContract = `EXPLICIT DIFFICULTY CONTRACT: [EASY / BEGINNER]
-1. The problem MUST be beginner-friendly, straightforward, and solvable using:
-   - Basic programming fundamentals
-   - Simple loops (single loop or straightforward pass)
-   - Basic conditions (if/else checks)
-   - Basic arrays, strings, or numbers
-   - Basic arithmetic or simple counting
-   - Direct straightforward traversal
+1. The problem MUST be beginner-friendly, straightforward, and solvable using basic programming fundamentals, simple loops, or basic conditions.
 2. STRICTLY FORBIDDEN unless "${cleanTopic}" specifically IS that concept:
    - NO Sliding Window / Window of length k / Length-k subarray reasoning
    - NO Subarray parity balancing / Contiguous subarray optimization
    - NO Prefix Sum / Cumulative Sum arrays
    - NO Two Pointers (left/right shrink/expand)
-   - NO Hash Maps / Hash Tables (unless topic is Hashing)
-   - NO Dynamic Programming / Memoization (unless topic is DP)
-   - NO Graph algorithms / BFS / DFS / Topological Sort / Union Find
-   - NO Trees / Heaps / Priority Queues / Monotonic Stacks
+   - NO Dynamic Programming / Memoization
    - NO Complex recursion / Backtracking
-   - NO Advanced Greedy / Divide and Conquer
-   - NO Binary search on answer / Predicate functions
-3. For custom topic "${cleanTopic}", understand the literal concept first:
-   - If topic is "Even or odd" or "Parity": generate direct element counting, filtering, or sum (e.g., "Count even and odd numbers", "Check if all elements are even", "Sum of odd elements in array", "Determine if a number is even or odd"). DO NOT create subarray parity balancing!
-   - If topic is "Arrays": generate basic array traversal, finding min/max, linear search, or counting.
-   - If topic is "Binary Search": generate standard target search in a sorted array.
-   - If topic is "Dynamic Programming": generate beginner 1D DP (e.g. Fibonacci, Climbing Stairs).
-   - If topic is "Joins": basic 2-table INNER JOIN or LEFT JOIN on matching IDs.
-   - If topic is "Normalization": check 1NF or compute simple candidate key.
-   - If topic is "Virtual Machines": filter active VMs or find total allocated memory.
-   - If topic is "Network Security": filter IPs by blacklist or check blocked port numbers.
-4. Constraints MUST be reasonable (e.g. 1 <= n <= 1000 or 1 <= n <= 10^4). Do not require heavy optimization.`;
+3. For "${cleanTopic}": generate straightforward direct element checks, linear scans, counts, or sums.
+4. Constraints MUST be reasonable (e.g. 1 <= n <= 1000).`;
       starterPlaceholder = '1 <= n <= 1000';
     } else if (difficulty === 'Medium') {
       difficultyContract = `EXPLICIT DIFFICULTY CONTRACT: [MEDIUM / INTERMEDIATE]
 1. Generate an intermediate interview-style problem requiring moderate reasoning.
-2. May require multiple reasoning steps, more complex conditions, or standard algorithms (e.g. Hash Tables, Two Pointers, Stacks, Queues, Binary Trees, Standard 1D/2D DP, BFS/DFS).
-3. The selected topic "${cleanTopic}" and subject "${cleanSubject}" MUST remain central to the solution.
-4. Constraints: typical interview constraints (e.g. 1 <= n <= 10^5) expecting O(N) or O(N log N) solution.`;
+2. The selected topic "${cleanTopic}" and subject "${cleanSubject}" MUST remain central to the solution.
+3. Constraints: typical interview constraints (e.g. 1 <= n <= 10^5) expecting O(N) or O(N log N) solution.`;
       starterPlaceholder = '1 <= n <= 10^5';
     } else {
       difficultyContract = `EXPLICIT DIFFICULTY CONTRACT: [HARD / ADVANCED]
@@ -2325,7 +2402,6 @@ FROM
       starterPlaceholder = '1 <= n <= 2 * 10^5';
     }
 
-    // Dynamic Scenario Themes to guarantee NO hardcoded or repetitive questions
     const scenarioContexts = [
       'e-commerce logistics and warehouse order batching',
       'hospital patient vital telemetry and sensor monitoring',
@@ -2351,64 +2427,58 @@ FROM
 TARGET COMPANY & ROLE PLACEMENT CONTEXT:
 - Target Company: ${cleanCompany}
 - Target Role: ${cleanRole || 'Software Engineer / Developer'}
-- INSTRUCTION: Create an authentic algorithmic problem tailored to the interview standards and technical bar of ${cleanCompany}. Ground the question in the specific topic "${cleanTopic}" and subject "${cleanSubject}" with high-calibre practical engineering framing.`;
+- INSTRUCTION: Create an authentic algorithmic problem tailored to the interview standards and technical bar of ${cleanCompany}. Ground the question in "${cleanTopic}" and "${cleanSubject}".`;
     }
 
-    const systemInstruction = `You are a Principal Technical Interviewer and Senior Competitive Programming Problem Author for top tech firms.
-Your task is to generate a completely ORIGINAL, high-calibre interview programming problem following the industry-standard LeetCode-style structure.
+    const systemInstruction = `You are a Principal Technical Interviewer and Senior Competitive Programming Problem Author.
+Generate a completely ORIGINAL LeetCode-style interview problem in JSON format.
 
 MANDATORY CONSTRAINTS:
-1. TARGET SUBJECT: "${cleanSubject}"
-2. TARGET TOPIC: "${cleanTopic}" (WHAT the student practices)
-3. SELECTED DIFFICULTY: "${difficulty}" (HOW complex the problem is)
-4. TARGET LANGUAGE: "${language}"
-5. CREATIVE CONTEXT SEED: "${randomScenario}"
+1. SUBJECT: "${cleanSubject}"
+2. TOPIC: "${cleanTopic}"
+3. DIFFICULTY: "${difficulty}"
+4. LANGUAGE: "${language}"
+5. SCENARIO: "${randomScenario}"
 ${companyPromptSegment}
 
 ${subjectContract}
-
 ${difficultyContract}
 
-CRITICAL MANDATORY INSTRUCTIONS:
-1. Generate an original coding problem matching BOTH the topic "${cleanTopic}" AND subject "${cleanSubject}" AND difficulty "${difficulty}".
-2. The starter code must contain ONLY language imports/includes and the required function/class signature with an EMPTY body containing only a comment and pass/return 0.
-3. NEVER put the solution, optimal algorithm, pseudocode, implementation, loops, or algorithm hints inside starterCode.
-4. STRICT ORIGINALITY: Do NOT copy or paraphrase existing LeetCode problems or test cases. Invent a fresh problem.
+STARTER CODE INSTRUCTION:
+- Provide ONLY standard imports and clean empty function/class signatures with placeholder comments.
+- NEVER include solution logic, implementations, or algorithm hints in starterCode.
 
 REQUIRED JSON OUTPUT SCHEMA:
 {
-  "title": "Clean descriptive problem title",
+  "title": "Problem Title",
   "difficulty": "${difficulty}",
   "subject": "${cleanSubject}",
   "topic": "${cleanTopic}",
   "tags": ["${cleanTopic}", "${cleanSubject}"],
-  "description": "Formal problem description explaining given inputs, what to calculate/find, what to return, and exact conditions.",
+  "description": "Clear problem statement explaining inputs, outputs, and requirements.",
   "examples": [
     {
-      "input": "Example input representation",
-      "output": "Example output representation",
-      "explanation": "Clear step-by-step mathematical or logical explanation."
+      "input": "Example 1 Input",
+      "output": "Example 1 Output",
+      "explanation": "Example 1 Explanation"
     },
     {
-      "input": "Second example input representation",
-      "output": "Second example output representation",
-      "explanation": "Clear explanation of why this output is correct."
+      "input": "Example 2 Input",
+      "output": "Example 2 Output",
+      "explanation": "Example 2 Explanation"
     }
   ],
-  "constraints": [
-    "${starterPlaceholder}",
-    "Values within standard ranges"
-  ],
+  "constraints": ["${starterPlaceholder}", "Standard input value bounds"],
   "expectedComplexity": {
-    "time": "Expected Time Complexity",
-    "space": "Expected Space Complexity"
+    "time": "${difficulty === 'Easy' ? 'O(N)' : 'O(N log N)'}",
+    "space": "O(1)"
   },
   "functionSignature": {
-    "C": "C function signature",
-    "C++": "C++ function signature",
-    "Java": "Java function signature",
-    "Python": "Python function signature",
-    "JavaScript": "JavaScript function signature",
+    "C": "int solve(...)",
+    "C++": "int solve(...)",
+    "Java": "public int solve(...)",
+    "Python": "def solve(self, ...):",
+    "JavaScript": "function solve(...)",
     "SQL": "-- Query table"
   },
   "starterCode": {
@@ -2420,163 +2490,128 @@ REQUIRED JSON OUTPUT SCHEMA:
     "SQL": "-- Write your SQL query below\\nSELECT * FROM records;"
   },
   "hiddenTestCases": [
-    {
-      "id": "tc_1",
-      "input": "Test input 1",
-      "expectedOutput": "Expected output 1",
-      "category": "normal",
-      "isHidden": false
-    },
-    {
-      "id": "tc_2",
-      "input": "Test input 2",
-      "expectedOutput": "Expected output 2",
-      "category": "edge",
-      "isHidden": false
-    },
-    {
-      "id": "tc_3",
-      "input": "Test input 3",
-      "expectedOutput": "Expected output 3",
-      "category": "small",
-      "isHidden": true
-    },
-    {
-      "id": "tc_4",
-      "input": "Test input 4",
-      "expectedOutput": "Expected output 4",
-      "category": "negative_or_boundary",
-      "isHidden": true
-    },
-    {
-      "id": "tc_5",
-      "input": "Test input 5",
-      "expectedOutput": "Expected output 5",
-      "category": "larger",
-      "isHidden": true
-    }
+    { "id": "tc_1", "input": "Input 1", "expectedOutput": "Output 1", "category": "normal", "isHidden": false },
+    { "id": "tc_2", "input": "Input 2", "expectedOutput": "Output 2", "category": "edge", "isHidden": false },
+    { "id": "tc_3", "input": "Input 3", "expectedOutput": "Output 3", "category": "small", "isHidden": true },
+    { "id": "tc_4", "input": "Input 4", "expectedOutput": "Output 4", "category": "boundary", "isHidden": true }
   ],
-  "hints": [
-    "Hint 1 focused on ${cleanTopic}",
-    "Hint 2 on edge cases"
-  ]
+  "hints": ["Hint 1 for ${cleanTopic}", "Hint 2 for edge cases"]
 }`;
 
-    // Retry loop with automatic rejection feedback (up to 3 attempts)
-    const MAX_ATTEMPTS = 3;
-    let lastRejectionReason = '';
-
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      console.log(`[Coding Arena] Generation attempt ${attempt}/${MAX_ATTEMPTS} for Subject="${cleanSubject}", Topic="${cleanTopic}", Difficulty="${difficulty}", Lang="${language}"`);
-
-      let prompt = `Generate a brand new, ORIGINAL ${difficulty} level interview problem for subject "${cleanSubject}" and MANDATORY topic "${cleanTopic}".
+    const prompt = `Generate a brand new, original ${difficulty} level interview problem for subject "${cleanSubject}" and topic "${cleanTopic}".
 Primary target coding language: ${language}.
 Context scenario theme: ${randomScenario}.
-The problem MUST strictly satisfy the subject contract for "${cleanSubject}" and the ${difficulty} difficulty contract for "${cleanTopic}".
-The starter code must contain ONLY empty function skeletons with placeholder comments.
-NEVER include solutions or algorithms in starterCode.
+The problem MUST satisfy the subject contract for "${cleanSubject}" and ${difficulty} difficulty contract for "${cleanTopic}".
+Starter code must contain ONLY empty function skeletons with comments.
 Return ONLY valid JSON matching the schema.`;
 
-      if (attempt > 1 && lastRejectionReason) {
-        prompt += `\n\nCRITICAL CORRECTION (Attempt ${attempt}/${MAX_ATTEMPTS}): Your previous attempt was REJECTED by the validator because: "${lastRejectionReason}".
-You MUST fix this immediately. Ensure the problem strictly matches Subject="${cleanSubject}", Topic="${cleanTopic}", Difficulty="${difficulty}" without adding unrequested advanced concepts or leaking solutions.`;
-      }
+    try {
+      console.log(`[Coding Arena] Invoking Gemini with thinkingLevel: LOW for Subject="${cleanSubject}", Topic="${cleanTopic}", Difficulty="${difficulty}"`);
 
-      try {
-        let rawResponse: any = null;
-        let usedModel = '';
+      const result = await generateContentWithResilience(ai, prompt, {
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          thinkingConfig: {
+            thinkingLevel: ThinkingLevel.LOW,
+          },
+        },
+        timeoutMs: 7500, // Fast 7.5s timeout per attempt to guarantee quick responses
+        label: 'Coding Arena Problem Generator',
+        maxAttemptsPerModel: 1,
+      });
 
-        try {
-          const result = await generateContentWithResilience(ai, prompt, {
-            config: {
-              systemInstruction,
-              responseMimeType: 'application/json',
-            },
-            label: 'Coding Arena Problem Generator',
-          });
-          rawResponse = result.response;
-          usedModel = result.usedModel;
-        } catch (err: any) {
-          console.warn(`[Coding Arena] AI generation failed:`, err?.message || err);
-        }
+      const rawResponse = result.response;
+      const usedModel = result.usedModel;
 
-        if (!rawResponse) {
-          throw new Error('All AI models failed to respond.');
-        }
-
+      if (rawResponse) {
         const problemData = extractJsonFromAiResponse(rawResponse);
 
         // Run Rule-Based Validator
         const validation = validateGeneratedProblem(problemData, cleanTopic, difficulty, cleanSubject);
-        if (!validation.valid) {
-          console.warn(`[Coding Arena] Attempt ${attempt} failed validation: ${validation.reason}`);
-          lastRejectionReason = validation.reason || 'Difficulty/Topic mismatch';
-          continue; // Try next attempt
+        const isDuplicateOrSolved = isProblemAlreadySolved(problemData);
+
+        if (validation.valid && !isDuplicateOrSolved) {
+          console.log(`[Coding Arena] Generated problem passed validation: "${problemData.title}" (${difficulty}) via ${usedModel}`);
+
+          const probTitle = problemData.title || `${cleanTopic} Challenge`;
+          const signatures = problemData.functionSignature || {};
+          const rawStarterCodes = problemData.starterCode || problemData.starter_templates || {};
+
+          // Sanitize starterCode for every language to guarantee NO solution leaks
+          const sanitizedStarterCode: Record<string, string> = {};
+          const supportedLangs = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
+          for (const lang of supportedLangs) {
+            const rawCode = rawStarterCodes[lang];
+            const sig = signatures[lang];
+            sanitizedStarterCode[lang] = sanitizeStarterCode(rawCode, lang, probTitle, sig);
+          }
+
+          const id = `prob_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const normalizedProblem = {
+            id,
+            title: probTitle,
+            difficulty: difficulty,
+            subject: cleanSubject,
+            topic: cleanTopic,
+            tags: Array.isArray(problemData.tags) && problemData.tags.length > 0 ? problemData.tags : [cleanTopic, cleanSubject],
+            description: problemData.description || problemData.problem_statement || '',
+            problem_statement: problemData.description || problemData.problem_statement || '',
+            examples: Array.isArray(problemData.examples) ? problemData.examples : [],
+            constraints: Array.isArray(problemData.constraints) ? problemData.constraints : [],
+            expectedComplexity: problemData.expectedComplexity || {
+              time: difficulty === 'Easy' ? 'O(N)' : 'O(N log N)',
+              space: 'O(1)',
+            },
+            functionSignature: signatures,
+            starterCode: sanitizedStarterCode,
+            starter_templates: sanitizedStarterCode,
+            hiddenTestCases: Array.isArray(problemData.hiddenTestCases)
+              ? problemData.hiddenTestCases
+              : (Array.isArray(problemData.test_cases) ? problemData.test_cases : []),
+            hints: Array.isArray(problemData.hints) ? problemData.hints : [],
+            editorial: problemData.editorial || undefined,
+            created_at: new Date().toISOString(),
+          };
+
+          savedProblemsStore.set(id, normalizedProblem);
+
+          return res.json({
+            success: true,
+            data: normalizedProblem,
+            model: usedModel,
+          });
+        } else {
+          console.warn(`[Coding Arena] AI generated problem did not pass validation or was already solved: valid=${validation.valid}, isSolved=${isDuplicateOrSolved}. Serving curated fallback.`);
         }
-
-        // Passed Validation!
-        console.log(`[Coding Arena] Generated problem passed validation: "${problemData.title}" (${difficulty})`);
-
-        const probTitle = problemData.title || `${cleanTopic} Challenge`;
-        const signatures = problemData.functionSignature || {};
-        const rawStarterCodes = problemData.starterCode || problemData.starter_templates || {};
-
-        // Sanitize starterCode for every language to guarantee NO solution leaks
-        const sanitizedStarterCode: Record<string, string> = {};
-        const supportedLangs = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
-        for (const lang of supportedLangs) {
-          const rawCode = rawStarterCodes[lang];
-          const sig = signatures[lang];
-          sanitizedStarterCode[lang] = sanitizeStarterCode(rawCode, lang, probTitle, sig);
-        }
-
-        // Normalize problem fields
-        const id = `prob_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        const normalizedProblem = {
-          id,
-          title: probTitle,
-          difficulty: difficulty, // Guarantee exact requested difficulty
-          subject: cleanSubject,
-          topic: cleanTopic,
-          tags: Array.isArray(problemData.tags) && problemData.tags.length > 0 ? problemData.tags : [cleanTopic, cleanSubject],
-          description: problemData.description || problemData.problem_statement || '',
-          problem_statement: problemData.description || problemData.problem_statement || '',
-          examples: Array.isArray(problemData.examples) ? problemData.examples : [],
-          constraints: Array.isArray(problemData.constraints) ? problemData.constraints : [],
-          expectedComplexity: problemData.expectedComplexity || {
-            time: difficulty === 'Easy' ? 'O(N)' : 'O(N log N)',
-            space: 'O(1)',
-          },
-          functionSignature: signatures,
-          starterCode: sanitizedStarterCode,
-          starter_templates: sanitizedStarterCode,
-          hiddenTestCases: Array.isArray(problemData.hiddenTestCases)
-            ? problemData.hiddenTestCases
-            : (Array.isArray(problemData.test_cases) ? problemData.test_cases : []),
-          hints: Array.isArray(problemData.hints) ? problemData.hints : [],
-          editorial: problemData.editorial || undefined,
-          created_at: new Date().toISOString(),
-        };
-
-        // Save generated problem into cache
-        savedProblemsStore.set(id, normalizedProblem);
-
-        return res.json({
-          success: true,
-          data: normalizedProblem,
-          model: usedModel,
-        });
-      } catch (err: any) {
-        console.error(`[Coding Arena] Attempt ${attempt} error:`, err?.message || err);
-        lastRejectionReason = err?.message || 'Generation error';
       }
+    } catch (err: any) {
+      console.warn(`[Coding Arena] AI generation failed or timed out:`, err?.message || err);
     }
 
-    // All 3 attempts failed validation
-    console.error(`[Coding Arena] Failed to generate valid problem after ${MAX_ATTEMPTS} attempts for Subject="${cleanSubject}", Topic="${cleanTopic}", Difficulty="${difficulty}".`);
-    return res.status(422).json({
-      success: false,
-      message: 'Unable to generate a suitable problem for this topic and difficulty. Please try again.',
+    // Instant Fallback to Curated Unsolved Question
+    console.info(`[Coding Arena] Serving curated unsolved question for Subject="${cleanSubject}", Topic="${cleanTopic}", Difficulty="${difficulty}"`);
+    const fallbackProb = getCuratedUnsolvedFallback();
+    const sanitizedStarterCode: Record<string, string> = {};
+    const supportedLangs = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
+    const rawStarterCodes = fallbackProb.starterCode || fallbackProb.starter_templates || {};
+    for (const lang of supportedLangs) {
+      const rawCode = rawStarterCodes[lang];
+      const sig = fallbackProb.functionSignature?.[lang];
+      sanitizedStarterCode[lang] = sanitizeStarterCode(rawCode, lang, fallbackProb.title, sig);
+    }
+
+    const finalFallback = {
+      ...fallbackProb,
+      starterCode: sanitizedStarterCode,
+      starter_templates: sanitizedStarterCode,
+    };
+    savedProblemsStore.set(finalFallback.id, finalFallback);
+
+    return res.json({
+      success: true,
+      data: finalFallback,
+      isFallback: true,
     });
   };
 
@@ -2634,9 +2669,42 @@ You MUST fix this immediately. Ensure the problem strictly matches Subject="${cl
       }
 
       const id = submission.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const totalTC = typeof submission.total_test_cases === 'number' && submission.total_test_cases > 0
+        ? submission.total_test_cases
+        : 5;
+      let passedTC = typeof submission.test_cases_passed === 'number'
+        ? Math.max(0, Math.min(submission.test_cases_passed, totalTC))
+        : (submission.status === 'accepted' ? totalTC : 0);
+
+      // Strict Source-of-Truth Status derivation
+      let status = submission.status || (passedTC === totalTC && totalTC > 0 ? 'accepted' : 'wrong_answer');
+      if (passedTC < totalTC && status === 'accepted') {
+        status = 'wrong_answer';
+      } else if (passedTC === totalTC && totalTC > 0 && (!status || status === 'wrong_answer')) {
+        status = 'accepted';
+      }
+
+      let statusText = submission.status_text;
+      if (status === 'accepted') {
+        statusText = 'Accepted';
+      } else if (status === 'compilation_error') {
+        statusText = 'Compilation Error';
+      } else if (status === 'runtime_error') {
+        statusText = 'Runtime Error';
+      } else if (status === 'time_limit_exceeded') {
+        statusText = 'Time Limit Exceeded';
+      } else {
+        statusText = 'Wrong Answer';
+      }
+
       const savedSubmission = {
         ...submission,
         id,
+        status,
+        status_text: statusText,
+        test_cases_passed: passedTC,
+        total_test_cases: totalTC,
+        test_cases_failed: Math.max(0, totalTC - passedTC),
         created_at: submission.created_at || new Date().toISOString(),
       };
 
@@ -2664,7 +2732,33 @@ You MUST fix this immediately. Ensure the problem strictly matches Subject="${cl
       userSubmissions = userSubmissions.filter((s) => s.problem_id === problemId);
     }
 
-    return res.json({ success: true, data: userSubmissions });
+    // Reconcile any existing records to guarantee status correctness
+    const reconciledSubmissions = userSubmissions.map((s) => {
+      const totalTC = typeof s.total_test_cases === 'number' && s.total_test_cases > 0 ? s.total_test_cases : 5;
+      let passedTC = typeof s.test_cases_passed === 'number'
+        ? Math.max(0, Math.min(s.test_cases_passed, totalTC))
+        : (s.status === 'accepted' ? totalTC : 0);
+
+      let status = s.status || (passedTC === totalTC && totalTC > 0 ? 'accepted' : 'wrong_answer');
+      if (passedTC < totalTC && status === 'accepted') {
+        status = 'wrong_answer';
+      } else if (passedTC === totalTC && totalTC > 0 && (!status || status === 'wrong_answer')) {
+        status = 'accepted';
+      }
+
+      const statusText = status === 'accepted' ? 'Accepted' : (s.status_text || 'Wrong Answer');
+
+      return {
+        ...s,
+        status,
+        status_text: statusText,
+        test_cases_passed: passedTC,
+        total_test_cases: totalTC,
+        test_cases_failed: Math.max(0, totalTC - passedTC),
+      };
+    });
+
+    return res.json({ success: true, data: reconciledSubmissions });
   };
 
   /**
@@ -2684,7 +2778,10 @@ You MUST fix this immediately. Ensure the problem strictly matches Subject="${cl
     const subjectBreakdown: Record<string, number> = {};
 
     for (const sub of userSubmissions) {
-      const isAccepted = sub.status?.toLowerCase() === 'accepted';
+      const totalTC = typeof sub.total_test_cases === 'number' && sub.total_test_cases > 0 ? sub.total_test_cases : 5;
+      const passedTC = typeof sub.test_cases_passed === 'number' ? sub.test_cases_passed : (sub.status === 'accepted' ? totalTC : 0);
+      const isAccepted = sub.status?.toLowerCase() === 'accepted' && passedTC === totalTC && totalTC > 0;
+
       if (isAccepted) {
         acceptedAttempts++;
         const pId = sub.problem_id || sub.problem_title || sub.id;
@@ -2898,7 +2995,12 @@ Perform a rigorous execution simulation and evaluation of the candidate's code. 
             config: {
               systemInstruction,
               responseMimeType: 'application/json',
+              thinkingConfig: {
+                thinkingLevel: ThinkingLevel.LOW,
+              },
             },
+            timeoutMs: 6000,
+            maxAttemptsPerModel: 1,
             label: 'Coding Arena Evaluator',
           });
           rawResponse = result.response;
@@ -2958,8 +3060,50 @@ Perform a rigorous execution simulation and evaluation of the candidate's code. 
         };
       }
 
-      if (evalData && executionId) {
-        evalData.executionId = executionId;
+      if (evalData) {
+        // Enforce strict test case numbers & results normalization
+        const testResults = Array.isArray(evalData.testCaseResults) ? evalData.testCaseResults : [];
+        const totalTC = typeof evalData.totalTestCases === 'number' && evalData.totalTestCases > 0
+          ? evalData.totalTestCases
+          : (testResults.length > 0 ? testResults.length : Math.max(problem.hiddenTestCases?.length || 5, 5));
+
+        let passedTC = typeof evalData.passedTestCases === 'number'
+          ? evalData.passedTestCases
+          : (testResults.length > 0 ? testResults.filter((t: any) => t.passed === true).length : 0);
+
+        if (testResults.length > 0) {
+          passedTC = testResults.filter((t: any) => t.passed === true).length;
+        }
+
+        passedTC = Math.max(0, Math.min(passedTC, totalTC));
+        evalData.totalTestCases = totalTC;
+        evalData.passedTestCases = passedTC;
+
+        // Derivation: ONLY accepted if all required test cases passed
+        const rawStatus = (evalData.status || '').toLowerCase().trim();
+        if (passedTC === totalTC && totalTC > 0) {
+          evalData.status = 'accepted';
+          evalData.statusText = 'Accepted';
+        } else {
+          // Can NEVER be accepted if passedTC < totalTC
+          if (rawStatus === 'compilation_error' || rawStatus === 'compile_error') {
+            evalData.status = 'compilation_error';
+            evalData.statusText = 'Compilation Error';
+          } else if (rawStatus === 'runtime_error') {
+            evalData.status = 'runtime_error';
+            evalData.statusText = 'Runtime Error';
+          } else if (rawStatus === 'time_limit_exceeded') {
+            evalData.status = 'time_limit_exceeded';
+            evalData.statusText = 'Time Limit Exceeded';
+          } else {
+            evalData.status = 'wrong_answer';
+            evalData.statusText = 'Wrong Answer';
+          }
+        }
+
+        if (executionId) {
+          evalData.executionId = executionId;
+        }
       }
 
       return res.json({
@@ -3190,7 +3334,12 @@ Adhere strictly to the JSON schema:
             config: {
               systemInstruction,
               responseMimeType: 'application/json',
+              thinkingConfig: {
+                thinkingLevel: ThinkingLevel.LOW,
+              },
             },
+            timeoutMs: 6000,
+            maxAttemptsPerModel: 1,
             label: 'AI Mentor',
           });
           rawResponse = result.response;

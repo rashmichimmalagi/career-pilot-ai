@@ -443,7 +443,7 @@ export async function getPreparationDashboardData(
     };
   }
 
-  return {
+  const dashboardData: PreparationDashboardData = {
     studentName: summary.studentName,
     greeting: summary.greeting,
     targetRole: summary.targetRole,
@@ -461,4 +461,27 @@ export async function getPreparationDashboardData(
     recentActivities: summary.recentActivities.slice(0, 15),
     aiRecommendation,
   };
+
+  // Cache computed data for immediate, zero-latency subsequent loads
+  try {
+    const cacheKey = `careerpilot_dashboard_cache_${effectiveId}`;
+    localStorage.setItem(cacheKey, JSON.stringify(dashboardData));
+  } catch (_) {}
+
+  return dashboardData;
+}
+
+/**
+ * Retrieve cached Preparation Dashboard Data for instant, flicker-free rendering
+ */
+export function getCachedPreparationDashboardData(studentId: string = 'guest'): PreparationDashboardData | null {
+  try {
+    const effectiveId = studentId || 'guest';
+    const cacheKey = `careerpilot_dashboard_cache_${effectiveId}`;
+    const raw = localStorage.getItem(cacheKey);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (_) {}
+  return null;
 }

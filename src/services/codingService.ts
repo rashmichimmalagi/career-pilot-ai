@@ -15,6 +15,7 @@ import {
   SavedQuestion,
   TopicProgressSummary,
   QuestionStatus,
+  SubmissionStatus,
 } from '../types/coding';
 import { calculateStreaks, calculateAchievements } from './achievementService';
 import {
@@ -23,6 +24,7 @@ import {
   getAvailableTopicsWithCounts,
   findQuestionById,
   TopicQuestionCount,
+  createTopicTailoredFallback,
 } from '../data/codingQuestionBank';
 
 export const SUBJECTS: CodingSubject[] = [
@@ -879,7 +881,12 @@ Return an array \`[minVal, maxVal]\` containing the minimum value followed by th
     };
   }
 
-  // DSA / Programming Medium/Hard Original Problem Fallback
+  // If topic is not Arrays or custom subject/topic, generate a dedicated topic-tailored fallback
+  if (topicLower !== 'arrays' && topicLower !== 'array') {
+    return createTopicTailoredFallback(subject, cleanTopic, difficulty, 'Python');
+  }
+
+  // DSA / Programming Medium/Hard Original Problem Fallback (for Arrays)
   return {
     id,
     title: 'Find the Longest Balanced Segment',
@@ -1000,6 +1007,16 @@ export const codingService = {
       throw new Error('Please enter a custom topic.');
     }
 
+    const effectiveUserId = config.userId || 'guest';
+    // Concurrently fetch solved problem identifiers for solved filtering
+    let solvedIds: Set<string> = new Set();
+    let solvedTitles: Set<string> = new Set();
+    try {
+      const solvedSet = await this.getSolvedProblemSet(effectiveUserId);
+      solvedIds = solvedSet.ids;
+      solvedTitles = solvedSet.titles;
+    } catch (_) {}
+
     try {
       const response = await fetchWithTimeout('/api/coding/generate-problem', {
         method: 'POST',
@@ -1007,10 +1024,12 @@ export const codingService = {
           'Content-Type': 'application/json',
         },
         signal,
-        timeoutMs: 12000,
+        timeoutMs: 15000,
         body: JSON.stringify({
           ...config,
           topic: finalTopic,
+          solvedProblemIds: Array.from(solvedIds),
+          solvedTitles: Array.from(solvedTitles),
         }),
       });
 
@@ -1018,54 +1037,68 @@ export const codingService = {
         const data = await response.json();
         if (data.success && data.data) {
           const prob = data.data as CodingProblem;
-          // Ensure starterCode has all languages sanitized to pure empty skeletons
-          if (!prob.starterCode) prob.starterCode = {};
 
-          const supportedLangs: CodingLanguage[] = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
-          for (const lang of supportedLangs) {
-            const raw = prob.starterCode[lang];
-            const sig = prob.functionSignature?.[lang];
-            prob.starterCode[lang] = sanitizeStarterCode(raw, lang, prob.title, sig);
+          // Double check that problem is not solved
+          const isAlreadySolved =
+            (prob.id && solvedIds.has(prob.id)) ||
+            (prob.title && solvedTitles.has(prob.title.trim().toLowerCase()));
+
+          if (!isAlreadySolved) {
+            // Ensure starterCode has all languages sanitized to pure empty skeletons
+            if (!prob.starterCode) prob.starterCode = {};
+
+            const supportedLangs: CodingLanguage[] = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
+            for (const lang of supportedLangs) {
+              const raw = prob.starterCode[lang];
+              const sig = prob.functionSignature?.[lang];
+              prob.starterCode[lang] = sanitizeStarterCode(raw, lang, prob.title, sig);
+            }
+
+            // Cache in local storage for instantaneous offline retrieval
+            try {
+              const localProblems = JSON.parse(localStorage.getItem('careerpilot_saved_problems') || '{}');
+              localProblems[prob.id] = prob;
+              localStorage.setItem('careerpilot_saved_problems', JSON.stringify(localProblems));
+            } catch (_) {}
+
+            return prob;
           }
-
-          // Cache in local storage for instantaneous offline retrieval
-          try {
-            const localProblems = JSON.parse(localStorage.getItem('careerpilot_saved_problems') || '{}');
-            localProblems[prob.id] = prob;
-            localStorage.setItem('careerpilot_saved_problems', JSON.stringify(localProblems));
-          } catch (_) {}
-
-          return prob;
-        } else if (data.message) {
-          throw new Error(data.message);
-        }
-      } else {
-        const errData = await response.json().catch(() => null);
-        if (errData?.message) {
-          throw new Error(errData.message);
-        }
-        if (response.status === 422) {
-          throw new Error('Unable to generate a suitable problem for this topic and difficulty. Please try again.');
         }
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') {
         throw err;
       }
-      console.warn('API problem generation error:', err?.message || err);
-      // If the error was an explicit validation or configuration failure message from server, throw it directly
-      if (
-        err?.message &&
-        !err.message.includes('Failed to fetch') &&
-        !err.message.includes('500') &&
-        !err.message.includes('503') &&
-        !err.message.includes('NetworkError')
-      ) {
-        throw err;
-      }
+      console.warn('API problem generation notice:', err?.message || err);
     }
 
-    // Fallback original problem only for offline network disconnects
+    // Instant Fallback to Curated Unsolved Question
+    const curatedUnsolved = await this.getNextUnsolvedProblem({
+      subject: config.subject,
+      topic: finalTopic,
+      difficulty: config.difficulty,
+      userId: effectiveUserId,
+      strictTopic: true,
+    });
+
+    if (curatedUnsolved) {
+      const cloned = { ...curatedUnsolved };
+      if (!cloned.starterCode) cloned.starterCode = {};
+      const supportedLangs: CodingLanguage[] = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
+      for (const lang of supportedLangs) {
+        const raw = cloned.starterCode[lang];
+        const sig = cloned.functionSignature?.[lang];
+        cloned.starterCode[lang] = sanitizeStarterCode(raw, lang, cloned.title, sig);
+      }
+      try {
+        const localProblems = JSON.parse(localStorage.getItem('careerpilot_saved_problems') || '{}');
+        localProblems[cloned.id] = cloned;
+        localStorage.setItem('careerpilot_saved_problems', JSON.stringify(localProblems));
+      } catch (_) {}
+      return cloned;
+    }
+
+    // Fallback original problem only if no curated question left
     const fallbackProb = getOriginalProblemFallback({ ...config, topic: finalTopic });
     try {
       const localProblems = JSON.parse(localStorage.getItem('careerpilot_saved_problems') || '{}');
@@ -1094,7 +1127,7 @@ export const codingService = {
           'Content-Type': 'application/json',
         },
         signal,
-        timeoutMs: mode === 'run' ? 5000 : 12000,
+        timeoutMs: mode === 'run' ? 8000 : 15000,
         body: JSON.stringify({
           executionId,
           problem,
@@ -1112,6 +1145,43 @@ export const codingService = {
           if (executionId && !resData.executionId) {
             resData.executionId = executionId;
           }
+
+          // Strict client-side validation of server response
+          const testResults = Array.isArray(resData.testCaseResults) ? resData.testCaseResults : [];
+          const totalTC = typeof resData.totalTestCases === 'number' && resData.totalTestCases > 0
+            ? resData.totalTestCases
+            : (testResults.length > 0 ? testResults.length : Math.max(problem.hiddenTestCases?.length || 5, 5));
+          let passedTC = typeof resData.passedTestCases === 'number'
+            ? resData.passedTestCases
+            : (testResults.length > 0 ? testResults.filter((t: any) => t.passed === true).length : 0);
+
+          if (testResults.length > 0) {
+            passedTC = testResults.filter((t: any) => t.passed === true).length;
+          }
+          passedTC = Math.max(0, Math.min(passedTC, totalTC));
+          resData.totalTestCases = totalTC;
+          resData.passedTestCases = passedTC;
+
+          const rawStatus = (resData.status || '').toLowerCase().trim();
+          if (passedTC === totalTC && totalTC > 0) {
+            resData.status = 'accepted';
+            resData.statusText = 'Accepted';
+          } else {
+            if (rawStatus === 'compilation_error' || rawStatus === 'compile_error') {
+              resData.status = 'compilation_error';
+              resData.statusText = 'Compilation Error';
+            } else if (rawStatus === 'runtime_error') {
+              resData.status = 'runtime_error';
+              resData.statusText = 'Runtime Error';
+            } else if (rawStatus === 'time_limit_exceeded') {
+              resData.status = 'time_limit_exceeded';
+              resData.statusText = 'Time Limit Exceeded';
+            } else {
+              resData.status = 'wrong_answer';
+              resData.statusText = 'Wrong Answer';
+            }
+          }
+
           return resData;
         }
       }
@@ -1128,7 +1198,7 @@ export const codingService = {
       code.includes('SELECT') ||
       code.trim().length > 60;
     const isAccepted = hasMeaningfulCode && !code.includes('TODO') && !code.includes('pass');
-    const passedTC = isAccepted ? totalTC : Math.max(1, Math.floor(totalTC / 2));
+    const passedTC = isAccepted ? totalTC : Math.max(0, Math.floor(totalTC / 2));
 
     return {
       executionId,
@@ -1176,7 +1246,7 @@ export const codingService = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
-        timeoutMs: 12000,
+        timeoutMs: 16000,
         body: JSON.stringify({
           executionId,
           problem: {
@@ -1213,7 +1283,7 @@ export const codingService = {
       throw new Error(json.error || 'Failed to generate mentor feedback');
     } catch (err: any) {
       if (err?.name === 'AbortError') throw err;
-      console.error('[CodingService] AI Mentor feedback error:', err);
+      console.info('[CodingService] AI Mentor feedback notice, using pedagogical fallback:', err?.message || err);
       // Client-side fallback if server fails
       const isTLE = executionResult?.status === 'time_limit_exceeded';
       const isComp = executionResult?.status === 'compilation_error';
@@ -1283,7 +1353,9 @@ export const codingService = {
 
     if (Array.isArray(submissions)) {
       for (const s of submissions) {
-        const isAccepted = s.status?.toLowerCase() === 'accepted';
+        const totalTC = typeof s.total_test_cases === 'number' && s.total_test_cases > 0 ? s.total_test_cases : 5;
+        const passedTC = typeof s.test_cases_passed === 'number' ? s.test_cases_passed : (s.status === 'accepted' ? totalTC : 0);
+        const isAccepted = s.status?.toLowerCase() === 'accepted' && passedTC === totalTC && totalTC > 0;
         if (isAccepted) {
           acceptedAttempts++;
           const pId = s.problem_id || s.problem_title || s.id;
@@ -1347,9 +1419,39 @@ export const codingService = {
    * Save a coding submission to database (Supabase + backend API + local storage in parallel)
    */
   async saveSubmission(submission: CodingSubmission): Promise<CodingSubmission> {
+    const totalTC = typeof submission.total_test_cases === 'number' && submission.total_test_cases > 0
+      ? submission.total_test_cases
+      : 5;
+    let passedTC = typeof submission.test_cases_passed === 'number'
+      ? Math.max(0, Math.min(submission.test_cases_passed, totalTC))
+      : (submission.status === 'accepted' ? totalTC : 0);
+
+    let status: SubmissionStatus = 'wrong_answer';
+    const rawStatus = (submission.status || '').toLowerCase().trim();
+    if (passedTC === totalTC && totalTC > 0) {
+      status = 'accepted';
+    } else if (rawStatus === 'compilation_error') {
+      status = 'compilation_error';
+    } else if (rawStatus === 'runtime_error') {
+      status = 'runtime_error';
+    } else if (rawStatus === 'time_limit_exceeded') {
+      status = 'time_limit_exceeded';
+    } else {
+      status = 'wrong_answer';
+    }
+
+    const statusText = status === 'accepted' ? 'Accepted' : (submission.status_text || (status === 'compilation_error' ? 'Compilation Error' : status === 'runtime_error' ? 'Runtime Error' : status === 'time_limit_exceeded' ? 'Time Limit Exceeded' : 'Wrong Answer'));
+
     const formattedSubmission: CodingSubmission = {
       ...submission,
       id: submission.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      status,
+      status_text: statusText,
+      test_cases_passed: passedTC,
+      total_test_cases: totalTC,
+      test_cases_failed: Math.max(0, totalTC - passedTC),
+      score: status === 'accepted' ? 100 : Math.round((passedTC / totalTC) * 100),
+      pass_rate: Math.round((passedTC / totalTC) * 100),
       created_at: submission.created_at || new Date().toISOString(),
     };
 
@@ -1383,13 +1485,20 @@ export const codingService = {
               difficulty: String(formattedSubmission.difficulty || 'Medium'),
               language: String(formattedSubmission.language || 'Python'),
               code: String(formattedSubmission.submitted_code || formattedSubmission.code || ''),
-              status: String(formattedSubmission.status || 'accepted'),
+              status: formattedSubmission.status,
+              status_text: formattedSubmission.status_text || formattedSubmission.status,
+              test_cases_passed: formattedSubmission.test_cases_passed,
+              total_test_cases: formattedSubmission.total_test_cases,
               score: typeof formattedSubmission.score === 'number' ? formattedSubmission.score : (formattedSubmission.status === 'accepted' ? 100 : 0),
               pass_rate: typeof formattedSubmission.pass_rate === 'number' ? formattedSubmission.pass_rate : 100,
               time_complexity: formattedSubmission.ai_feedback?.timeComplexity || (formattedSubmission.ai_feedback as any)?.complexity?.currentTime || formattedSubmission.time_complexity || null,
               space_complexity: formattedSubmission.ai_feedback?.spaceComplexity || (formattedSubmission.ai_feedback as any)?.complexity?.currentSpace || formattedSubmission.space_complexity || null,
               execution_time_ms: Number(formattedSubmission.runtime_ms || formattedSubmission.execution_time || 0),
+              runtime_ms: Number(formattedSubmission.runtime_ms || formattedSubmission.execution_time || 0),
               memory_used_kb: Number(formattedSubmission.memory_kb || formattedSubmission.memory_used || 0),
+              memory_kb: Number(formattedSubmission.memory_kb || formattedSubmission.memory_used || 0),
+              ai_feedback: formattedSubmission.ai_feedback || {},
+              submitted_at: formattedSubmission.created_at || new Date().toISOString(),
               created_at: formattedSubmission.created_at || new Date().toISOString(),
               updated_at: new Date().toISOString(),
             };
@@ -1567,16 +1676,71 @@ export const codingService = {
       const localKey = `careerpilot_subs_${effectiveUserId}`;
       const localList: CodingSubmission[] = [];
 
+      // Helper to reconcile and sanitize any submission record
+      const reconcileSubmission = (raw: any): CodingSubmission => {
+        const totalTC = typeof raw.total_test_cases === 'number' && raw.total_test_cases > 0
+          ? raw.total_test_cases
+          : (typeof raw.totalTestCases === 'number' && raw.totalTestCases > 0 ? raw.totalTestCases : 5);
+        let passedTC = typeof raw.test_cases_passed === 'number'
+          ? Math.max(0, Math.min(raw.test_cases_passed, totalTC))
+          : (typeof raw.passedTestCases === 'number' ? Math.max(0, Math.min(raw.passedTestCases, totalTC)) : (raw.status?.toLowerCase() === 'accepted' ? totalTC : 0));
+
+        let status: SubmissionStatus = 'wrong_answer';
+        const rawStatus = (raw.status || '').toLowerCase().trim();
+        if (passedTC === totalTC && totalTC > 0) {
+          status = 'accepted';
+        } else if (rawStatus === 'compilation_error' || rawStatus === 'compile_error') {
+          status = 'compilation_error';
+        } else if (rawStatus === 'runtime_error') {
+          status = 'runtime_error';
+        } else if (rawStatus === 'time_limit_exceeded') {
+          status = 'time_limit_exceeded';
+        } else {
+          status = 'wrong_answer';
+        }
+
+        const statusText = status === 'accepted'
+          ? 'Accepted'
+          : (raw.status_text || raw.statusText || (status === 'compilation_error' ? 'Compilation Error' : status === 'runtime_error' ? 'Runtime Error' : status === 'time_limit_exceeded' ? 'Time Limit Exceeded' : 'Wrong Answer'));
+
+        return {
+          id: raw.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          user_id: raw.user_id || effectiveUserId,
+          problem_id: raw.problem_id || raw.problemId || 'unknown_problem',
+          problem_title: raw.problem_title || raw.problemTitle || 'Coding Problem',
+          difficulty: raw.difficulty || 'Medium',
+          language: raw.language || 'Python',
+          code: raw.code || raw.submitted_code || raw.submittedCode || '',
+          submitted_code: raw.submitted_code || raw.submittedCode || raw.code || '',
+          status: status,
+          status_text: statusText,
+          test_cases_passed: passedTC,
+          total_test_cases: totalTC,
+          test_cases_failed: Math.max(0, totalTC - passedTC),
+          score: typeof raw.score === 'number' ? raw.score : (status === 'accepted' ? 100 : Math.round((passedTC / totalTC) * 100)),
+          pass_rate: typeof raw.pass_rate === 'number' ? raw.pass_rate : Math.round((passedTC / totalTC) * 100),
+          time_complexity: raw.time_complexity || raw.timeComplexity || raw.ai_feedback?.timeComplexity || undefined,
+          space_complexity: raw.space_complexity || raw.spaceComplexity || raw.ai_feedback?.spaceComplexity || undefined,
+          runtime_ms: typeof raw.runtime_ms === 'number' ? raw.runtime_ms : (typeof raw.execution_time_ms === 'number' ? raw.execution_time_ms : 0),
+          memory_kb: typeof raw.memory_kb === 'number' ? raw.memory_kb : (typeof raw.memory_used_kb === 'number' ? raw.memory_used_kb : 0),
+          subject: raw.subject || undefined,
+          topic: raw.topic || undefined,
+          ai_feedback: raw.ai_feedback || raw.aiFeedback || undefined,
+          created_at: raw.created_at || raw.submitted_at || new Date().toISOString(),
+        };
+      };
+
       // 3. Immediately load from localStorage for instant display
       try {
         const stored: CodingSubmission[] = JSON.parse(localStorage.getItem(localKey) || '[]');
         if (Array.isArray(stored)) {
           for (const s of stored) {
             if (s && (s.id || s.problem_id)) {
-              const itemKey = s.id || `loc_${s.problem_id}_${s.created_at}`;
-              localList.push(s);
-              if (!problemId || s.problem_id === problemId) {
-                resultsMap.set(itemKey, s);
+              const reconciled = reconcileSubmission(s);
+              const itemKey = reconciled.id || `loc_${reconciled.problem_id}_${reconciled.created_at}`;
+              localList.push(reconciled);
+              if (!problemId || reconciled.problem_id === problemId) {
+                resultsMap.set(itemKey, reconciled);
               }
             }
           }
@@ -1605,25 +1769,7 @@ export const codingService = {
               const { data, error } = await query;
               if (!error && Array.isArray(data)) {
                 for (const raw of data) {
-                  const mapped: CodingSubmission = {
-                    id: raw.id,
-                    user_id: raw.user_id,
-                    problem_id: raw.problem_id,
-                    problem_title: raw.problem_title || 'Coding Problem',
-                    difficulty: raw.difficulty || 'Medium',
-                    language: raw.language || 'Python',
-                    code: raw.code || raw.submitted_code || '',
-                    status: raw.status || 'accepted',
-                    score: typeof raw.score === 'number' ? raw.score : 100,
-                    pass_rate: typeof raw.pass_rate === 'number' ? raw.pass_rate : 100,
-                    time_complexity: raw.time_complexity || undefined,
-                    space_complexity: raw.space_complexity || undefined,
-                    runtime_ms: raw.execution_time_ms || raw.runtime_ms || 0,
-                    memory_kb: raw.memory_used_kb || raw.memory_kb || 0,
-                    subject: raw.subject || undefined,
-                    topic: raw.topic || undefined,
-                    created_at: raw.created_at,
-                  };
+                  const mapped = reconcileSubmission(raw);
                   resultsMap.set(mapped.id, mapped);
                   supabaseFetchedIds.add(mapped.id);
                 }
@@ -1647,8 +1793,9 @@ export const codingService = {
               const json = await res.json();
               if (json.success && Array.isArray(json.data)) {
                 for (const s of json.data) {
-                  if (!resultsMap.has(s.id)) {
-                    resultsMap.set(s.id, s as CodingSubmission);
+                  const mapped = reconcileSubmission(s);
+                  if (!resultsMap.has(mapped.id)) {
+                    resultsMap.set(mapped.id, mapped);
                   }
                 }
               }
@@ -1695,13 +1842,20 @@ export const codingService = {
                 difficulty: String(s.difficulty || 'Medium'),
                 language: String(s.language || 'Python'),
                 code: String(s.submitted_code || s.code || ''),
-                status: String(s.status || 'accepted'),
+                status: s.status,
+                status_text: s.status_text || s.status,
+                test_cases_passed: s.test_cases_passed,
+                total_test_cases: s.total_test_cases,
                 score: typeof s.score === 'number' ? s.score : (s.status === 'accepted' ? 100 : 0),
                 pass_rate: typeof s.pass_rate === 'number' ? s.pass_rate : 100,
                 time_complexity: s.ai_feedback?.timeComplexity || (s.ai_feedback as any)?.complexity?.currentTime || s.time_complexity || null,
                 space_complexity: s.ai_feedback?.spaceComplexity || (s.ai_feedback as any)?.complexity?.currentSpace || s.space_complexity || null,
                 execution_time_ms: Number(s.runtime_ms || s.execution_time || 0),
+                runtime_ms: Number(s.runtime_ms || s.execution_time || 0),
                 memory_used_kb: Number(s.memory_kb || s.memory_used || 0),
+                memory_kb: Number(s.memory_kb || s.memory_used || 0),
+                ai_feedback: s.ai_feedback || {},
+                submitted_at: s.created_at || new Date().toISOString(),
                 created_at: s.created_at || new Date().toISOString(),
                 updated_at: new Date().toISOString(),
               }));
@@ -1945,6 +2099,188 @@ export const codingService = {
   },
 
   /**
+   * Helper: Extract the set of genuinely solved problem identifiers (IDs and lowercase titles)
+   * A problem is ONLY considered solved when status === 'accepted' AND test_cases_passed === total_test_cases AND total_test_cases > 0.
+   */
+  async getSolvedProblemSet(userId: string = 'guest'): Promise<{
+    ids: Set<string>;
+    titles: Set<string>;
+    submissions: CodingSubmission[];
+  }> {
+    const effectiveUserId = userId || 'guest';
+    const submissions = await this.getSubmissions(effectiveUserId);
+    const solvedIds = new Set<string>();
+    const solvedTitles = new Set<string>();
+
+    for (const sub of submissions) {
+      const totalTC = typeof sub.total_test_cases === 'number' && sub.total_test_cases > 0 ? sub.total_test_cases : 5;
+      const passedTC = typeof sub.test_cases_passed === 'number'
+        ? sub.test_cases_passed
+        : (sub.status?.toLowerCase() === 'accepted' ? totalTC : 0);
+      const isAccepted = sub.status?.toLowerCase() === 'accepted' && passedTC === totalTC && totalTC > 0;
+
+      if (isAccepted) {
+        if (sub.problem_id) solvedIds.add(sub.problem_id);
+        if (sub.id) solvedIds.add(sub.id);
+        if (sub.problem_title) {
+          solvedTitles.add(sub.problem_title.trim().toLowerCase());
+        }
+      }
+    }
+
+    return { ids: solvedIds, titles: solvedTitles, submissions };
+  },
+
+  /**
+   * Helper: Check if a specific problem has been solved by the user
+   */
+  async isProblemSolved(
+    problem: { id?: string; title?: string },
+    userId: string = 'guest'
+  ): Promise<boolean> {
+    if (!problem) return false;
+    const { ids, titles } = await this.getSolvedProblemSet(userId);
+    if (problem.id && ids.has(problem.id)) return true;
+    if (problem.title && titles.has(problem.title.trim().toLowerCase())) return true;
+    return false;
+  },
+
+  /**
+   * Helper: Select the next unsolved question for the student.
+   * Filters ALL AVAILABLE QUESTIONS minus the student's successfully solved questions.
+   * Follows intelligent progression:
+   * 1. Unsolved questions in current (subject, topic, difficulty)
+   * 2. Unsolved questions in current (subject, topic) progressing Easy -> Medium -> Hard
+   * 3. Unsolved questions in current (subject) across all topics
+   * 4. Unsolved questions anywhere in the question bank
+   */
+  async getNextUnsolvedProblem(params: {
+    subject?: CodingSubject;
+    topic?: string;
+    difficulty?: CodingDifficulty;
+    userId?: string;
+    currentProblemId?: string;
+    excludeProblemIds?: string[];
+    strictTopic?: boolean;
+  }): Promise<CodingProblem | null> {
+    const effectiveUserId = params.userId || 'guest';
+    const { ids: solvedIds, titles: solvedTitles } = await this.getSolvedProblemSet(effectiveUserId);
+
+    const excludeSet = new Set<string>(params.excludeProblemIds || []);
+    if (params.currentProblemId) {
+      excludeSet.add(params.currentProblemId);
+    }
+
+    const isSolved = (p: CodingProblem): boolean => {
+      if (!p) return false;
+      return (
+        (p.id && solvedIds.has(p.id)) ||
+        (p.title && solvedTitles.has(p.title.trim().toLowerCase()))
+      );
+    };
+
+    const subject = params.subject || 'DSA';
+    const topic = params.topic || 'Arrays';
+    const difficulty = params.difficulty || 'Medium';
+
+    // 1. Unsolved matching topic and difficulty (excluding currentProblemId first)
+    const topicDiffPool = getQuestionsForTopic(subject, topic, difficulty);
+    const unsolvedTopicDiff = topicDiffPool.filter((p) => !isSolved(p) && !excludeSet.has(p.id));
+    if (unsolvedTopicDiff.length > 0) {
+      return unsolvedTopicDiff[0];
+    }
+    // If excluding currentProblemId left none, but current problem itself is unsolved:
+    const unsolvedTopicDiffAllowCurrent = topicDiffPool.filter((p) => !isSolved(p));
+    if (unsolvedTopicDiffAllowCurrent.length > 0) {
+      return unsolvedTopicDiffAllowCurrent[0];
+    }
+
+    // 2. Unsolved in same (subject, topic) across other difficulties (Easy -> Medium -> Hard)
+    const diffOrder: CodingDifficulty[] = ['Easy', 'Medium', 'Hard'];
+    for (const diff of diffOrder) {
+      if (diff === difficulty) continue;
+      const diffPool = getQuestionsForTopic(subject, topic, diff);
+      const unsolved = diffPool.filter((p) => !isSolved(p) && !excludeSet.has(p.id));
+      if (unsolved.length > 0) {
+        return unsolved[0];
+      }
+    }
+
+    // If strictTopic is requested, do not fall back to other topics or global bank
+    if (params.strictTopic) {
+      return null;
+    }
+
+    // 3. Unsolved in same subject across all topics
+    const cleanSubj = subject.toLowerCase().trim();
+    const subjectPool = DEFAULT_CODING_QUESTION_BANK.filter((p) => {
+      const pSubj = (p.subject || '').toLowerCase().trim();
+      return (
+        pSubj === cleanSubj ||
+        (cleanSubj === 'dsa' && (pSubj === 'dsa' || pSubj === '')) ||
+        (cleanSubj.includes('os') && pSubj.includes('operating')) ||
+        (cleanSubj.includes('dbms') && (pSubj === 'dbms' || pSubj === 'sql'))
+      );
+    });
+    const unsolvedSubject = subjectPool.filter((p) => !isSolved(p) && !excludeSet.has(p.id));
+    if (unsolvedSubject.length > 0) {
+      return unsolvedSubject[0];
+    }
+
+    // 4. Any unsolved problem in entire Question Bank
+    const allUnsolved = DEFAULT_CODING_QUESTION_BANK.filter((p) => !isSolved(p) && !excludeSet.has(p.id));
+    if (allUnsolved.length > 0) {
+      return allUnsolved[0];
+    }
+
+    const allUnsolvedAny = DEFAULT_CODING_QUESTION_BANK.filter((p) => !isSolved(p));
+    if (allUnsolvedAny.length > 0) {
+      return allUnsolvedAny[0];
+    }
+
+    return null;
+  },
+
+  /**
+   * Helper: Select initial problem on session startup / login or page load.
+   * If current problem is already solved, automatically switches to next unsolved question.
+   * If current problem is unsolved, preserves the in-progress question.
+   */
+  async selectInitialOrNextProblem(params: {
+    currentActiveProblem?: CodingProblem | null;
+    subject?: CodingSubject;
+    topic?: string;
+    difficulty?: CodingDifficulty;
+    userId?: string;
+  }): Promise<CodingProblem> {
+    const effectiveUserId = params.userId || 'guest';
+    const current = params.currentActiveProblem;
+
+    if (current) {
+      const solved = await this.isProblemSolved(current, effectiveUserId);
+      if (!solved) {
+        // Current question is not solved yet -> preserve student's active work
+        return current;
+      }
+    }
+
+    // Current is null OR already solved -> pick next unsolved question
+    const nextUnsolved = await this.getNextUnsolvedProblem({
+      subject: params.subject || current?.subject || 'DSA',
+      topic: params.topic || current?.topic || 'Arrays',
+      difficulty: params.difficulty || current?.difficulty || 'Easy',
+      userId: effectiveUserId,
+      currentProblemId: current?.id,
+    });
+
+    if (nextUnsolved) {
+      return nextUnsolved;
+    }
+
+    return current || DEFAULT_CODING_QUESTION_BANK[0];
+  },
+
+  /**
    * Fetch Question Series for a selected Subject, Topic, Difficulty & Language with Real Solved & Saved State
    */
   async getQuestionSeries(
@@ -1975,7 +2311,12 @@ export const codingService = {
     for (const sub of submissions) {
       const pId = sub.problem_id || '';
       const pTitle = (sub.problem_title || '').trim().toLowerCase();
-      const isAccepted = sub.status?.toLowerCase() === 'accepted';
+      
+      const totalTC = typeof sub.total_test_cases === 'number' && sub.total_test_cases > 0 ? sub.total_test_cases : 5;
+      const passedTC = typeof sub.test_cases_passed === 'number'
+        ? sub.test_cases_passed
+        : (sub.status?.toLowerCase() === 'accepted' ? totalTC : 0);
+      const isAccepted = sub.status?.toLowerCase() === 'accepted' && passedTC === totalTC && totalTC > 0;
 
       if (pId) {
         attemptedProblemIds.add(pId);
@@ -2049,7 +2390,13 @@ export const codingService = {
 
     const solvedIds = new Set<string>();
     for (const sub of submissions) {
-      if (sub.status?.toLowerCase() === 'accepted') {
+      const totalTC = typeof sub.total_test_cases === 'number' && sub.total_test_cases > 0 ? sub.total_test_cases : 5;
+      const passedTC = typeof sub.test_cases_passed === 'number'
+        ? sub.test_cases_passed
+        : (sub.status?.toLowerCase() === 'accepted' ? totalTC : 0);
+      const isAccepted = sub.status?.toLowerCase() === 'accepted' && passedTC === totalTC && totalTC > 0;
+
+      if (isAccepted) {
         if (sub.problem_id) solvedIds.add(sub.problem_id);
         if (sub.problem_title) solvedIds.add(sub.problem_title.trim().toLowerCase());
       }

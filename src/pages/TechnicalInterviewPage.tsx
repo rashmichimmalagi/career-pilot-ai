@@ -112,7 +112,7 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
   const [activeReport, setActiveReport] = useState<MockInterviewReport | null>(null);
 
   // Stored Previous Reports
-  const [pastReports, setPastReports] = useState<MockInterviewReport[]>([]);
+  const [pastReports, setPastReports] = useState<MockInterviewReport[]>(() => interviewStorage.getReports(studentId));
   const [isFromCompanyPrep, setIsFromCompanyPrep] = useState<boolean>(false);
   const [sourceContext, setSourceContext] = useState<string | null>(null);
   const [companyTarget, setCompanyTarget] = useState<string>('');

@@ -52,7 +52,7 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
   const studentId = user?.id || 'guest';
 
   // State
-  const [messages, setMessages] = useState<MentorMessage[]>([]);
+  const [messages, setMessages] = useState<MentorMessage[]>(() => getMentorChatHistory(studentId));
   const [inputText, setInputText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [studentContext, setStudentContext] = useState<MentorStudentContext | null>(null);

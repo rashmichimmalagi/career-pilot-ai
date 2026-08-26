@@ -191,7 +191,10 @@ export function calculateCodingScore(submissions: CodingSubmission[]): CodingRea
   let hardSolved = 0;
 
   for (const s of submissions) {
-    const isAccepted = s.status === 'accepted' || s.status_text === 'Accepted' || (s.score && s.score >= 90);
+    const totalTC = typeof s.total_test_cases === 'number' && s.total_test_cases > 0 ? s.total_test_cases : 5;
+    const passedTC = typeof s.test_cases_passed === 'number' ? s.test_cases_passed : (s.status === 'accepted' ? totalTC : 0);
+    const isAccepted = s.status === 'accepted' && passedTC === totalTC && totalTC > 0;
+
     if (isAccepted) {
       acceptedSubmissionsCount++;
       if (!acceptedMap.has(s.problem_id)) {

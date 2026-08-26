@@ -41,18 +41,38 @@ export const CompanyPreparationPage: React.FC<CompanyPreparationPageProps> = ({
   const { user, profile } = useAuth();
   const studentId = user?.id || 'guest';
 
-  // Selection states
-  const [selectedCompany, setSelectedCompany] = useState<string>('Google');
-  const [isCustomCompany, setIsCustomCompany] = useState<boolean>(false);
-  const [customCompanyName, setCustomCompanyName] = useState<string>('');
+  // Selection states initialized from active target
+  const initialActiveTarget = React.useMemo(() => {
+    return getActiveStudentTarget(studentId);
+  }, [studentId]);
 
-  const [selectedRole, setSelectedRole] = useState<string>('Software Developer');
-  const [isCustomRole, setIsCustomRole] = useState<boolean>(false);
-  const [customRoleName, setCustomRoleName] = useState<string>('');
+  const [selectedCompany, setSelectedCompany] = useState<string>(() => {
+    return initialActiveTarget ? initialActiveTarget.companyName : 'Google';
+  });
+  const [isCustomCompany, setIsCustomCompany] = useState<boolean>(() => {
+    return initialActiveTarget ? Boolean(initialActiveTarget.isCustomCompany) : false;
+  });
+  const [customCompanyName, setCustomCompanyName] = useState<string>(() => {
+    return initialActiveTarget && initialActiveTarget.isCustomCompany ? initialActiveTarget.companyName : '';
+  });
+
+  const [selectedRole, setSelectedRole] = useState<string>(() => {
+    return initialActiveTarget ? initialActiveTarget.targetRole : (profile?.target_role || 'Software Developer');
+  });
+  const [isCustomRole, setIsCustomRole] = useState<boolean>(() => {
+    return initialActiveTarget ? Boolean(initialActiveTarget.isCustomRole) : false;
+  });
+  const [customRoleName, setCustomRoleName] = useState<string>(() => {
+    return initialActiveTarget && initialActiveTarget.isCustomRole ? initialActiveTarget.targetRole : '';
+  });
 
   // Target list & Analysis state
-  const [savedTargets, setSavedTargets] = useState<StudentTargetCompany[]>([]);
-  const [activeTargetId, setActiveTargetState] = useState<string | null>(null);
+  const [savedTargets, setSavedTargets] = useState<StudentTargetCompany[]>(() => {
+    return getStudentTargets(studentId);
+  });
+  const [activeTargetId, setActiveTargetState] = useState<string | null>(() => {
+    return initialActiveTarget ? initialActiveTarget.id : null;
+  });
   const [analysis, setAnalysis] = useState<CompanyReadinessAnalysis | null>(() => {
     try {
       const cached = localStorage.getItem(`careerpilot_company_readiness_${studentId}`);
@@ -75,7 +95,7 @@ export const CompanyPreparationPage: React.FC<CompanyPreparationPageProps> = ({
     }
   }, []);
 
-  // Initialize targets and active selection
+  // Sync targets when studentId changes
   useEffect(() => {
     const targets = getStudentTargets(studentId);
     setSavedTargets(targets);
@@ -93,12 +113,8 @@ export const CompanyPreparationPage: React.FC<CompanyPreparationPageProps> = ({
       if (active.isCustomRole) {
         setCustomRoleName(active.targetRole);
       }
-    } else {
-      // Default to Google / Software Developer
-      setSelectedCompany('Google');
-      setSelectedRole(profile?.target_role || 'Software Developer');
     }
-  }, [studentId, profile]);
+  }, [studentId]);
 
   // Compute Company Readiness when company or role changes (stale-while-revalidate)
   const loadAnalysis = useCallback(async () => {

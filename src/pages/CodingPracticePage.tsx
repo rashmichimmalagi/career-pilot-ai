@@ -191,8 +191,6 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     generateAbortRef.current = abortController;
 
     setIsGenerating(true);
-    setEvaluationResult(null);
-    setSubmissions([]);
 
     try {
       const problem = await codingService.generateProblem(
@@ -211,7 +209,10 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       // If aborted, do not update state
       if (abortController.signal.aborted) return;
 
+      // Atomic update of problem and editor state together
       setActiveProblem(problem);
+      setEvaluationResult(null);
+      setSubmissions([]);
       setMobileActiveView('problem');
       setPageTab('arena');
 
@@ -232,15 +233,15 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       showToast(
         'Problem Ready',
         config.targetCompany
-          ? `Generated "${problem.title}" (${problem.difficulty}) tailored for ${config.targetCompany}!`
-          : `Generated "${problem.title}" (${problem.difficulty}) for ${config.topic}!`,
+          ? `Loaded "${problem.title}" (${problem.difficulty}) tailored for ${config.targetCompany}!`
+          : `Loaded "${problem.title}" (${problem.difficulty}) for ${config.topic}!`,
         'success'
       );
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
       console.error('Error generating problem:', err);
       const errMsg =
-        err?.message || "I couldn't generate a problem for this topic. Try describing the topic differently.";
+        err?.message || "Unable to generate a problem right now. Please try again.";
       showToast('Generation Notice', errMsg, 'error');
     } finally {
       setIsGenerating(false);
@@ -368,7 +369,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
   const finalTopic = isCustomTopicSelected ? customTopic.trim() : selectedTopic.trim();
   const displayTopic = isCustomTopicSelected ? (customTopic.trim() || 'Custom Topic') : selectedTopic;
 
-  // Load Question Series, Topic Progress, and Saved Bookmarks
+  // Load Question Series, Topic Progress, and Saved Bookmarks with Smart Progression
   useEffect(() => {
     let isMounted = true;
     const effectiveUserId = user?.id || 'guest';
@@ -397,23 +398,60 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
           setTopicProgress(progress);
           setSavedQuestions(saved);
 
-          // If no problem is selected, initialize with the first series problem or default bank question
-          if (!activeProblemRef.current) {
-            const firstProblem = series[0]?.problem || DEFAULT_CODING_QUESTION_BANK[0];
-            if (firstProblem) {
+          // Smart Question Progression Logic:
+          // Check if current active problem is null OR has already been solved by this student
+          const currentProb = activeProblemRef.current;
+          let isCurrentSolved = false;
+
+          if (currentProb) {
+            // Check if solved in series list or in submission history
+            isCurrentSolved = series.some(
+              (s) =>
+                (s.id === currentProb.id ||
+                  s.title.trim().toLowerCase() === currentProb.title.trim().toLowerCase()) &&
+                s.status === 'solved'
+            );
+            if (!isCurrentSolved) {
+              isCurrentSolved = await codingService.isProblemSolved(currentProb, effectiveUserId);
+            }
+          }
+
+          // If no problem is loaded OR if the current problem is already solved,
+          // automatically pick the next unsolved question for this student!
+          if (!currentProb || isCurrentSolved) {
+            // 1. Check if series has an unsolved question
+            const firstUnsolvedInSeries = series.find((s) => s.status !== 'solved')?.problem;
+            let nextTargetProblem = firstUnsolvedInSeries;
+
+            // 2. If all in series are solved, look across topic / subject / question bank
+            if (!nextTargetProblem) {
+              nextTargetProblem =
+                (await codingService.getNextUnsolvedProblem({
+                  subject: (isCustomSubjectSelected ? 'DSA' : selectedSubject) as CodingSubject,
+                  topic: finalTopic || 'Arrays',
+                  difficulty: selectedDifficulty,
+                  userId: effectiveUserId,
+                  currentProblemId: currentProb?.id,
+                })) || undefined;
+            }
+
+            if (nextTargetProblem && isMounted) {
               const currentLang = selectedLanguageRef.current;
               const rawStarter =
-                firstProblem.starterCode?.[currentLang] ||
-                firstProblem.starter_templates?.[currentLang] ||
+                nextTargetProblem.starterCode?.[currentLang] ||
+                nextTargetProblem.starter_templates?.[currentLang] ||
                 '';
               const cleanStarter = sanitizeStarterCode(
                 rawStarter,
                 currentLang,
-                firstProblem.title,
-                firstProblem.functionSignature?.[currentLang]
+                nextTargetProblem.title,
+                nextTargetProblem.functionSignature?.[currentLang]
               );
-              setActiveProblem(firstProblem);
+              setActiveProblem(nextTargetProblem);
               setCurrentCode(cleanStarter);
+              try {
+                localStorage.setItem('careerpilot_active_coding_problem', JSON.stringify(nextTargetProblem));
+              } catch (_) {}
             }
           }
         }
@@ -549,6 +587,31 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       handleSelectProblemForPractice(targetItem.problem, selectedLanguageRef.current);
     }
   }, [currentSeriesIndex, seriesItems, handleSelectProblemForPractice]);
+
+  // Jump directly to the next unsolved problem in current track / bank
+  const handleNextUnsolvedProblem = useCallback(async () => {
+    const effectiveUserId = user?.id || 'guest';
+    const currentProb = activeProblemRef.current;
+
+    const nextUnsolved = await codingService.getNextUnsolvedProblem({
+      subject: (isCustomSubjectSelected ? 'DSA' : selectedSubject) as CodingSubject,
+      topic: finalTopic || 'Arrays',
+      difficulty: selectedDifficulty,
+      userId: effectiveUserId,
+      currentProblemId: currentProb?.id,
+    });
+
+    if (nextUnsolved) {
+      handleSelectProblemForPractice(nextUnsolved, selectedLanguageRef.current);
+      showToastRef.current('Next Unsolved Problem', `Loaded: "${nextUnsolved.title}"`, 'success');
+    } else {
+      showToastRef.current(
+        'All Available Questions Solved!',
+        'You have completed all standard questions in this track! Click Generate Problem to create custom AI challenges.',
+        'info'
+      );
+    }
+  }, [user?.id, isCustomSubjectSelected, selectedSubject, finalTopic, selectedDifficulty, handleSelectProblemForPractice]);
 
   // Update available topics and default language when subject changes
   const handleSubjectChange = useCallback((subject: CodingSubject) => {
@@ -1371,6 +1434,17 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                     >
                       <span className="hidden sm:inline">Next</span>
                       <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleNextUnsolvedProblem}
+                      id="next-unsolved-problem-btn"
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                      title="Jump to Next Unsolved Problem"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                      <span className="hidden sm:inline">Next Unsolved</span>
                     </button>
 
                     <button

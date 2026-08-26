@@ -20,7 +20,10 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { EditProfileModal } from '../components/profile/EditProfileModal';
-import { getPreparationDashboardData } from '../services/preparationDashboardService';
+import {
+  getPreparationDashboardData,
+  getCachedPreparationDashboardData,
+} from '../services/preparationDashboardService';
 import { PreparationDashboardData } from '../types/preparationDashboard';
 import { PreparationTopSection } from '../components/dashboard/PreparationTopSection';
 import { ModuleProgressGrid } from '../components/dashboard/ModuleProgressGrid';
@@ -29,8 +32,6 @@ import { PerformanceInsightsSection } from '../components/dashboard/PerformanceI
 import { RecentActivitySection } from '../components/dashboard/RecentActivitySection';
 import { AIRecommendationCard } from '../components/dashboard/AIRecommendationCard';
 import { SendTestEmailCard } from '../components/common/SendTestEmailCard';
-import { PersistenceDiagnosticModal } from '../components/dashboard/PersistenceDiagnosticModal';
-import { runPersistenceDiagnostics, CareerPilotDiagnosticReport } from '../services/diagnosticService';
 
 // React Error Boundary for isolated error handling
 interface ErrorBoundaryProps {
@@ -96,72 +97,77 @@ interface DashboardPageProps {
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { user, profile, loading: authLoading } = useAuth();
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
-  const [dashboardData, setDashboardData] = useState<PreparationDashboardData | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [diagReport, setDiagReport] = useState<CareerPilotDiagnosticReport | null>(null);
-  const [isDiagRunning, setIsDiagRunning] = useState(false);
-  const [showDiagModal, setShowDiagModal] = useState(false);
 
   // Authenticated Student ID for Scoped Calculation
   const studentId = user?.id || profile?.id || 'guest';
 
-  const handleRunDiagnostics = async () => {
-    setIsDiagRunning(true);
-    try {
-      const report = await runPersistenceDiagnostics();
-      setDiagReport(report);
-      setShowDiagModal(true);
-    } catch (err: any) {
-      console.error('Failed to execute diagnostics:', err);
-    } finally {
-      setIsDiagRunning(false);
-    }
-  };
+  // Instant render from local cache first (no blank screen or full-page spinner)
+  const [dashboardData, setDashboardData] = useState<PreparationDashboardData | null>(() => {
+    return getCachedPreparationDashboardData(studentId);
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(() => !dashboardData);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadDashboard = useCallback(async () => {
-    setIsLoading(true);
+  const isMountedRef = React.useRef(true);
+  const inFlightRef = React.useRef(false);
+
+  const loadDashboard = useCallback(async (isSilent = false) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    if (!isSilent && !dashboardData) {
+      setIsLoading(true);
+    }
     setLoadError(null);
     try {
       const data = await getPreparationDashboardData(studentId, profile);
-      setDashboardData(data);
+      if (isMountedRef.current) {
+        setDashboardData(data);
+      }
     } catch (err: any) {
       console.error('[Dashboard] Error fetching preparation dashboard data:', err);
-      setLoadError(err?.message || 'Failed to aggregate student analytics');
+      if (isMountedRef.current) {
+        setLoadError(err?.message || 'Failed to aggregate student analytics');
+      }
     } finally {
-      setIsLoading(false);
+      inFlightRef.current = false;
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [studentId, profile]);
+  }, [studentId, profile, dashboardData]);
 
   useEffect(() => {
-    loadDashboard();
+    isMountedRef.current = true;
+    loadDashboard(Boolean(dashboardData));
 
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const handleDataUpdate = () => {
-      console.log('[Dashboard] Activity or profile updated event received. Refreshing...');
-      loadDashboard();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadDashboard(true);
+      }, 300);
     };
 
-    const handleOpenDiagnosticsEvent = () => {
-      handleRunDiagnostics();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleDataUpdate();
+      }
     };
 
     window.addEventListener('careerpilot_profile_updated', handleDataUpdate);
     window.addEventListener('careerpilot_activity_updated', handleDataUpdate);
-    window.addEventListener('open-persistence-diagnostics', handleOpenDiagnosticsEvent);
     window.addEventListener('storage', handleDataUpdate);
     window.addEventListener('focus', handleDataUpdate);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        handleDataUpdate();
-      }
-    });
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      isMountedRef.current = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('careerpilot_profile_updated', handleDataUpdate);
       window.removeEventListener('careerpilot_activity_updated', handleDataUpdate);
-      window.removeEventListener('open-persistence-diagnostics', handleOpenDiagnosticsEvent);
       window.removeEventListener('storage', handleDataUpdate);
       window.removeEventListener('focus', handleDataUpdate);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [loadDashboard]);
 
@@ -202,22 +208,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         {/* Top Control Bar: Refresh & Profile Trigger */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="font-medium">Real-Time Student Analytics Active</span>
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              id="dashboard-inspect-diagnostics-btn"
-              onClick={handleRunDiagnostics}
-              disabled={isDiagRunning}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors shadow-xs cursor-pointer"
-              title="Inspect Supabase Cloud Persistence & Data State"
-            >
-              <Activity className={`w-3.5 h-3.5 ${isDiagRunning ? 'animate-spin' : ''}`} />
-              <span>{isDiagRunning ? 'Checking...' : 'Inspect Diagnostics'}</span>
-            </button>
-
             <button
               onClick={() => onNavigate('study-planner')}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-600 text-white transition-all shadow-xs cursor-pointer"
@@ -228,7 +222,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </button>
 
             <button
-              onClick={loadDashboard}
+              onClick={() => loadDashboard(false)}
               disabled={isLoading}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
               title="Refresh Dashboard Data"
@@ -429,19 +423,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </div>
             <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
               <button
-                onClick={loadDashboard}
+                onClick={() => loadDashboard(false)}
                 className="px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-xs cursor-pointer inline-flex items-center gap-2"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>Retry</span>
-              </button>
-              <button
-                onClick={handleRunDiagnostics}
-                disabled={isDiagRunning}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer inline-flex items-center gap-1.5"
-              >
-                <Activity className={`w-3.5 h-3.5 ${isDiagRunning ? 'animate-spin' : ''}`} />
-                <span>{isDiagRunning ? 'Running Diagnostics...' : 'Inspect Diagnostics'}</span>
               </button>
               <button
                 onClick={() => setIsEditProfileOpen(true)}
@@ -454,15 +440,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         )}
 
       </div>
-
-      {/* Persistence & Sync Diagnostics Modal */}
-      <PersistenceDiagnosticModal
-        isOpen={showDiagModal}
-        onClose={() => setShowDiagModal(false)}
-        report={diagReport}
-        isLoading={isDiagRunning}
-        onRefresh={handleRunDiagnostics}
-      />
 
       {/* Edit Profile Modal */}
       {isEditProfileOpen && (

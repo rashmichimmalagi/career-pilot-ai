@@ -582,6 +582,24 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
   // ==========================================
 
   /**
+   * Get cached resumes synchronously for instant, flicker-free rendering
+   */
+  getCachedUserResumes(userId: string): ResumeVersionItem[] {
+    const effectiveUserId = userId || 'guest';
+    try {
+      const storageKey = `careerpilot_resumes_${effectiveUserId}`;
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.sort((a: ResumeVersionItem, b: ResumeVersionItem) => b.version - a.version);
+        }
+      }
+    } catch (_) {}
+    return [];
+  },
+
+  /**
    * Get all resumes for authenticated student directly from database
    */
   async getUserResumes(userId: string): Promise<ResumeVersionItem[]> {
