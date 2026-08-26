@@ -11,6 +11,7 @@ import { getStoredDailyTasks, getCompletedItemIds } from './roadmapStorage';
 import { generatePersonalizedRoadmap } from './roadmapEngine';
 import { codingService } from './codingService';
 import { getPlacementHistory } from './placementStorage';
+import { persistenceManager } from './persistenceManager';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 /**
@@ -52,6 +53,9 @@ export function getDailyStudyTime(studentId: string = 'guest'): number {
 export function setDailyStudyTime(studentId: string = 'guest', minutes: number): void {
   try {
     localStorage.setItem(getStudyTimeStorageKey(studentId), String(minutes));
+    if (studentId && studentId !== 'guest') {
+      persistenceManager.saveStudyPlanState(studentId, { dailyStudyTime: minutes }).catch(() => {});
+    }
   } catch (_) {}
 }
 
@@ -722,6 +726,11 @@ export async function getTodayStudyPlan(
       // Save to persistent local storage for today
       try {
         localStorage.setItem(storageKey, JSON.stringify(generatedPlan));
+        if (effectiveId && effectiveId !== 'guest') {
+          persistenceManager.saveStudyPlanState(effectiveId, {
+            studyPlans: { [todayStr]: generatedPlan },
+          }).catch(() => {});
+        }
       } catch (_) {}
 
       return { plan: generatedPlan, dashboardData };
@@ -778,6 +787,15 @@ export function updateTaskStatus(
     } catch (_) {}
 
     localStorage.setItem(storageKey, JSON.stringify(plan));
+
+    // Write-through to persistence manager for cloud persistence
+    if (effectiveId && effectiveId !== 'guest') {
+      persistenceManager.saveStudyPlanState(effectiveId, {
+        manualCompletions: { [todayStr]: Object.keys(manualMap) },
+        studyPlans: { [todayStr]: plan },
+      }).catch(() => {});
+    }
+
     return plan;
   } catch (err) {
     console.error('[studyPlannerService] updateTaskStatus error:', err);

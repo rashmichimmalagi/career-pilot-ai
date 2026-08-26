@@ -14,6 +14,7 @@ import { getStudentTargets, getActiveTargetId } from './companyPrepStorage';
 import { getStoredDailyTasks, getCompletedItemIds } from './roadmapStorage';
 import { calculateStreaks } from './achievementService';
 import { resolveStudentCodingLanguage, getDailyStudyTime } from './studyPlannerService';
+import { persistenceManager } from './persistenceManager';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 const CHAT_STORAGE_PREFIX = 'careerpilot_mentor_chat_';
@@ -431,6 +432,9 @@ export function saveMentorChatHistory(studentId: string = 'guest', messages: Men
   try {
     const trimmed = messages.slice(-50); // Keep 50 recent messages
     localStorage.setItem(`${CHAT_STORAGE_PREFIX}${studentId}`, JSON.stringify(trimmed));
+    if (studentId && studentId !== 'guest') {
+      persistenceManager.saveMentorChatHistory(studentId, trimmed).catch(() => {});
+    }
   } catch (err) {
     console.error('[MentorService] Error saving chat history:', err);
   }
@@ -439,6 +443,9 @@ export function saveMentorChatHistory(studentId: string = 'guest', messages: Men
 export function clearMentorChatHistory(studentId: string = 'guest'): void {
   try {
     localStorage.removeItem(`${CHAT_STORAGE_PREFIX}${studentId}`);
+    if (studentId && studentId !== 'guest') {
+      persistenceManager.saveMentorChatHistory(studentId, []).catch(() => {});
+    }
   } catch (err) {
     console.error('[MentorService] Error clearing chat history:', err);
   }

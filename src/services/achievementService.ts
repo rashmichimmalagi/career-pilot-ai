@@ -1,5 +1,6 @@
 import { CodingSubmission, Achievement, AchievementCategory, UserAchievementsSummary } from '../types/coding';
 import { getPlacementStats } from './placementStorage';
+import { persistenceManager } from './persistenceManager';
 
 /**
  * Format a Date to local calendar string YYYY-MM-DD
@@ -45,6 +46,9 @@ export function savePersistedLongestStreak(userId: string = 'guest', streak: num
     const current = getPersistedLongestStreak(userId);
     if (streak > current) {
       localStorage.setItem(`careerpilot_longest_streak_${userId}`, streak.toString());
+      if (userId && userId !== 'guest') {
+        persistenceManager.saveAchievements(userId, undefined, streak).catch(() => {});
+      }
     }
   } catch (_) {}
 }
@@ -79,6 +83,9 @@ export function savePermanentUnlockedBadge(
     if (!current[badgeId]) {
       current[badgeId] = { id: badgeId, unlockedAt };
       localStorage.setItem(`careerpilot_unlocked_badges_${userId}`, JSON.stringify(current));
+      if (userId && userId !== 'guest') {
+        persistenceManager.saveAchievements(userId, current).catch(() => {});
+      }
     }
   } catch (_) {}
 }
