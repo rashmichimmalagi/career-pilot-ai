@@ -1645,11 +1645,11 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
   // -------------------------------------------------------------
 
   /**
-   * Helper to clean and parse AI JSON responses with multi-tier repair and fallback
+   * Helper to clean and parse AI JSON responses with multi-tier repair, bracket balancing, and fallback extraction
    */
   function extractJsonFromAiResponse(rawResponse: any): any {
-    if (!rawResponse) {
-      throw new Error('Empty response received from AI service.');
+    if (rawResponse === null || rawResponse === undefined || rawResponse === '') {
+      return null;
     }
 
     // 1. If it's already a clean JavaScript domain object (and not the raw SDK response wrapper)
@@ -1657,10 +1657,21 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
       typeof rawResponse === 'object' &&
       !rawResponse.candidates &&
       !rawResponse.usageMetadata &&
-      !rawResponse.sdkHttpResponse &&
-      (rawResponse.question || rawResponse.title || rawResponse.status || rawResponse.overall_score || rawResponse.id)
+      !rawResponse.sdkHttpResponse
     ) {
-      return rawResponse;
+      if (
+        rawResponse.question ||
+        rawResponse.questions ||
+        rawResponse.title ||
+        rawResponse.status ||
+        rawResponse.overall_score ||
+        rawResponse.overallScore ||
+        rawResponse.id ||
+        rawResponse.score ||
+        Array.isArray(rawResponse)
+      ) {
+        return rawResponse;
+      }
     }
 
     // 2. Extract model text safely
@@ -1680,7 +1691,6 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
         .map((p: any) => (typeof p.text === 'string' ? p.text : ''))
         .join('');
     } else if (typeof rawResponse === 'object' && rawResponse !== null) {
-      // If it's a domain object that wasn't caught
       if (!rawResponse.candidates && !rawResponse.usageMetadata) {
         return rawResponse;
       }
@@ -1688,31 +1698,46 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
 
     let cleanText = (rawText || '').trim();
     if (!cleanText) {
-      throw new Error('Could not extract text content from AI response.');
+      return null;
     }
 
-    // 3. Remove markdown fences (```json ... ``` or ``` ...)
-    cleanText = cleanText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    // 3. Remove markdown fences (```json ... ``` or ``` ... ``` or any backtick wrappers)
+    cleanText = cleanText
+      .replace(/^```(?:json|JSON|javascript|js)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
 
-    // 4. Extract outermost JSON structure
-    const firstOpen = cleanText.indexOf('{');
-    const lastClose = cleanText.lastIndexOf('}');
-    if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
-      cleanText = cleanText.substring(firstOpen, lastClose + 1).trim();
+    // 4. Extract outermost JSON structure (Object vs Array)
+    const firstOpenBrace = cleanText.indexOf('{');
+    const lastCloseBrace = cleanText.lastIndexOf('}');
+    const firstOpenBracket = cleanText.indexOf('[');
+    const lastCloseBracket = cleanText.lastIndexOf(']');
+
+    if (
+      firstOpenBracket !== -1 &&
+      (firstOpenBrace === -1 || firstOpenBracket < firstOpenBrace) &&
+      lastCloseBracket !== -1 &&
+      lastCloseBracket > firstOpenBracket
+    ) {
+      // Array is the outermost structure
+      cleanText = cleanText.substring(firstOpenBracket, lastCloseBracket + 1).trim();
+    } else if (firstOpenBrace !== -1 && lastCloseBrace !== -1 && lastCloseBrace > firstOpenBrace) {
+      // Object is the outermost structure
+      cleanText = cleanText.substring(firstOpenBrace, lastCloseBrace + 1).trim();
     }
 
     // Attempt 1: Direct JSON.parse
     try {
       return JSON.parse(cleanText);
     } catch (err1: any) {
-      // Attempt 2: Clean trailing commas and remove comments
+      // Attempt 2: Clean trailing commas and remove JS comments
       try {
         const sanitized = cleanText
           .replace(/,\s*([\]}])/g, '$1')
           .replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '$1');
         return JSON.parse(sanitized);
       } catch (err2: any) {
-        // Attempt 3: Repair unescaped newlines/tabs inside string literals
+        // Attempt 3: Repair unescaped control chars and newlines/tabs inside string literals
         try {
           const repaired = cleanText
             .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
@@ -1723,51 +1748,105 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
             });
           return JSON.parse(repaired);
         } catch (err3: any) {
-          // Attempt 4: Regex-based field extraction for key structures
-          console.warn('[AI Parser] Standard JSON parse failed, attempting regex key extraction...');
-          
-          const extractField = (fieldName: string): string | undefined => {
-            const regex = new RegExp(`"${fieldName}"\\s*:\\s*"([\\s\\S]*?)(?:"\\s*,\\s*"|(?:"\\s*\\}))`, 'i');
-            const m = cleanText.match(regex);
-            if (m && m[1]) {
-              return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
-            }
-            return undefined;
-          };
+          // Attempt 4: Truncated JSON repair (auto-close open quotes, braces, brackets)
+          try {
+            let truncated = cleanText
+              .replace(/,\s*([\]}])/g, '$1')
+              .replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '$1');
+            
+            // If open quote is unmatched, append closing quote
+            let inString = false;
+            let escaped = false;
+            const openStack: string[] = [];
 
-          const extractNumber = (fieldName: string): number | undefined => {
-            const regex = new RegExp(`"${fieldName}"\\s*:\\s*([0-9]+)`, 'i');
-            const m = cleanText.match(regex);
-            return m ? Number(m[1]) : undefined;
-          };
-
-          if (cleanText.includes('"question"') || cleanText.includes('"title"')) {
-            const extractedObj: Record<string, any> = {};
-            if (cleanText.includes('"question"')) {
-              extractedObj.id = extractField('id') || `tiq_${Date.now()}`;
-              extractedObj.question = extractField('question');
-              extractedObj.questionNumber = extractNumber('questionNumber') || 1;
-              extractedObj.totalQuestions = extractNumber('totalQuestions') || 5;
-              extractedObj.subject = extractField('subject');
-              extractedObj.topic = extractField('topic');
-              extractedObj.difficulty = extractField('difficulty');
-              extractedObj.questionType = extractField('questionType') || 'Conceptual';
-              extractedObj.interviewerGreeting = extractField('interviewerGreeting');
-              extractedObj.codeSnippet = extractField('codeSnippet');
-            }
-            if (cleanText.includes('"title"')) {
-              extractedObj.title = extractField('title');
-              extractedObj.description = extractField('description') || extractField('problem_statement');
-              extractedObj.difficulty = extractField('difficulty');
+            for (let i = 0; i < truncated.length; i++) {
+              const ch = truncated[i];
+              if (escaped) {
+                escaped = false;
+                continue;
+              }
+              if (ch === '\\') {
+                escaped = true;
+                continue;
+              }
+              if (ch === '"') {
+                inString = !inString;
+                continue;
+              }
+              if (!inString) {
+                if (ch === '{' || ch === '[') {
+                  openStack.push(ch);
+                } else if (ch === '}' && openStack[openStack.length - 1] === '{') {
+                  openStack.pop();
+                } else if (ch === ']' && openStack[openStack.length - 1] === '[') {
+                  openStack.pop();
+                }
+              }
             }
 
-            if (extractedObj.question || extractedObj.title) {
-              return extractedObj;
+            if (inString) {
+              truncated += '"';
             }
+            while (openStack.length > 0) {
+              const last = openStack.pop();
+              if (last === '{') truncated += '}';
+              else if (last === '[') truncated += ']';
+            }
+
+            return JSON.parse(truncated);
+          } catch (err4: any) {
+            // Attempt 5: Regex-based field extraction for key structures
+            console.warn('[AI Parser] Standard JSON parse and repair failed, attempting regex key extraction...');
+            
+            const extractField = (fieldName: string): string | undefined => {
+              const regex = new RegExp(`"${fieldName}"\\s*:\\s*"([\\s\\S]*?)(?:"\\s*,\\s*"|(?:"\\s*\\}))`, 'i');
+              const m = cleanText.match(regex);
+              if (m && m[1]) {
+                return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+              }
+              return undefined;
+            };
+
+            const extractNumber = (fieldName: string): number | undefined => {
+              const regex = new RegExp(`"${fieldName}"\\s*:\\s*([0-9]+)`, 'i');
+              const m = cleanText.match(regex);
+              return m ? Number(m[1]) : undefined;
+            };
+
+            if (cleanText.includes('"question"') || cleanText.includes('"title"') || cleanText.includes('"score"')) {
+              const extractedObj: Record<string, any> = {};
+              if (cleanText.includes('"question"')) {
+                extractedObj.id = extractField('id') || `tiq_${Date.now()}`;
+                extractedObj.question = extractField('question');
+                extractedObj.questionNumber = extractNumber('questionNumber') || 1;
+                extractedObj.totalQuestions = extractNumber('totalQuestions') || 5;
+                extractedObj.subject = extractField('subject');
+                extractedObj.topic = extractField('topic');
+                extractedObj.difficulty = extractField('difficulty');
+                extractedObj.questionType = extractField('questionType') || 'Conceptual';
+                extractedObj.interviewerGreeting = extractField('interviewerGreeting');
+                extractedObj.codeSnippet = extractField('codeSnippet');
+              }
+              if (cleanText.includes('"title"')) {
+                extractedObj.title = extractField('title');
+                extractedObj.description = extractField('description') || extractField('problem_statement');
+                extractedObj.difficulty = extractField('difficulty');
+              }
+              if (cleanText.includes('"score"')) {
+                extractedObj.score = extractNumber('score');
+                extractedObj.correctness = extractField('correctness');
+                extractedObj.improvement = extractField('improvement');
+                extractedObj.interview_tip = extractField('interview_tip');
+              }
+
+              if (extractedObj.question || extractedObj.title || typeof extractedObj.score === 'number') {
+                return extractedObj;
+              }
+            }
+
+            console.warn('[AI Parser] All parsing and recovery passes completed with null fallback.');
+            return null;
           }
-
-          console.error('[AI Parser] All parsing and recovery passes failed. Input preview:', cleanText.slice(0, 300));
-          throw new Error(`JSON parsing failed: ${err1?.message || 'Invalid AI JSON output'}`);
         }
       }
     }
@@ -4048,111 +4127,112 @@ Adhere strictly to the JSON schema:
       });
     }
 
-    const {
-      subject = 'DSA',
-      topic = 'Arrays',
-      isCustomTopic = false,
-      customTopicText = '',
-      difficulty = 'Medium',
-      language = '',
-      questionCount = 5,
-      questionNumber = 1,
-    } = req.body || {};
+    try {
+      const {
+        subject = 'DSA',
+        topic = 'Arrays',
+        isCustomTopic = false,
+        customTopicText = '',
+        difficulty = 'Medium',
+        language = '',
+        questionCount = 5,
+        questionNumber = 1,
+      } = req.body || {};
 
-    const cleanSubject = typeof subject === 'string' && subject.trim() ? subject.trim() : 'DSA';
-    const cleanTopic = isCustomTopic && customTopicText && typeof customTopicText === 'string' && customTopicText.trim()
-      ? customTopicText.trim()
-      : (typeof topic === 'string' && topic.trim() ? topic.trim() : 'Arrays');
-    const cleanDifficulty = typeof difficulty === 'string' && difficulty.trim() ? difficulty.trim() : 'Medium';
-    
-    const isNonProgSubject =
-      [
-        'dbms',
-        'sql',
-        'operating systems',
-        'computer networks',
-        'system design',
-        'cloud computing',
-        'cybersecurity',
-        'software testing',
-        'computer architecture',
-        'devops',
-        'machine learning',
-        'data engineering',
-      ].some((sub) => sub === cleanSubject.toLowerCase()) ||
-      cleanSubject.toLowerCase().includes('os') ||
-      cleanSubject.toLowerCase().includes('operating') ||
-      cleanSubject.toLowerCase().includes('linux') ||
-      cleanSubject.toLowerCase().includes('network') ||
-      cleanSubject.toLowerCase().includes('dbms') ||
-      cleanSubject.toLowerCase().includes('database') ||
-      cleanSubject.toLowerCase().includes('sql') ||
-      cleanSubject.toLowerCase().includes('system design') ||
-      cleanSubject.toLowerCase().includes('cloud') ||
-      cleanSubject.toLowerCase().includes('security') ||
-      cleanSubject.toLowerCase().includes('testing') ||
-      cleanSubject.toLowerCase().includes('architecture');
+      const cleanSubject = typeof subject === 'string' && subject.trim() ? subject.trim() : 'DSA';
+      const cleanTopic = isCustomTopic && customTopicText && typeof customTopicText === 'string' && customTopicText.trim()
+        ? customTopicText.trim()
+        : (typeof topic === 'string' && topic.trim() ? topic.trim() : 'Arrays');
+      const cleanDifficulty = typeof difficulty === 'string' && difficulty.trim() ? difficulty.trim() : 'Medium';
+      
+      const isNonProgSubject =
+        [
+          'dbms',
+          'sql',
+          'operating systems',
+          'computer networks',
+          'system design',
+          'cloud computing',
+          'cybersecurity',
+          'software testing',
+          'computer architecture',
+          'devops',
+          'machine learning',
+          'data engineering',
+        ].some((sub) => sub === cleanSubject.toLowerCase()) ||
+        cleanSubject.toLowerCase().includes('os') ||
+        cleanSubject.toLowerCase().includes('operating') ||
+        cleanSubject.toLowerCase().includes('linux') ||
+        cleanSubject.toLowerCase().includes('network') ||
+        cleanSubject.toLowerCase().includes('dbms') ||
+        cleanSubject.toLowerCase().includes('database') ||
+        cleanSubject.toLowerCase().includes('sql') ||
+        cleanSubject.toLowerCase().includes('system design') ||
+        cleanSubject.toLowerCase().includes('cloud') ||
+        cleanSubject.toLowerCase().includes('security') ||
+        cleanSubject.toLowerCase().includes('testing') ||
+        cleanSubject.toLowerCase().includes('architecture');
 
-    const rawLanguage = typeof language === 'string' ? language.trim() : '';
-    const isLanguageApplicable =
-      !isNonProgSubject &&
-      Boolean(rawLanguage) &&
-      rawLanguage !== 'Not Required' &&
-      rawLanguage !== 'None' &&
-      rawLanguage !== 'not_applicable';
-    const cleanLanguage = isLanguageApplicable ? rawLanguage : '';
-    const totalQuestions = Math.min(30, Math.max(1, Number(questionCount) || 5));
+      const rawLanguage = typeof language === 'string' ? language.trim() : '';
+      const isLanguageApplicable =
+        !isNonProgSubject &&
+        Boolean(rawLanguage) &&
+        rawLanguage !== 'Not Required' &&
+        rawLanguage !== 'None' &&
+        rawLanguage !== 'not_applicable';
+      const cleanLanguage = isLanguageApplicable ? rawLanguage : '';
+      const totalQuestions = Math.min(30, Math.max(1, Number(questionCount) || 5));
 
-    console.log(`[Technical Interview] Batch generating ${totalQuestions} questions in ONE request for Subject="${cleanSubject}", Topic="${cleanTopic}", Difficulty="${cleanDifficulty}", Language="${cleanLanguage || 'Not Required (Theoretical/Conceptual)'}"`);
+      console.log(`[Technical Interview] Batch generating ${totalQuestions} questions in ONE request for Subject="${cleanSubject}", Topic="${cleanTopic}", Difficulty="${cleanDifficulty}", Language="${cleanLanguage || 'Not Required (Theoretical/Conceptual)'}"`);
 
-    const { client: ai, error: configError } = getGemini();
+      const { client: ai, error: configError } = getGemini();
 
-    let difficultyGuidance = '';
-    if (cleanDifficulty === 'Easy') {
-      difficultyGuidance = `DIFFICULTY: EASY (Fundamental concepts, simple reasoning, beginner interview level):
+      let difficultyGuidance = '';
+      if (cleanDifficulty === 'Easy') {
+        difficultyGuidance = `DIFFICULTY: EASY (Fundamental concepts, simple reasoning, beginner interview level):
 - Focus on core definitions, basic mechanisms, foundational properties, time/space complexity of base operations, or explaining how the concept works in simple terms.
 - Suitable for entry-level / junior campus placement screening.
 - Avoid multi-tiered edge cases, complex distributed architectures, or advanced proofs.`;
-    } else if (cleanDifficulty === 'Medium') {
-      difficultyGuidance = `DIFFICULTY: MEDIUM (Moderate reasoning, practical/interview scenarios, standard tech placement level):
+      } else if (cleanDifficulty === 'Medium') {
+        difficultyGuidance = `DIFFICULTY: MEDIUM (Moderate reasoning, practical/interview scenarios, standard tech placement level):
 - Focus on practical scenarios, comparing alternatives, trade-offs, internal mechanics, common pitfalls, intermediate algorithmic reasoning, or real-world application.
 - Suitable for standard Tier-1/Tier-2 campus and product company rounds.`;
-    } else {
-      difficultyGuidance = `DIFFICULTY: HARD (Advanced reasoning, complex edge cases, strong interview-level depth):
+      } else {
+        difficultyGuidance = `DIFFICULTY: HARD (Advanced reasoning, complex edge cases, strong interview-level depth):
 - Focus on deep architectural trade-offs, concurrency/race conditions, internal engine implementations (e.g. B+ Tree node splitting, OS page fault handler steps, Linux kernel scheduling), low-level optimizations, or complex edge cases.
 - Suitable for senior technical evaluations.`;
-    }
+      }
 
-    let languageGuidance = '';
-    if (!cleanLanguage) {
-      languageGuidance = `SUBJECT DOMAIN FOCUS (Language Independent / Conceptual / Architectural):
+      let languageGuidance = '';
+      if (!cleanLanguage) {
+        languageGuidance = `SUBJECT DOMAIN FOCUS (Language Independent / Conceptual / Architectural):
 - This is a core computer science domain interview on ${cleanSubject}. Focus purely on domain principles, architectural mechanisms, protocol lifecycles, theoretical concepts, and engineering trade-offs.
 - Do NOT mandate any specific programming language syntax. If pseudocode or a query is needed, use generic pseudo-code or standard SQL (for databases).
 - In the JSON response, set "language" to "" (empty string) and "codeSnippet" to null unless an abstract diagram/SQL schema is specifically helpful.`;
-    } else if (cleanLanguage === 'C') {
-      languageGuidance = `PROGRAMMING LANGUAGE: C (Low-Level & Procedural):
+      } else if (cleanLanguage === 'C') {
+        languageGuidance = `PROGRAMMING LANGUAGE: C (Low-Level & Procedural):
 - Must use C concepts: Arrays, Pointers, Pointer arithmetic, Strings (null-terminated char arrays), Structures, Unions, Dynamic memory allocation (malloc, calloc, realloc, free), Stack vs heap layout, Function pointers, Recursion, Preprocessor directives, Compilation pipeline, Undefined behavior, Segmentation faults, Pass by value vs passing pointers.
 - STRICT PROHIBITION: Do NOT generate C++-specific concepts such as Classes, Objects, Inheritance, Polymorphism, Virtual functions, STL containers (vector, map), Templates, or References (&) unless C++ was selected.
 - If codeSnippet is provided, it must be strictly valid C syntax (e.g. \`int arr[5] = {1, 2, 3, 4, 5};\`).`;
-    } else if (cleanLanguage === 'C++') {
-      languageGuidance = `PROGRAMMING LANGUAGE: C++ (Object-Oriented & Modern Systems):
+      } else if (cleanLanguage === 'C++') {
+        languageGuidance = `PROGRAMMING LANGUAGE: C++ (Object-Oriented & Modern Systems):
 - May cover: Classes and objects, Constructors/destructors, Inheritance, Polymorphism, Virtual functions & vtables, Function & Operator overloading, References vs Pointers, RAII, Smart pointers (unique_ptr, shared_ptr, weak_ptr), STL containers (vector, map, unordered_map, set), Templates, Exception handling, Memory management, Stack vs heap.
 - If codeSnippet is provided, use standard modern C++ syntax (e.g. \`std::vector<int> nums = {1, 2, 3, 4, 5};\`).`;
-    } else if (cleanLanguage === 'Python') {
-      languageGuidance = `PROGRAMMING LANGUAGE: PYTHON (High-Level & Dynamic):
+      } else if (cleanLanguage === 'Python') {
+        languageGuidance = `PROGRAMMING LANGUAGE: PYTHON (High-Level & Dynamic):
 - Must use Python concepts: Lists, Tuples, Dictionaries, Sets, List comprehensions, Iterators, Generators (yield), Functions, Lambda, OOP in Python, Exception handling, Mutable vs Immutable objects, Python memory behavior and garbage collection/reference counting.
 - STRICT PROHIBITION: Do NOT generate C/C++ memory-management questions (like manual malloc/free or pointers) for a Python interview unless doing a theoretical language-independent comparison.
 - If codeSnippet is provided, use clean Pythonic syntax (e.g. \`nums = [1, 2, 3, 4, 5]\`).`;
-    } else if (cleanLanguage === 'Java') {
-      languageGuidance = `PROGRAMMING LANGUAGE: JAVA (Object-Oriented & JVM):
+      } else if (cleanLanguage === 'Java') {
+        languageGuidance = `PROGRAMMING LANGUAGE: JAVA (Object-Oriented & JVM):
 - May cover: Classes and objects, Inheritance, Interfaces vs Abstract classes, Exception handling, Collections framework (ArrayList, HashMap, HashSet, LinkedList), Multithreading & Concurrency, JVM architecture & memory layout, Garbage collection, Method overloading/overriding, Access modifiers.
 - If codeSnippet is provided, use valid Java syntax (e.g. \`int[] nums = new int[]{1, 2, 3, 4, 5};\` or \`ArrayList<Integer> nums = new ArrayList<>();\`).`;
-    } else {
-      languageGuidance = `PROGRAMMING LANGUAGE: ${cleanLanguage}:
+      } else {
+        languageGuidance = `PROGRAMMING LANGUAGE: ${cleanLanguage}:
 - Frame questions and any code snippets using idiomatic ${cleanLanguage} concepts and syntax.`;
-    }
+      }
 
-    const systemInstruction = `You are a Senior Principal Technical Interviewer at a top-tier technology company.
+      const systemInstruction = `You are a Senior Principal Technical Interviewer at a top-tier technology company.
 Your goal is to conduct a professional, rigorous technical interview for a software engineering candidate.
 
 YOU ARE GENERATING ALL ${totalQuestions} QUESTIONS FOR A COMPLETE INTERVIEW ROUND IN A SINGLE STRUCTURED RESPONSE.
@@ -4195,7 +4275,7 @@ OUTPUT JSON SCHEMA:
   ]
 }`;
 
-    const prompt = `Generate exactly ${totalQuestions} original, non-repetitive technical interview questions for:
+      const prompt = `Generate exactly ${totalQuestions} original, non-repetitive technical interview questions for:
 Subject: ${cleanSubject}
 Topic: ${cleanTopic}
 Difficulty: ${cleanDifficulty}
@@ -4203,101 +4283,127 @@ ${cleanLanguage ? `Programming Language: ${cleanLanguage}\n` : 'Language / Stack
 
 Return ONLY a valid JSON object containing an array of exactly ${totalQuestions} questions matching the schema.`;
 
-    let rawResponse: any = null;
-    let usedModel = '';
-    let lastError: any = null;
+      let rawResponse: any = null;
+      let usedModel = '';
+      let lastError: any = null;
 
-    if (ai && !configError) {
-      try {
-        const result = await generateContentWithResilience(ai, prompt, {
-          config: {
-            systemInstruction,
-            responseMimeType: 'application/json',
-          },
-          label: 'Technical Interview Questions',
-        });
-        rawResponse = result.response;
-        usedModel = result.usedModel;
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[Technical Interview] Batch generation warning:`, err?.message || err);
-      }
-    }
-
-    let finalQuestions: any[] = [];
-
-    if (rawResponse) {
-      try {
-        const parsedData = extractJsonFromAiResponse(rawResponse);
-        const rawList = Array.isArray(parsedData)
-          ? parsedData
-          : Array.isArray(parsedData?.questions)
-          ? parsedData.questions
-          : parsedData?.question
-          ? [parsedData]
-          : [];
-
-        if (rawList.length > 0) {
-          finalQuestions = rawList
-            .filter((q: any) => q && typeof q.question === 'string' && q.question.trim().length > 10)
-            .map((q: any, index: number) => {
-              const qNum = index + 1;
-              return {
-                id: q.id || `tiq_${Date.now()}_${qNum}`,
-                questionNumber: qNum,
-                totalQuestions: totalQuestions,
-                question: q.question.trim(),
-                subject: cleanSubject,
-                topic: cleanTopic,
-                difficulty: q.difficulty || cleanDifficulty,
-                language: cleanLanguage,
-                questionType: q.questionType || 'Conceptual',
-                interviewerGreeting: q.interviewerGreeting || `Question ${qNum} of ${totalQuestions}. Take your time and explain your reasoning clearly.`,
-                codeSnippet: q.codeSnippet && typeof q.codeSnippet === 'string' && q.codeSnippet.trim() !== 'null' && q.codeSnippet.trim() !== 'undefined'
-                  ? q.codeSnippet.trim()
-                  : undefined,
-              };
-            });
+      if (ai && !configError) {
+        try {
+          const result = await generateContentWithResilience(ai, prompt, {
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+            },
+            label: 'Technical Interview Questions',
+          });
+          rawResponse = result.response;
+          usedModel = result.usedModel;
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`[Technical Interview] Batch generation warning:`, err?.message || err);
         }
-      } catch (parseErr: any) {
-        console.warn('[Technical Interview] JSON parse warning on AI batch response, augmenting with curated generator:', parseErr?.message || parseErr);
       }
-    }
 
-    // If AI generated fewer questions than requested or failed, seamlessly supplement using fallback generator
-    if (finalQuestions.length < totalQuestions) {
-      console.log(`[Technical Interview] AI returned ${finalQuestions.length}/${totalQuestions} questions. Augmenting remaining ${totalQuestions - finalQuestions.length} with domain generator.`);
+      let finalQuestions: any[] = [];
+
+      if (rawResponse) {
+        try {
+          const parsedData = extractJsonFromAiResponse(rawResponse);
+          const rawList = Array.isArray(parsedData)
+            ? parsedData
+            : Array.isArray(parsedData?.questions)
+            ? parsedData.questions
+            : parsedData?.question
+            ? [parsedData]
+            : [];
+
+          if (rawList.length > 0) {
+            finalQuestions = rawList
+              .filter((q: any) => q && typeof q.question === 'string' && q.question.trim().length > 10)
+              .map((q: any, index: number) => {
+                const qNum = index + 1;
+                return {
+                  id: q.id || `tiq_${Date.now()}_${qNum}`,
+                  questionNumber: qNum,
+                  totalQuestions: totalQuestions,
+                  question: q.question.trim(),
+                  subject: cleanSubject,
+                  topic: cleanTopic,
+                  difficulty: q.difficulty || cleanDifficulty,
+                  language: cleanLanguage,
+                  questionType: q.questionType || 'Conceptual',
+                  interviewerGreeting: q.interviewerGreeting || `Question ${qNum} of ${totalQuestions}. Take your time and explain your reasoning clearly.`,
+                  codeSnippet: q.codeSnippet && typeof q.codeSnippet === 'string' && q.codeSnippet.trim() !== 'null' && q.codeSnippet.trim() !== 'undefined'
+                    ? q.codeSnippet.trim()
+                    : undefined,
+                };
+              });
+          }
+        } catch (parseErr: any) {
+          console.warn('[Technical Interview] JSON parse warning on AI batch response, augmenting with curated generator:', parseErr?.message || parseErr);
+        }
+      }
+
+      // If AI generated fewer questions than requested or failed, seamlessly supplement using fallback generator
+      if (finalQuestions.length < totalQuestions) {
+        console.log(`[Technical Interview] AI returned ${finalQuestions.length}/${totalQuestions} questions. Augmenting remaining ${totalQuestions - finalQuestions.length} with domain generator.`);
+        const fallbackList = generateFallbackInterviewQuestions(
+          cleanSubject,
+          cleanTopic,
+          cleanDifficulty,
+          cleanLanguage,
+          totalQuestions
+        );
+
+        for (let i = finalQuestions.length; i < totalQuestions; i++) {
+          const fallbackQ = fallbackList[i];
+          finalQuestions.push({
+            ...fallbackQ,
+            questionNumber: i + 1,
+            totalQuestions: totalQuestions,
+          });
+        }
+      } else if (finalQuestions.length > totalQuestions) {
+        finalQuestions = finalQuestions.slice(0, totalQuestions);
+      }
+
+      console.log(`[Technical Interview] Successfully prepared ${finalQuestions.length} questions in single request.`);
+
+      return res.json({
+        success: true,
+        data: {
+          questions: finalQuestions,
+        },
+        questions: finalQuestions,
+        totalQuestions: finalQuestions.length,
+        model: usedModel || 'fallback-curated-engine',
+      });
+    } catch (globalErr: any) {
+      console.error('[Technical Interview] Error in generateInterviewQuestionsHandler, falling back safely:', globalErr);
+      const reqSubject = (req.body?.subject as string) || 'DSA';
+      const reqTopic = (req.body?.topic as string) || 'Arrays';
+      const reqDiff = (req.body?.difficulty as string) || 'Medium';
+      const reqLang = (req.body?.language as string) || '';
+      const reqCount = Math.min(30, Math.max(1, Number(req.body?.questionCount) || 5));
+
       const fallbackList = generateFallbackInterviewQuestions(
-        cleanSubject,
-        cleanTopic,
-        cleanDifficulty,
-        cleanLanguage,
-        totalQuestions
+        reqSubject,
+        reqTopic,
+        reqDiff,
+        reqLang,
+        reqCount
       );
 
-      for (let i = finalQuestions.length; i < totalQuestions; i++) {
-        const fallbackQ = fallbackList[i];
-        finalQuestions.push({
-          ...fallbackQ,
-          questionNumber: i + 1,
-          totalQuestions: totalQuestions,
-        });
-      }
-    } else if (finalQuestions.length > totalQuestions) {
-      finalQuestions = finalQuestions.slice(0, totalQuestions);
+      return res.json({
+        success: true,
+        data: {
+          questions: fallbackList,
+        },
+        questions: fallbackList,
+        totalQuestions: fallbackList.length,
+        model: 'fallback-emergency-curated-engine',
+      });
     }
-
-    console.log(`[Technical Interview] Successfully prepared ${finalQuestions.length} questions in single request.`);
-
-    return res.json({
-      success: true,
-      data: {
-        questions: finalQuestions,
-      },
-      questions: finalQuestions,
-      totalQuestions: finalQuestions.length,
-      model: usedModel || 'fallback-curated-engine',
-    });
   };
 
   /**

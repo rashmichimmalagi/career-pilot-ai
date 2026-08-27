@@ -372,6 +372,37 @@ class PersistenceManagerClass {
             if (!ok && item.attempts < 5) {
               remaining.push({ ...item, attempts: item.attempts + 1 });
             }
+          } else if (item.type === 'save_coding_submission') {
+            const sub = item.payload;
+            const payload = {
+              id: sub.id,
+              user_id: sub.user_id || item.userId,
+              problem_id: String(sub.problem_id || sub.id),
+              problem_title: String(sub.problem_title || 'Coding Problem'),
+              difficulty: String(sub.difficulty || 'Medium'),
+              language: String(sub.language || 'Python'),
+              code: String(sub.submitted_code || sub.code || ''),
+              status: sub.status,
+              status_text: sub.status_text || sub.status,
+              test_cases_passed: sub.test_cases_passed,
+              total_test_cases: sub.total_test_cases,
+              score: typeof sub.score === 'number' ? sub.score : (sub.status === 'accepted' ? 100 : 0),
+              pass_rate: typeof sub.pass_rate === 'number' ? sub.pass_rate : 100,
+              time_complexity: sub.ai_feedback?.timeComplexity || sub.time_complexity || null,
+              space_complexity: sub.ai_feedback?.spaceComplexity || sub.space_complexity || null,
+              execution_time_ms: Number(sub.runtime_ms || sub.execution_time || 0),
+              runtime_ms: Number(sub.runtime_ms || sub.execution_time || 0),
+              memory_used_kb: Number(sub.memory_kb || sub.memory_used || 0),
+              memory_kb: Number(sub.memory_kb || sub.memory_used || 0),
+              ai_feedback: sub.ai_feedback || {},
+              submitted_at: sub.created_at || new Date().toISOString(),
+              created_at: sub.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+            const { error } = await supabase.from('coding_submissions').upsert(payload, { onConflict: 'id' });
+            if (error && item.attempts < 5) {
+              remaining.push({ ...item, attempts: item.attempts + 1 });
+            }
           }
         } catch (e) {
           if (item.attempts < 5) {

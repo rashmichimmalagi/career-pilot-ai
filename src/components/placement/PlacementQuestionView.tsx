@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Clock,
   ArrowLeft,
@@ -48,6 +48,16 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
   // Practice mode explanation reveal tracking (questionNumber -> boolean)
   const [revealedInPractice, setRevealedInPractice] = useState<Record<number, boolean>>({});
 
+  // Submission lock & idempotency
+  const [isSubmitted, setIsSubmitted] = useState<boolean>(false);
+  const isSubmittingRef = useRef<boolean>(false);
+
+  // Determine mode
+  // Mode 2 (Practice Quiz): config.mode === 'practice' (immediate feedback, locked per question)
+  // Mode 1 (Placement Practice): config.mode === 'timed' or assessment test (record selection, change allowed, review, evaluate on final submit)
+  const isPracticeQuiz = config.mode === 'practice';
+  const isPlacementPractice = !isPracticeQuiz;
+
   // Timer state
   const isTimedMode = config.mode === 'timed';
   const initialTimeSeconds = (config.timeLimitMinutes || Math.max(1, Math.round(totalQuestions * 1.5))) * 60;
@@ -59,6 +69,8 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
 
   // Time remaining countdown for timed mode, elapsed time for practice mode
   useEffect(() => {
+    if (isSubmitted) return;
+
     const timer = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
 
@@ -76,49 +88,104 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isTimedMode]);
+  }, [isTimedMode, isSubmitted]);
+
+  const evaluateAllAnswersOnSubmit = useCallback(
+    (currentAnswersMap: Record<number, PlacementAnswerRecord>) => {
+      const finalAnswers: Record<number, PlacementAnswerRecord> = {};
+      questions.forEach((q) => {
+        const existing = currentAnswersMap[q.questionNumber];
+        if (existing && !existing.isSkipped && existing.selectedOption !== null) {
+          // In Placement Practice or Practice Quiz, evaluate the candidate's last chosen option against the correct option
+          const isCorrect = existing.selectedOption === q.correctOption;
+          finalAnswers[q.questionNumber] = {
+            questionNumber: q.questionNumber,
+            selectedOption: existing.selectedOption,
+            isSkipped: false,
+            isCorrect,
+            timeSpentSeconds: existing.timeSpentSeconds || 0,
+          };
+        } else {
+          finalAnswers[q.questionNumber] = {
+            questionNumber: q.questionNumber,
+            selectedOption: null,
+            isSkipped: true,
+            isCorrect: false,
+            timeSpentSeconds: 0,
+          };
+        }
+      });
+      return finalAnswers;
+    },
+    [questions]
+  );
 
   const handleAutoSubmitOnTimeOut = useCallback(() => {
-    // Fill unvisited or unanswered as skipped
-    const finalAnswers: Record<number, PlacementAnswerRecord> = { ...answers };
-    questions.forEach((q) => {
-      if (!finalAnswers[q.questionNumber]) {
-        finalAnswers[q.questionNumber] = {
-          questionNumber: q.questionNumber,
-          selectedOption: null,
-          isSkipped: true,
-          isCorrect: false,
-        };
-      }
-    });
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmitted(true);
+
+    const finalAnswers = evaluateAllAnswersOnSubmit(answers);
     onFinishTest(finalAnswers, initialTimeSeconds);
-  }, [answers, initialTimeSeconds, onFinishTest, questions]);
+  }, [answers, evaluateAllAnswersOnSubmit, initialTimeSeconds, onFinishTest]);
 
   // Handle option selection
   const handleSelectOption = (optionKey: 'A' | 'B' | 'C' | 'D') => {
+    if (isSubmitted) return;
     const qNum = currentQuestion.questionNumber;
-    const isCorrect = optionKey === currentQuestion.correctOption;
 
-    setAnswers((prev) => ({
-      ...prev,
-      [qNum]: {
-        questionNumber: qNum,
-        selectedOption: optionKey,
-        isSkipped: false,
-        isCorrect,
-      },
-    }));
+    if (isPracticeQuiz) {
+      // MODE 2: PRACTICE QUIZ
+      // If already answered, question is LOCKED - prevent altering the answer
+      const existingAnswer = answers[qNum];
+      if (existingAnswer && existingAnswer.selectedOption !== null) {
+        return;
+      }
 
-    if (config.mode === 'practice') {
+      // Immediately evaluate and lock
+      const isCorrect = optionKey === currentQuestion.correctOption;
+      setAnswers((prev) => ({
+        ...prev,
+        [qNum]: {
+          questionNumber: qNum,
+          selectedOption: optionKey,
+          isSkipped: false,
+          isCorrect,
+          timeSpentSeconds: prev[qNum]?.timeSpentSeconds || 0,
+        },
+      }));
+
       setRevealedInPractice((prev) => ({
         ...prev,
         [qNum]: true,
+      }));
+    } else {
+      // MODE 1: PLACEMENT PRACTICE
+      // Record selected option without evaluating yet
+      // Student can change answer freely (A -> C -> B)
+      // Only the last selected option is evaluated on final submit
+      setAnswers((prev) => ({
+        ...prev,
+        [qNum]: {
+          questionNumber: qNum,
+          selectedOption: optionKey,
+          isSkipped: false,
+          isCorrect: false, // will be evaluated on final test submission
+          timeSpentSeconds: prev[qNum]?.timeSpentSeconds || 0,
+        },
       }));
     }
   };
 
   const handleClearOption = () => {
+    if (isSubmitted) return;
     const qNum = currentQuestion.questionNumber;
+
+    // In Practice Quiz mode, if locked, clearing is not allowed
+    if (isPracticeQuiz && revealedInPractice[qNum]) {
+      return;
+    }
+
     setAnswers((prev) => {
       const next = { ...prev };
       delete next[qNum];
@@ -127,7 +194,17 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
   };
 
   const handleSkipQuestion = () => {
+    if (isSubmitted) return;
     const qNum = currentQuestion.questionNumber;
+
+    // If practice mode and already answered, simply move to next question
+    if (isPracticeQuiz && revealedInPractice[qNum]) {
+      if (currentIndex < totalQuestions - 1) {
+        setCurrentIndex((prev) => prev + 1);
+      }
+      return;
+    }
+
     setAnswers((prev) => ({
       ...prev,
       [qNum]: {
@@ -135,6 +212,7 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
         selectedOption: null,
         isSkipped: true,
         isCorrect: false,
+        timeSpentSeconds: prev[qNum]?.timeSpentSeconds || 0,
       },
     }));
 
@@ -161,19 +239,13 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
   };
 
   const handleSubmitConfirmed = () => {
-    // Fill any missing with skipped
-    const finalAnswers: Record<number, PlacementAnswerRecord> = { ...answers };
-    questions.forEach((q) => {
-      if (!finalAnswers[q.questionNumber]) {
-        finalAnswers[q.questionNumber] = {
-          questionNumber: q.questionNumber,
-          selectedOption: null,
-          isSkipped: true,
-          isCorrect: false,
-        };
-      }
-    });
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmitted(true);
+    setIsSubmitModalOpen(false);
 
+    // Evaluate all answers upon final submission
+    const finalAnswers = evaluateAllAnswersOnSubmit(answers);
     const timeSpent = isTimedMode ? initialTimeSeconds - timeRemainingSeconds : elapsedSeconds;
     onFinishTest(finalAnswers, Math.max(1, timeSpent));
   };
@@ -181,22 +253,33 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
   // Keyboard shortcut listener (A, B, C, D / 1, 2, 3, 4, ArrowLeft, ArrowRight)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if typing in an input or modal is open
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName) || isSubmitModalOpen) {
+      // Don't trigger if typing in an input or modal is open or submitted
+      if (
+        ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName) ||
+        isSubmitModalOpen ||
+        isExitModalOpen ||
+        isSubmitted
+      ) {
         return;
       }
 
+      // If in practice mode and current question is already answered, do not process option keys
+      const currentQNum = currentQuestion.questionNumber;
+      const isCurrentLockedInPractice = isPracticeQuiz && Boolean(revealedInPractice[currentQNum]);
+
       const key = e.key.toUpperCase();
       if (['A', 'B', 'C', 'D'].includes(key)) {
-        handleSelectOption(key as 'A' | 'B' | 'C' | 'D');
+        if (!isCurrentLockedInPractice) {
+          handleSelectOption(key as 'A' | 'B' | 'C' | 'D');
+        }
       } else if (key === '1') {
-        handleSelectOption('A');
+        if (!isCurrentLockedInPractice) handleSelectOption('A');
       } else if (key === '2') {
-        handleSelectOption('B');
+        if (!isCurrentLockedInPractice) handleSelectOption('B');
       } else if (key === '3') {
-        handleSelectOption('C');
+        if (!isCurrentLockedInPractice) handleSelectOption('C');
       } else if (key === '4') {
-        handleSelectOption('D');
+        if (!isCurrentLockedInPractice) handleSelectOption('D');
       } else if (e.key === 'ArrowRight' && currentIndex < totalQuestions - 1) {
         handleNext();
       } else if (e.key === 'ArrowLeft' && currentIndex > 0) {
@@ -206,14 +289,14 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, currentQuestion, totalQuestions, isSubmitModalOpen]);
+  }, [currentIndex, currentQuestion, totalQuestions, isSubmitModalOpen, isExitModalOpen, isSubmitted, isPracticeQuiz, revealedInPractice]);
 
   // Status counts
   const answerList = Object.values(answers) as PlacementAnswerRecord[];
   const answeredCount = answerList.filter((a) => !a.isSkipped && a.selectedOption !== null).length;
   const skippedCount = answerList.filter((a) => a.isSkipped).length;
   const currentAnswerRecord = answers[currentQuestion.questionNumber];
-  const isRevealed = config.mode === 'practice' && Boolean(revealedInPractice[currentQuestion.questionNumber]);
+  const isQuestionAnsweredInPractice = isPracticeQuiz && Boolean(revealedInPractice[currentQuestion.questionNumber]);
 
   // Format timer strings
   const formatTime = (totalSeconds: number) => {
@@ -367,7 +450,7 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {currentAnswerRecord?.selectedOption && (
+            {currentAnswerRecord?.selectedOption && !isQuestionAnsweredInPractice && (
               <button
                 onClick={handleClearOption}
                 className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 transition-colors flex items-center gap-1 cursor-pointer"
@@ -403,16 +486,25 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
 
             let optionClasses = 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 hover:border-indigo-300 dark:hover:border-indigo-700 text-slate-800 dark:text-slate-200';
 
-            if (isSelected) {
-              optionClasses = 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 shadow-xs';
-            }
-
-            // In practice mode, if revealed, highlight correctness
-            if (isRevealed) {
-              if (isCorrectOption) {
-                optionClasses = 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-100 font-semibold';
-              } else if (isSelected && !isCorrectOption) {
-                optionClasses = 'border-rose-500 bg-rose-50/70 dark:bg-rose-950/40 text-rose-950 dark:text-rose-100';
+            if (isPlacementPractice) {
+              // MODE 1: PLACEMENT PRACTICE
+              // Highlight selected option cleanly. NO "Correct" / "Incorrect" / reveal feedback.
+              if (isSelected) {
+                optionClasses = 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/50 text-indigo-950 dark:text-indigo-100 ring-2 ring-indigo-500/30 shadow-xs font-medium';
+              }
+            } else {
+              // MODE 2: PRACTICE QUIZ
+              // If answered/revealed, highlight correctness immediately and lock
+              if (isQuestionAnsweredInPractice) {
+                if (isCorrectOption) {
+                  optionClasses = 'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-100 font-semibold';
+                } else if (isSelected && !isCorrectOption) {
+                  optionClasses = 'border-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-rose-950 dark:text-rose-100 font-medium';
+                } else {
+                  optionClasses = 'border-slate-200 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/20 text-slate-400 dark:text-slate-500 opacity-60';
+                }
+              } else if (isSelected) {
+                optionClasses = 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 shadow-xs';
               }
             }
 
@@ -421,15 +513,24 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
                 key={optKey}
                 type="button"
                 onClick={() => handleSelectOption(optKey)}
-                className={`w-full p-4 rounded-2xl border-2 text-left transition-all flex items-start gap-4 cursor-pointer relative group ${optionClasses}`}
+                disabled={isQuestionAnsweredInPractice || isSubmitted}
+                className={`w-full p-4 rounded-2xl border-2 text-left transition-all flex items-start gap-4 relative group ${
+                  isQuestionAnsweredInPractice ? 'cursor-default' : 'cursor-pointer'
+                } ${optionClasses}`}
               >
                 <div className={`w-8 h-8 rounded-xl font-bold text-xs flex items-center justify-center shrink-0 transition-colors ${
-                  isSelected
+                  isPlacementPractice
+                    ? isSelected
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-950/60'
+                    : isQuestionAnsweredInPractice
+                    ? isCorrectOption
+                      ? 'bg-emerald-600 text-white'
+                      : isSelected
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400'
+                    : isSelected
                     ? 'bg-indigo-600 text-white'
-                    : isRevealed && isCorrectOption
-                    ? 'bg-emerald-600 text-white'
-                    : isRevealed && isSelected && !isCorrectOption
-                    ? 'bg-rose-600 text-white'
                     : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-950/60'
                 }`}>
                   {optKey}
@@ -439,11 +540,11 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
                   {optText}
                 </div>
 
-                {isRevealed && isCorrectOption && (
+                {isPracticeQuiz && isQuestionAnsweredInPractice && isCorrectOption && (
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-1" />
                 )}
 
-                {isRevealed && isSelected && !isCorrectOption && (
+                {isPracticeQuiz && isQuestionAnsweredInPractice && isSelected && !isCorrectOption && (
                   <XCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0 mt-1" />
                 )}
               </button>
@@ -451,8 +552,8 @@ export const PlacementQuestionView: React.FC<PlacementQuestionViewProps> = ({
           })}
         </div>
 
-        {/* Practice Mode: Instant Explanation Banner */}
-        {isRevealed && (
+        {/* Practice Quiz Mode ONLY: Instant Explanation Banner */}
+        {isPracticeQuiz && isQuestionAnsweredInPractice && (
           <div className="p-5 rounded-2xl bg-gradient-to-br from-indigo-50/80 to-purple-50/60 dark:from-slate-900 dark:to-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 space-y-2.5 animate-fadeIn">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">

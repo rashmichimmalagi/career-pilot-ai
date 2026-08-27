@@ -26,6 +26,7 @@ interface ProblemViewProps {
   selectedLanguage?: CodingLanguage;
   submissions?: CodingSubmission[];
   hasSubmitted?: boolean;
+  onRestoreCode?: (code: string) => void;
 }
 
 export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
@@ -33,6 +34,7 @@ export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
   selectedLanguage = 'Python',
   submissions = [],
   hasSubmitted = false,
+  onRestoreCode,
 }) => {
   if (process.env.NODE_ENV !== 'production') {
     console.log('[RENDER] ProblemView:', problem?.id, problem?.title);
@@ -40,11 +42,26 @@ export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
   const [activeTab, setActiveTab] = useState<'description' | 'editorial' | 'submissions'>('description');
   const [copiedInputIdx, setCopiedInputIdx] = useState<number | null>(null);
   const [expandedHints, setExpandedHints] = useState<Record<number, boolean>>({});
+  const [expandedSubmissions, setExpandedSubmissions] = useState<Record<string, boolean>>({});
+  const [copiedSubId, setCopiedSubId] = useState<string | null>(null);
 
   const copyToClipboard = (text: string, idx: number) => {
     navigator.clipboard.writeText(text);
     setCopiedInputIdx(idx);
     setTimeout(() => setCopiedInputIdx(null), 2000);
+  };
+
+  const copySubmissionCode = (subId: string, code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedSubId(subId);
+    setTimeout(() => setCopiedSubId(null), 2000);
+  };
+
+  const toggleSubmissionExpand = (subId: string) => {
+    setExpandedSubmissions((prev) => ({
+      ...prev,
+      [subId]: !prev[subId],
+    }));
   };
 
   const toggleHint = (idx: number) => {
@@ -477,6 +494,68 @@ export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
                         </span>
                       )}
                     </div>
+
+                    {/* View Submitted Code Trigger & Panel */}
+                    {(sub.submitted_code || sub.code) && (
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                        <button
+                          type="button"
+                          onClick={() => toggleSubmissionExpand(sub.id || `sub_${i}`)}
+                          className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Code2 className="w-3.5 h-3.5" />
+                          <span>{expandedSubmissions[sub.id || `sub_${i}`] ? 'Hide Submitted Code' : 'View Submitted Code'}</span>
+                          {expandedSubmissions[sub.id || `sub_${i}`] ? (
+                            <ChevronUp className="w-3.5 h-3.5 ml-0.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5 ml-0.5" />
+                          )}
+                        </button>
+
+                        {expandedSubmissions[sub.id || `sub_${i}`] && (
+                          <div className="mt-2.5 space-y-2 rounded-xl bg-slate-900 text-slate-100 p-3 text-xs font-mono border border-slate-800 animate-in fade-in duration-150">
+                            <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                              <span className="text-[11px] text-slate-400 font-sans">
+                                {sub.language} solution ({sub.created_at ? new Date(sub.created_at).toLocaleDateString() : 'Saved'})
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => copySubmissionCode(sub.id || `sub_${i}`, sub.submitted_code || sub.code || '')}
+                                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors flex items-center gap-1 cursor-pointer text-[11px]"
+                                >
+                                  {copiedSubId === (sub.id || `sub_${i}`) ? (
+                                    <>
+                                      <Check className="w-3 h-3 text-emerald-400" />
+                                      <span className="text-emerald-400">Copied</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3 h-3" />
+                                      <span>Copy</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {onRestoreCode && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onRestoreCode(sub.submitted_code || sub.code || '')}
+                                    className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-sans font-bold transition-all cursor-pointer text-[11px]"
+                                  >
+                                    Load into Editor
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <pre className="overflow-x-auto max-h-60 p-1 text-[11px] leading-relaxed text-slate-200">
+                              <code>{sub.submitted_code || sub.code}</code>
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

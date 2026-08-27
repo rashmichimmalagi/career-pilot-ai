@@ -1,5 +1,7 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { codingHistoryService } from './codingHistoryService';
+import { persistenceManager } from './persistenceManager';
 import {
   CodingSubject,
   CodingDifficulty,
@@ -1465,12 +1467,21 @@ export const codingService = {
       localStorage.setItem(key, JSON.stringify(updated));
     } catch (_) {}
 
+    // Record immediately in codingHistoryService for the active problem & language
+    try {
+      const probId = String(formattedSubmission.problem_id || formattedSubmission.id);
+      const codeToSave = String(formattedSubmission.submitted_code || formattedSubmission.code || '');
+      if (probId && codeToSave) {
+        codingHistoryService.saveSubmittedCode(uId, probId, formattedSubmission.language, codeToSave);
+      }
+    } catch (_) {}
+
     // Invalidate cached submissions so next fetch is fresh
     if (cachedSubmissions && cachedSubmissions.key.startsWith(uId)) {
       cachedSubmissions = null;
     }
 
-    // 2. Parallel remote persistence (Supabase + Backend API concurrently)
+    // 2. Parallel remote persistence (Supabase via PersistenceManager + Backend API concurrently)
     const remoteTasks: Promise<any>[] = [];
 
     if (isSupabaseConfigured() && uId && uId !== 'guest') {
@@ -1485,6 +1496,9 @@ export const codingService = {
               difficulty: String(formattedSubmission.difficulty || 'Medium'),
               language: String(formattedSubmission.language || 'Python'),
               code: String(formattedSubmission.submitted_code || formattedSubmission.code || ''),
+              submitted_code: String(formattedSubmission.submitted_code || formattedSubmission.code || ''),
+              subject: formattedSubmission.subject || null,
+              topic: formattedSubmission.topic || null,
               status: formattedSubmission.status,
               status_text: formattedSubmission.status_text || formattedSubmission.status,
               test_cases_passed: formattedSubmission.test_cases_passed,
@@ -1505,13 +1519,54 @@ export const codingService = {
 
             const { error } = await supabase
               .from('coding_submissions')
-              .upsert(dbPayload);
+              .upsert(dbPayload, { onConflict: 'id' });
 
             if (error) {
-              console.warn('[CodingService] Supabase submission upsert notice:', error.message);
+              console.warn('[CodingService] Supabase submission upsert notice, trying base payload:', error.message);
+              // Fallback to strict minimal column schema in case custom columns don't exist
+              const basePayload = {
+                id: dbPayload.id,
+                user_id: dbPayload.user_id,
+                problem_id: dbPayload.problem_id,
+                problem_title: dbPayload.problem_title,
+                difficulty: dbPayload.difficulty,
+                language: dbPayload.language,
+                code: dbPayload.code,
+                status: dbPayload.status,
+                status_text: dbPayload.status_text,
+                test_cases_passed: dbPayload.test_cases_passed,
+                total_test_cases: dbPayload.total_test_cases,
+                score: dbPayload.score,
+                pass_rate: dbPayload.pass_rate,
+                execution_time_ms: dbPayload.execution_time_ms,
+                runtime_ms: dbPayload.runtime_ms,
+                memory_kb: dbPayload.memory_kb,
+                ai_feedback: dbPayload.ai_feedback,
+                created_at: dbPayload.created_at,
+                updated_at: dbPayload.updated_at,
+              };
+              const fallbackRes = await supabase.from('coding_submissions').upsert(basePayload, { onConflict: 'id' });
+              if (fallbackRes.error) {
+                persistenceManager.enqueueOfflineMutation({
+                  id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                  userId: uId,
+                  type: 'save_coding_submission',
+                  payload: formattedSubmission,
+                  timestamp: new Date().toISOString(),
+                  attempts: 0,
+                });
+              }
             }
           } catch (err) {
-            console.warn('[CodingService] Error saving submission to Supabase:', err);
+            console.warn('[CodingService] Error saving submission to Supabase, enqueued:', err);
+            persistenceManager.enqueueOfflineMutation({
+              id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              userId: uId,
+              type: 'save_coding_submission',
+              payload: formattedSubmission,
+              timestamp: new Date().toISOString(),
+              attempts: 0,
+            });
           }
         })()
       );
@@ -1819,6 +1874,11 @@ export const codingService = {
         if (effectiveUserId !== 'guest') {
           localStorage.setItem(localKey, JSON.stringify(allSubmissions));
         }
+      } catch (_) {}
+
+      // Automatically hydrate coding history cache so code is instantly restorable on every device
+      try {
+        codingHistoryService.hydrateFromSubmissions(effectiveUserId, allSubmissions);
       } catch (_) {}
 
       // Update in-memory cache

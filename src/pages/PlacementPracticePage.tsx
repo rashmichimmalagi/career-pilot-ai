@@ -15,6 +15,7 @@ import {
 } from '../types/placement';
 import {
   getPlacementHistory,
+  fetchPlacementHistory,
   getPlacementStats,
   savePlacementSession,
   computeSessionBreakdown,
@@ -70,6 +71,15 @@ export const PlacementPracticePage: React.FC<PlacementPracticePageProps> = ({
     const hist = getPlacementHistory(studentId);
     setHistory(hist);
     setStats(getPlacementStats(studentId));
+
+    if (studentId && studentId !== 'guest') {
+      fetchPlacementHistory(studentId).then((synced) => {
+        if (synced) {
+          setHistory(synced);
+          setStats(getPlacementStats(studentId));
+        }
+      });
+    }
   }, [studentId]);
 
   useEffect(() => {

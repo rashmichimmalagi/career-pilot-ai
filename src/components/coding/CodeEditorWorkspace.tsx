@@ -443,7 +443,8 @@ export const CodeEditorWorkspace: React.FC<CodeEditorWorkspaceProps> = React.mem
       problem.id,
       language,
       starterCode,
-      submissions
+      submissions,
+      problem.title
     );
 
     if (

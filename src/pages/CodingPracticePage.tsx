@@ -352,13 +352,47 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     }
   }, [user?.id]);
 
-  // Load count of user submissions for badge
+  // Load count of user submissions for badge and general history
   useEffect(() => {
+    let isMounted = true;
     const effectiveUserId = user?.id || 'guest';
     codingService.getSubmissions(effectiveUserId).then((subs) => {
-      setSubmissionCount(subs.length);
+      if (isMounted) {
+        setSubmissionCount(subs.length);
+      }
     }).catch(() => {});
+    return () => {
+      isMounted = false;
+    };
   }, [user?.id]);
+
+  // Load submissions for active problem whenever problem or user changes
+  useEffect(() => {
+    let isMounted = true;
+    const effectiveUserId = user?.id || 'guest';
+    if (!activeProblem) {
+      setSubmissions([]);
+      return;
+    }
+
+    codingService.getSubmissions(effectiveUserId, activeProblem.id).then((allSubs) => {
+      if (isMounted) {
+        const probIdNorm = (activeProblem.id || '').trim().toLowerCase();
+        const probTitleNorm = (activeProblem.title || '').trim().toLowerCase();
+        const matching = allSubs.filter((s) => {
+          if (!s) return false;
+          const sId = (s.problem_id || (s as any).problemId || '').trim().toLowerCase();
+          const sTitle = (s.problem_title || (s as any).problemTitle || '').trim().toLowerCase();
+          return sId === probIdNorm || (probTitleNorm && sTitle === probTitleNorm);
+        });
+        setSubmissions(matching.length > 0 ? matching : allSubs.filter(s => s.problem_id === activeProblem.id));
+      }
+    }).catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeProblem?.id, activeProblem?.title, user?.id]);
 
   // Compute final subject & topic according to user selection
   const isCustomSubjectSelected = selectedSubject === '+ Custom Subject';
@@ -572,12 +606,25 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       problem.title,
       problem.functionSignature?.[langToUse]
     );
-    setCurrentCode(cleanStarter);
+
+    const effectiveUserId = user?.id || 'guest';
+    const draftCode = codingHistoryService.getDraftCode(effectiveUserId, problem.id, langToUse);
+    const restorable = codingHistoryService.getRestorableCode(
+      effectiveUserId,
+      problem.id,
+      langToUse,
+      cleanStarter,
+      undefined,
+      problem.title
+    );
+
+    const codeToSet = draftCode || (restorable && restorable.source === 'submitted' ? restorable.code : cleanStarter);
+    setCurrentCode(codeToSet);
     setEvaluationResult(null);
     setPageTab('arena');
     setMobileActiveView('problem');
     showToastRef.current('Loaded Problem', `"${problem.title}" is ready in the Coding Arena!`, 'success');
-  }, []);
+  }, [user?.id]);
 
   const handleNavigateSeries = useCallback((direction: 'prev' | 'next') => {
     if (currentSeriesIndex === -1) return;
@@ -651,9 +698,20 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         prob.title,
         prob.functionSignature?.[newLanguage]
       );
-      setCurrentCode(cleanStarter);
+      const effectiveUserId = user?.id || 'guest';
+      const draftCode = codingHistoryService.getDraftCode(effectiveUserId, prob.id, newLanguage);
+      const restorable = codingHistoryService.getRestorableCode(
+        effectiveUserId,
+        prob.id,
+        newLanguage,
+        cleanStarter,
+        submissions,
+        prob.title
+      );
+      const codeToSet = draftCode || (restorable && restorable.source === 'submitted' ? restorable.code : cleanStarter);
+      setCurrentCode(codeToSet);
     }
-  }, []);
+  }, [user?.id, submissions]);
 
   // Real AI Problem Generator Handler
   const handleGenerateProblem = async () => {
@@ -1528,6 +1586,11 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                       selectedLanguage={selectedLanguage}
                       submissions={submissions}
                       hasSubmitted={submissions.length > 0}
+                      onRestoreCode={(restoredCode) => {
+                        setCurrentCode(restoredCode);
+                        setMobileActiveView('editor');
+                        showToastRef.current('Code Restored', 'Loaded submitted solution into editor!', 'success');
+                      }}
                     />
                   </div>
 
