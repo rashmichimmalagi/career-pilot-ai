@@ -61,7 +61,14 @@ import {
 } from '../services/codingService';
 import { codingHistoryService } from '../services/codingHistoryService';
 import { checkNewlyUnlockedAchievements } from '../services/achievementService';
-import { DEFAULT_CODING_QUESTION_BANK } from '../data/codingQuestionBank';
+import {
+  DEFAULT_CODING_QUESTION_BANK,
+  isProblemCompatible,
+  normalizeTopic,
+  normalizeSubject,
+  createTopicTailoredFallback,
+  getQuestionsForTopic,
+} from '../data/codingQuestionBank';
 import { ProblemView } from '../components/coding/ProblemView';
 import { CodeEditorWorkspace } from '../components/coding/CodeEditorWorkspace';
 import { MyPracticeView } from '../components/coding/MyPracticeView';
@@ -100,10 +107,18 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       const saved = localStorage.getItem('careerpilot_active_coding_problem');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && parsed.title) return parsed;
+        if (parsed && parsed.title) {
+          const compat = isProblemCompatible(parsed, {
+            subject: 'DSA',
+            topic: SUBJECT_TOPICS['DSA'][0],
+            difficulty: 'Medium',
+          });
+          if (compat.compatible) return parsed;
+        }
       }
     } catch (_) {}
-    return DEFAULT_CODING_QUESTION_BANK[0] || null;
+    const initialPool = getQuestionsForTopic('DSA', SUBJECT_TOPICS['DSA'][0], 'Medium');
+    return initialPool[0] || DEFAULT_CODING_QUESTION_BANK[0] || null;
   });
   const [currentCode, setCurrentCode] = useState<string>(() => {
     try {
@@ -209,8 +224,27 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       // If aborted, do not update state
       if (abortController.signal.aborted) return;
 
+      let finalProblem = problem;
+      const compatCheck = isProblemCompatible(finalProblem, {
+        subject: config.subject,
+        topic: config.topic,
+        difficulty: config.difficulty,
+      });
+
+      if (!compatCheck.compatible) {
+        console.warn('[Coding Arena] Generated problem failed compatibility check:', compatCheck.reasons);
+        finalProblem = createTopicTailoredFallback(config.subject, config.topic, config.difficulty, config.language);
+      }
+
+      console.log(
+        `[Coding Arena Diagnostics]\n` +
+        `Selected Configuration: Subject="${config.subject}", Topic="${config.topic}", Difficulty="${config.difficulty}", Language="${config.language}"\n` +
+        `Opened Question: ID="${finalProblem.id}", Title="${finalProblem.title}", Subject="${finalProblem.subject}", Topic="${finalProblem.topic}", Difficulty="${finalProblem.difficulty}"\n` +
+        `Compatibility Check: PASS`
+      );
+
       // Atomic update of problem and editor state together
-      setActiveProblem(problem);
+      setActiveProblem(finalProblem);
       setEvaluationResult(null);
       setSubmissions([]);
       setMobileActiveView('problem');
@@ -218,14 +252,14 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
 
       // Set guaranteed sanitized starter code
       const rawStarter =
-        problem.starterCode?.[config.language] ||
-        problem.starter_templates?.[config.language] ||
+        finalProblem.starterCode?.[config.language] ||
+        finalProblem.starter_templates?.[config.language] ||
         '';
       const cleanStarter = sanitizeStarterCode(
         rawStarter,
         config.language,
-        problem.title,
-        problem.functionSignature?.[config.language]
+        finalProblem.title,
+        finalProblem.functionSignature?.[config.language]
       );
       setCurrentCode(cleanStarter);
 
@@ -233,8 +267,8 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       showToast(
         'Problem Ready',
         config.targetCompany
-          ? `Loaded "${problem.title}" (${problem.difficulty}) tailored for ${config.targetCompany}!`
-          : `Loaded "${problem.title}" (${problem.difficulty}) for ${config.topic}!`,
+          ? `Loaded "${finalProblem.title}" (${finalProblem.difficulty}) tailored for ${config.targetCompany}!`
+          : `Loaded "${finalProblem.title}" (${finalProblem.difficulty}) for ${config.topic}!`,
         'success'
       );
     } catch (err: any) {
@@ -433,26 +467,36 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
           setSavedQuestions(saved);
 
           // Smart Question Progression Logic:
-          // Check if current active problem is null OR has already been solved by this student
+          // Check if current active problem is null OR has already been solved by this student OR is incompatible with current filters
           const currentProb = activeProblemRef.current;
           let isCurrentSolved = false;
+          let isCurrentCompatible = false;
 
           if (currentProb) {
-            // Check if solved in series list or in submission history
-            isCurrentSolved = series.some(
-              (s) =>
-                (s.id === currentProb.id ||
-                  s.title.trim().toLowerCase() === currentProb.title.trim().toLowerCase()) &&
-                s.status === 'solved'
-            );
-            if (!isCurrentSolved) {
-              isCurrentSolved = await codingService.isProblemSolved(currentProb, effectiveUserId);
+            const compat = isProblemCompatible(currentProb, {
+              subject: finalSubject,
+              topic: finalTopic || 'Arrays',
+              difficulty: selectedDifficulty,
+            });
+            isCurrentCompatible = compat.compatible;
+
+            if (isCurrentCompatible) {
+              // Check if solved in series list or in submission history
+              isCurrentSolved = series.some(
+                (s) =>
+                  (s.id === currentProb.id ||
+                    s.title.trim().toLowerCase() === currentProb.title.trim().toLowerCase()) &&
+                  s.status === 'solved'
+              );
+              if (!isCurrentSolved) {
+                isCurrentSolved = await codingService.isProblemSolved(currentProb, effectiveUserId);
+              }
             }
           }
 
-          // If no problem is loaded OR if the current problem is already solved,
+          // If no problem is loaded OR if the current problem is incompatible or already solved,
           // automatically pick the next unsolved question for this student!
-          if (!currentProb || isCurrentSolved) {
+          if (!currentProb || !isCurrentCompatible || isCurrentSolved) {
             // 1. Check if series has an unsolved question
             const firstUnsolvedInSeries = series.find((s) => s.status !== 'solved')?.problem;
             let nextTargetProblem = firstUnsolvedInSeries;
@@ -466,7 +510,17 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                   difficulty: selectedDifficulty,
                   userId: effectiveUserId,
                   currentProblemId: currentProb?.id,
+                  language: selectedLanguageRef.current,
                 })) || undefined;
+            }
+
+            if (!nextTargetProblem) {
+              nextTargetProblem = createTopicTailoredFallback(
+                (isCustomSubjectSelected ? customSubject : selectedSubject) as string,
+                finalTopic || 'Arrays',
+                selectedDifficulty,
+                selectedLanguageRef.current
+              );
             }
 
             if (nextTargetProblem && isMounted) {
@@ -482,7 +536,17 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                 nextTargetProblem.functionSignature?.[currentLang]
               );
               setActiveProblem(nextTargetProblem);
+              setEvaluationResult(null);
+              setSubmissions([]);
               setCurrentCode(cleanStarter);
+
+              console.log(
+                `[Coding Arena Diagnostics]\n` +
+                `Selected Configuration: Subject="${finalSubject}", Topic="${finalTopic}", Difficulty="${selectedDifficulty}", Language="${currentLang}"\n` +
+                `Opened Question: ID="${nextTargetProblem.id}", Title="${nextTargetProblem.title}", Subject="${nextTargetProblem.subject}", Topic="${nextTargetProblem.topic}", Difficulty="${nextTargetProblem.difficulty}"\n` +
+                `Compatibility Check: PASS`
+              );
+
               try {
                 localStorage.setItem('careerpilot_active_coding_problem', JSON.stringify(nextTargetProblem));
               } catch (_) {}
@@ -504,6 +568,30 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       isMounted = false;
     };
   }, [selectedSubject, selectedTopic, customSubject, customTopic, selectedDifficulty, user?.id]);
+
+  // Load submissions for active problem authoritatively from Supabase/cache
+  useEffect(() => {
+    let isMounted = true;
+    const effectiveUserId = user?.id || 'guest';
+    const currentProbId = activeProblem?.id;
+
+    if (currentProbId) {
+      codingService
+        .getSubmissions(effectiveUserId, currentProbId)
+        .then((subs) => {
+          if (isMounted) {
+            setSubmissions(subs);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setSubmissions([]);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeProblem?.id, user?.id]);
 
   // Bookmark Toggle Handler
   const handleToggleBookmark = useCallback(async (problem: CodingProblem) => {
@@ -646,6 +734,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       difficulty: selectedDifficulty,
       userId: effectiveUserId,
       currentProblemId: currentProb?.id,
+      language: selectedLanguageRef.current,
     });
 
     if (nextUnsolved) {
@@ -864,32 +953,56 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         created_at: new Date().toISOString(),
       };
 
-      setSubmissions((prev) => [newSubmission, ...prev]);
+      // 2. Authoritative Persistence via codingService
+      const savedSubmission = await codingService.saveSubmission(newSubmission);
+
+      setSubmissions((prev) => [savedSubmission, ...prev.filter((s) => s.id !== savedSubmission.id)]);
       setSubmissionCount((prev) => prev + 1);
 
-      if (evalResult.status === 'accepted') {
-        showToastRef.current('Accepted!', `All ${evalResult.totalTestCases} test cases passed! Great job!`, 'success');
+      if (savedSubmission.cloudSynced) {
+        if (evalResult.status === 'accepted') {
+          showToastRef.current('Accepted (Saved to Cloud)', `All ${evalResult.totalTestCases} test cases passed! Great job!`, 'success');
+        } else {
+          showToastRef.current(
+            'Submission Saved to Cloud',
+            `${evalResult.statusText} (${evalResult.passedTestCases}/${evalResult.totalTestCases} passed). Review AI feedback.`,
+            'info'
+          );
+        }
       } else {
-        showToastRef.current(
-          'Submission Evaluated',
-          `${evalResult.statusText} (${evalResult.passedTestCases}/${evalResult.totalTestCases} passed). Review AI feedback.`,
-          'info'
-        );
+        if (effectiveUserId !== 'guest') {
+          showToastRef.current(
+            'Saved Locally',
+            'Submission completed, but cloud sync is pending. You can retry syncing anytime.',
+            'warning',
+            {
+              label: 'Retry Sync',
+              onClick: () => handleRetryCloudSave(savedSubmission),
+            }
+          );
+        } else {
+          if (evalResult.status === 'accepted') {
+            showToastRef.current('Accepted (Guest Mode)', `All ${evalResult.totalTestCases} test cases passed! Sign in to sync across devices.`, 'success');
+          } else {
+            showToastRef.current(
+              'Submission Evaluated (Guest)',
+              `${evalResult.statusText} (${evalResult.passedTestCases}/${evalResult.totalTestCases} passed). Sign in to persist to cloud.`,
+              'info'
+            );
+          }
+        }
       }
 
-      // 2. Non-blocking asynchronous background sync for persistence & achievements
-      (async () => {
-        try {
-          await codingService.saveSubmission(newSubmission);
-          const allSubs = await codingService.getSubmissions(effectiveUserId);
-          const newlyUnlocked = checkNewlyUnlockedAchievements(allSubs, effectiveUserId);
-          if (newlyUnlocked.length > 0) {
-            setNewlyUnlockedAchievement(newlyUnlocked[0]);
-          }
-        } catch (bgErr) {
-          console.warn('Background submission sync warning:', bgErr);
+      // Check for newly unlocked achievements
+      try {
+        const allSubs = await codingService.getSubmissions(effectiveUserId);
+        const newlyUnlocked = checkNewlyUnlockedAchievements(allSubs, effectiveUserId);
+        if (newlyUnlocked.length > 0) {
+          setNewlyUnlockedAchievement(newlyUnlocked[0]);
         }
-      })();
+      } catch (bgErr) {
+        console.warn('Achievement check notice:', bgErr);
+      }
 
       return evalResult;
     } catch (error: any) {
@@ -904,6 +1017,20 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       }
     }
   }, [user?.id]);
+
+  const handleRetryCloudSave = useCallback(async (sub: CodingSubmission) => {
+    try {
+      const res = await codingService.saveSubmission(sub);
+      if (res.cloudSynced) {
+        showToastRef.current('Cloud Sync Success', 'Submission successfully synced to Supabase!', 'success');
+        setSubmissions((prev) => prev.map((s) => (s.id === res.id ? res : s)));
+      } else {
+        showToastRef.current('Cloud Sync Notice', res.cloudSyncError || 'Could not sync to cloud.', 'warning');
+      }
+    } catch (err: any) {
+      showToastRef.current('Cloud Sync Error', err.message || 'Retry failed.', 'error');
+    }
+  }, []);
 
   const handleViewAchievements = useCallback(() => {
     setPageTab('history');
@@ -1586,6 +1713,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                       selectedLanguage={selectedLanguage}
                       submissions={submissions}
                       hasSubmitted={submissions.length > 0}
+                      onRetryCloudSave={handleRetryCloudSave}
                       onRestoreCode={(restoredCode) => {
                         setCurrentCode(restoredCode);
                         setMobileActiveView('editor');

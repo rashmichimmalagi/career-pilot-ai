@@ -155,6 +155,8 @@ export interface CodingSubmission {
   space_complexity?: string;
   ai_feedback?: AIEvaluationFeedback;
   problem_data?: CodingProblem;
+  cloudSynced?: boolean;
+  cloudSyncError?: string;
   created_at?: string;
 }
 

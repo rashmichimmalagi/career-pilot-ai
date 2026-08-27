@@ -2054,7 +2054,434 @@ Implement the \`ParkingSystem\` class:
     hints: ['Store remaining slots in an array or member variables, decrement when greater than 0.'],
     editorial: { approach: 'Encapsulated slot state tracker.', timeComplexity: 'O(1)', spaceComplexity: 'O(1)' },
   },
+
+  // ==========================================
+  // SEARCH ELEMENT IN ARRAY — EASY & MEDIUM & HARD
+  // ==========================================
+  {
+    id: 'dsa_search_01',
+    title: 'Search Element in Array',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'Search Element in Array',
+    tags: ['Search Element in Array', 'Arrays', 'Linear Search', 'Searching'],
+    description: `Given an integer array \`nums\` and an integer \`target\`, search for \`target\` in the array.
+
+If \`target\` exists in \`nums\`, return its **0-based index**. Otherwise, return \`-1\`.
+
+### Examples
+- **Example 1:** \`nums = [4, 2, 7, 1, 9, 3], target = 7\` → Output: \`2\`
+- **Example 2:** \`nums = [10, 20, 30, 40], target = 25\` → Output: \`-1\`
+- **Example 3:** \`nums = [5], target = 5\` → Output: \`0\``,
+    examples: [
+      { input: 'nums = [4, 2, 7, 1, 9, 3], target = 7', output: '2', explanation: '7 is located at index 2.' },
+      { input: 'nums = [10, 20, 30, 40], target = 25', output: '-1', explanation: '25 is not present in the array.' },
+      { input: 'nums = [5], target = 5', output: '0', explanation: '5 is located at index 0.' },
+    ],
+    constraints: [
+      '1 <= nums.length <= 10^5',
+      '-10^9 <= nums[i] <= 10^9',
+      '-10^9 <= target <= 10^9',
+    ],
+    expectedComplexity: { time: 'O(N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'int searchElement(int* nums, int numsSize, int target)',
+      'C++': 'int searchElement(vector<int>& nums, int target)',
+      Java: 'public int searchElement(int[] nums, int target)',
+      Python: 'def searchElement(self, nums: List[int], target: int) -> int:',
+      JavaScript: 'function searchElement(nums, target)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nint searchElement(int* nums, int numsSize, int target) {\n    // Implement search logic here\n    return -1;\n}`,
+      'C++': `#include <iostream>\n#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    int searchElement(vector<int>& nums, int target) {\n        // Implement search logic here\n        return -1;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public int searchElement(int[] nums, int target) {\n        // Implement search logic here\n        return -1;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def searchElement(self, nums: List[int], target: int) -> int:\n        # Implement search logic here\n        pass`,
+      JavaScript: `/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number}\n */\nfunction searchElement(nums, target) {\n  // Implement search logic here\n  return -1;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums = [4, 2, 7, 1, 9, 3], target = 7', expectedOutput: '2', isHidden: false },
+      { id: 'tc_2', input: 'nums = [10, 20, 30, 40], target = 25', expectedOutput: '-1', isHidden: false },
+      { id: 'tc_3', input: 'nums = [5], target = 5', expectedOutput: '0', isHidden: true },
+      { id: 'tc_4', input: 'nums = [-8, -3, 0, 15, 42], target = -3', expectedOutput: '1', isHidden: true },
+      { id: 'tc_5', input: 'nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], target = 10', expectedOutput: '9', isHidden: true },
+    ],
+    hints: [
+      'Iterate through the array from left to right (index 0 to nums.length - 1).',
+      'Compare each element nums[i] with target. If equal, return i immediately.',
+      'If the loop completes without finding target, return -1.',
+    ],
+    editorial: {
+      approach: 'Linear scan through the array comparing each element with the target value in O(N) time and O(1) space.',
+      timeComplexity: 'O(N)',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  {
+    id: 'dsa_search_02',
+    title: 'Search Element in Rotated Sorted Array',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Search Element in Array',
+    tags: ['Search Element in Array', 'Binary Search', 'Arrays', 'Searching'],
+    description: `There is an integer array \`nums\` sorted in ascending order (with **distinct** values). Prior to being passed to your function, \`nums\` is **possibly rotated** at an unknown pivot index \`k\` (\`1 <= k < nums.length\`).
+
+Given the rotated array \`nums\` and an integer \`target\`, return the index of \`target\` if it is in \`nums\`, or \`-1\` if it is not in \`nums\`.
+
+You must write an algorithm with \`O(log n)\` runtime complexity.
+
+### Examples
+- **Example 1:** \`nums = [4, 5, 6, 7, 0, 1, 2], target = 0\` → Output: \`4\`
+- **Example 2:** \`nums = [4, 5, 6, 7, 0, 1, 2], target = 3\` → Output: \`-1\`
+- **Example 3:** \`nums = [1], target = 0\` → Output: \`-1\``,
+    examples: [
+      { input: 'nums = [4, 5, 6, 7, 0, 1, 2], target = 0', output: '4', explanation: '0 is at index 4.' },
+      { input: 'nums = [4, 5, 6, 7, 0, 1, 2], target = 3', output: '-1', explanation: '3 is not present in the array.' },
+      { input: 'nums = [1], target = 0', output: '-1', explanation: '1 does not match 0.' },
+    ],
+    constraints: [
+      '1 <= nums.length <= 5000',
+      '-10^4 <= nums[i] <= 10^4',
+      'All values of nums are unique.',
+      'nums is an ascending array that is possibly rotated.',
+      '-10^4 <= target <= 10^4',
+    ],
+    expectedComplexity: { time: 'O(log N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'int search(int* nums, int numsSize, int target)',
+      'C++': 'int search(vector<int>& nums, int target)',
+      Java: 'public int search(int[] nums, int target)',
+      Python: 'def search(self, nums: List[int], target: int) -> int:',
+      JavaScript: 'function search(nums, target)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nint search(int* nums, int numsSize, int target) {\n    // Modified binary search\n    return -1;\n}`,
+      'C++': `#include <iostream>\n#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    int search(vector<int>& nums, int target) {\n        // Modified binary search\n        return -1;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public int search(int[] nums, int target) {\n        // Modified binary search\n        return -1;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def search(self, nums: List[int], target: int) -> int:\n        # Modified binary search\n        pass`,
+      JavaScript: `/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number}\n */\nfunction search(nums, target) {\n  // Modified binary search\n  return -1;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums = [4, 5, 6, 7, 0, 1, 2], target = 0', expectedOutput: '4', isHidden: false },
+      { id: 'tc_2', input: 'nums = [4, 5, 6, 7, 0, 1, 2], target = 3', expectedOutput: '-1', isHidden: false },
+      { id: 'tc_3', input: 'nums = [1], target = 0', expectedOutput: '-1', isHidden: true },
+      { id: 'tc_4', input: 'nums = [6, 7, 1, 2, 3, 4, 5], target = 3', expectedOutput: '4', isHidden: true },
+      { id: 'tc_5', input: 'nums = [3, 1], target = 1', expectedOutput: '1', isHidden: true },
+    ],
+    hints: [
+      'In a rotated sorted array, dividing the array at the middle will always produce at least one half that is normally sorted.',
+      'Check whether the left half nums[low...mid] is sorted. If it is, check if target lies within that range.',
+      'Otherwise, the right half nums[mid...high] must be sorted. Narrow your binary search boundaries accordingly.',
+    ],
+    editorial: {
+      approach: 'Modified binary search determining which half of the array is monotonically sorted at each step.',
+      timeComplexity: 'O(log N)',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  {
+    id: 'dsa_search_03',
+    title: 'Find First and Last Position of Element in Sorted Array',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Search Element in Array',
+    tags: ['Search Element in Array', 'Binary Search', 'Arrays', 'Searching'],
+    description: `Given an array of integers \`nums\` sorted in non-decreasing order, find the starting and ending position of a given \`target\` value.
+
+If \`target\` is not found in the array, return \`[-1, -1]\`.
+
+You must write an algorithm with \`O(log n)\` runtime complexity.
+
+### Examples
+- **Example 1:** \`nums = [5, 7, 7, 8, 8, 10], target = 8\` → Output: \`[3, 4]\`
+- **Example 2:** \`nums = [5, 7, 7, 8, 8, 10], target = 6\` → Output: \`[-1, -1]\`
+- **Example 3:** \`nums = [], target = 0\` → Output: \`[-1, -1]\``,
+    examples: [
+      { input: 'nums = [5, 7, 7, 8, 8, 10], target = 8', output: '[3, 4]', explanation: '8 appears starting at index 3 and ending at index 4.' },
+      { input: 'nums = [5, 7, 7, 8, 8, 10], target = 6', output: '[-1, -1]', explanation: '6 does not exist in nums.' },
+      { input: 'nums = [], target = 0', output: '[-1, -1]', explanation: 'Empty array produces [-1, -1].' },
+    ],
+    constraints: [
+      '0 <= nums.length <= 10^5',
+      '-10^9 <= nums[i] <= 10^9',
+      'nums is a non-decreasing array.',
+      '-10^9 <= target <= 10^9',
+    ],
+    expectedComplexity: { time: 'O(log N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'int* searchRange(int* nums, int numsSize, int target, int* returnSize)',
+      'C++': 'vector<int> searchRange(vector<int>& nums, int target)',
+      Java: 'public int[] searchRange(int[] nums, int target)',
+      Python: 'def searchRange(self, nums: List[int], target: int) -> List[int]:',
+      JavaScript: 'function searchRange(nums, target)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n\nint* searchRange(int* nums, int numsSize, int target, int* returnSize) {\n    *returnSize = 2;\n    int* res = (int*)malloc(2 * sizeof(int));\n    res[0] = -1; res[1] = -1;\n    // Binary search for first and last occurrences\n    return res;\n}`,
+      'C++': `#include <iostream>\n#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    vector<int> searchRange(vector<int>& nums, int target) {\n        // Binary search for first and last occurrences\n        return {-1, -1};\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public int[] searchRange(int[] nums, int target) {\n        // Binary search for first and last occurrences\n        return new int[]{-1, -1};\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def searchRange(self, nums: List[int], target: int) -> List[int]:\n        # Binary search for first and last occurrences\n        pass`,
+      JavaScript: `/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number[]}\n */\nfunction searchRange(nums, target) {\n  // Binary search for first and last occurrences\n  return [-1, -1];\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums = [5, 7, 7, 8, 8, 10], target = 8', expectedOutput: '[3, 4]', isHidden: false },
+      { id: 'tc_2', input: 'nums = [5, 7, 7, 8, 8, 10], target = 6', expectedOutput: '[-1, -1]', isHidden: false },
+      { id: 'tc_3', input: 'nums = [], target = 0', expectedOutput: '[-1, -1]', isHidden: true },
+      { id: 'tc_4', input: 'nums = [1], target = 1', expectedOutput: '[0, 0]', isHidden: true },
+      { id: 'tc_5', input: 'nums = [2, 2, 2, 2, 2], target = 2', expectedOutput: '[0, 4]', isHidden: true },
+    ],
+    hints: [
+      'Run two separate binary searches: one to find the leftmost boundary of target, and one for the rightmost boundary.',
+      'When searching for the first occurrence, if nums[mid] == target, continue searching in the left half (high = mid - 1).',
+      'When searching for the last occurrence, if nums[mid] == target, continue searching in the right half (low = mid + 1).',
+    ],
+    editorial: {
+      approach: 'Two binary search passes: one finding lower bound index, second finding upper bound index.',
+      timeComplexity: 'O(log N)',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  {
+    id: 'dsa_search_04',
+    title: 'Search in a 2D Matrix',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Search Element in Array',
+    tags: ['Search Element in Array', 'Matrix', 'Binary Search', 'Arrays'],
+    description: `You are given an \`m x n\` integer matrix \`matrix\` with the following two properties:
+1. Each row is sorted in non-decreasing order.
+2. The first integer of each row is greater than the last integer of the previous row.
+
+Given an integer \`target\`, return \`true\` if \`target\` is in \`matrix\` or \`false\` otherwise.
+
+You must write a solution in \`O(log(m * n))\` time complexity.
+
+### Examples
+- **Example 1:** \`matrix = [[1, 3, 5, 7], [10, 11, 16, 20], [23, 30, 34, 60]], target = 3\` → Output: \`true\`
+- **Example 2:** \`matrix = [[1, 3, 5, 7], [10, 11, 16, 20], [23, 30, 34, 60]], target = 13\` → Output: \`false\``,
+    examples: [
+      { input: 'matrix = [[1, 3, 5, 7], [10, 11, 16, 20], [23, 30, 34, 60]], target = 3', output: 'true', explanation: '3 exists at (0, 1).' },
+      { input: 'matrix = [[1, 3, 5, 7], [10, 11, 16, 20], [23, 30, 34, 60]], target = 13', output: 'false', explanation: '13 does not exist.' },
+    ],
+    constraints: [
+      'm == matrix.length',
+      'n == matrix[i].length',
+      '1 <= m, n <= 100',
+      '-10^4 <= matrix[i][j], target <= 10^4',
+    ],
+    expectedComplexity: { time: 'O(log(M * N))', space: 'O(1)' },
+    functionSignature: {
+      'C++': 'bool searchMatrix(vector<vector<int>>& matrix, int target)',
+      Java: 'public boolean searchMatrix(int[][] matrix, int target)',
+      Python: 'def searchMatrix(self, matrix: List[List[int]], target: int) -> bool:',
+      JavaScript: 'function searchMatrix(matrix, target)',
+    },
+    starterCode: {
+      'C++': `#include <iostream>\n#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    bool searchMatrix(vector<vector<int>>& matrix, int target) {\n        // Treat matrix as 1D virtual array of size m * n\n        return false;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public boolean searchMatrix(int[][] matrix, int target) {\n        // Treat matrix as 1D virtual array of size m * n\n        return false;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def searchMatrix(self, matrix: List[List[int]], target: int) -> bool:\n        # Treat matrix as 1D virtual array of size m * n\n        pass`,
+      JavaScript: `/**\n * @param {number[][]} matrix\n * @param {number} target\n * @return {boolean}\n */\nfunction searchMatrix(matrix, target) {\n  // Treat matrix as 1D virtual array of size m * n\n  return false;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'matrix = [[1, 3, 5, 7], [10, 11, 16, 20], [23, 30, 34, 60]], target = 3', expectedOutput: 'true', isHidden: false },
+      { id: 'tc_2', input: 'matrix = [[1, 3, 5, 7], [10, 11, 16, 20], [23, 30, 34, 60]], target = 13', expectedOutput: 'false', isHidden: false },
+      { id: 'tc_3', input: 'matrix = [[1]], target = 1', expectedOutput: 'true', isHidden: true },
+      { id: 'tc_4', input: 'matrix = [[1, 3]], target = 3', expectedOutput: 'true', isHidden: true },
+    ],
+    hints: [
+      'The 2D matrix can be viewed as a flattened 1D sorted array of length m * n.',
+      'For any 1D index mid, the row is mid / n and the col is mid % n.',
+    ],
+    editorial: {
+      approach: 'Binary search mapping 1D mid pointer to 2D coordinates (mid / n, mid % n).',
+      timeComplexity: 'O(log(M * N))',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  {
+    id: 'dsa_search_05',
+    title: 'Find Minimum in Rotated Sorted Array',
+    difficulty: 'Medium',
+    subject: 'DSA',
+    topic: 'Search Element in Array',
+    tags: ['Search Element in Array', 'Binary Search', 'Arrays', 'Searching'],
+    description: `Suppose an array of length \`n\` sorted in ascending order is rotated between \`1\` and \`n\` times.
+
+Given the sorted rotated array \`nums\` of **unique** elements, return the **minimum element** of this array.
+
+You must write an algorithm that runs in \`O(log n)\` time.
+
+### Examples
+- **Example 1:** \`nums = [3, 4, 5, 1, 2]\` → Output: \`1\`
+- **Example 2:** \`nums = [4, 5, 6, 7, 0, 1, 2]\` → Output: \`0\`
+- **Example 3:** \`nums = [11, 13, 15, 17]\` → Output: \`11\``,
+    examples: [
+      { input: 'nums = [3, 4, 5, 1, 2]', output: '1', explanation: 'Original array was [1,2,3,4,5] rotated 3 times.' },
+      { input: 'nums = [4, 5, 6, 7, 0, 1, 2]', output: '0', explanation: '0 is the minimum value.' },
+      { input: 'nums = [11, 13, 15, 17]', output: '11', explanation: '11 is the minimum value.' },
+    ],
+    constraints: [
+      'n == nums.length',
+      '1 <= n <= 5000',
+      '-5000 <= nums[i] <= 5000',
+      'All the integers of nums are unique.',
+      'nums is sorted and rotated between 1 and n times.',
+    ],
+    expectedComplexity: { time: 'O(log N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'int findMin(int* nums, int numsSize)',
+      'C++': 'int findMin(vector<int>& nums)',
+      Java: 'public int findMin(int[] nums)',
+      Python: 'def findMin(self, nums: List[int]) -> int:',
+      JavaScript: 'function findMin(nums)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nint findMin(int* nums, int numsSize) {\n    // Binary search for minimum pivot element\n    return 0;\n}`,
+      'C++': `#include <iostream>\n#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    int findMin(vector<int>& nums) {\n        // Binary search for minimum pivot element\n        return 0;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public int findMin(int[] nums) {\n        // Binary search for minimum pivot element\n        return 0;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def findMin(self, nums: List[int]) -> int:\n        # Binary search for minimum pivot element\n        pass`,
+      JavaScript: `/**\n * @param {number[]} nums\n * @return {number}\n */\nfunction findMin(nums) {\n  // Binary search for minimum pivot element\n  return 0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'nums = [3, 4, 5, 1, 2]', expectedOutput: '1', isHidden: false },
+      { id: 'tc_2', input: 'nums = [4, 5, 6, 7, 0, 1, 2]', expectedOutput: '0', isHidden: false },
+      { id: 'tc_3', input: 'nums = [11, 13, 15, 17]', expectedOutput: '11', isHidden: true },
+      { id: 'tc_4', input: 'nums = [2, 1]', expectedOutput: '1', isHidden: true },
+      { id: 'tc_5', input: 'nums = [1]', expectedOutput: '1', isHidden: true },
+    ],
+    hints: [
+      'Compare nums[mid] with nums[high].',
+      'If nums[mid] > nums[high], the minimum element must be strictly to the right of mid (low = mid + 1).',
+      'Otherwise, the minimum element is at mid or to the left of mid (high = mid).',
+    ],
+    editorial: {
+      approach: 'Binary search narrowing down the pivot where the drop occurs.',
+      timeComplexity: 'O(log N)',
+      spaceComplexity: 'O(1)',
+    },
+  },
 ];
+
+/**
+ * Normalization helper for coding topics to prevent formatting & punctuation discrepancies
+ */
+export function normalizeTopic(t?: string): string {
+  if (!t) return '';
+  return t
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Normalization helper for coding subjects
+ */
+export function normalizeSubject(s?: string): string {
+  if (!s) return '';
+  const clean = s.trim().toLowerCase();
+  if (clean === '+ custom subject' || clean === 'custom subject') return '';
+  if (clean.includes('c/c++') || clean === 'c++' || clean === 'c') return 'c/c++';
+  if (clean.includes('os') || clean.includes('operating')) return 'operating systems';
+  if (clean.includes('dbms') || clean === 'sql') return 'dbms';
+  if (clean.includes('network')) return 'computer networks';
+  if (clean.includes('oop') || clean.includes('object')) return 'oop';
+  if (clean.includes('java')) return 'java';
+  if (clean.includes('python')) return 'python';
+  if (clean.includes('javascript') || clean.includes('web')) return 'javascript';
+  return clean;
+}
+
+/**
+ * Strict Compatibility Validator
+ * Validates that a CodingProblem strictly matches the selected configuration (Subject, Topic, Difficulty, Language)
+ */
+export function isProblemCompatible(
+  problem: CodingProblem | null | undefined,
+  config: {
+    subject?: string;
+    topic?: string;
+    difficulty?: string;
+    language?: string;
+  }
+): { compatible: boolean; reasons: string[] } {
+  if (!problem) {
+    return { compatible: false, reasons: ['Problem is null or undefined'] };
+  }
+
+  const reasons: string[] = [];
+  const reqSubj = (config.subject || '').trim();
+  const reqTopic = (config.topic || '').trim();
+  const reqDiff = (config.difficulty || '').trim();
+
+  // 1. Validate Subject (if specified and not generic "+ Custom Subject")
+  if (reqSubj && reqSubj !== '+ Custom Subject') {
+    const normReqSubj = normalizeSubject(reqSubj);
+    const normProbSubj = normalizeSubject(problem.subject);
+
+    if (normReqSubj && normProbSubj) {
+      const isSubjMatch =
+        normReqSubj === normProbSubj ||
+        (normReqSubj === 'dsa' && (normProbSubj === 'dsa' || !normProbSubj)) ||
+        (normReqSubj === 'c/c++' && (normProbSubj === 'c/c++' || normProbSubj === 'dsa')) ||
+        (normReqSubj === 'java' && (normProbSubj === 'java' || normProbSubj === 'dsa')) ||
+        (normReqSubj === 'python' && (normProbSubj === 'python' || normProbSubj === 'dsa')) ||
+        (normReqSubj === 'javascript' && (normProbSubj === 'javascript' || normProbSubj === 'dsa'));
+
+      if (!isSubjMatch) {
+        reasons.push(`Subject mismatch: requested "${reqSubj}", got "${problem.subject}"`);
+      }
+    }
+  }
+
+  // 2. Validate Topic (AUTHORITATIVE REQUIREMENT — Exact canonical matching or explicit alias)
+  if (reqTopic && reqTopic !== 'Custom Topic') {
+    const normReqTopic = normalizeTopic(reqTopic);
+    const normProbTopic = normalizeTopic(problem.topic);
+
+    let isTopicMatch = normReqTopic === normProbTopic;
+
+    // Check tags if explicit tag equals target topic
+    if (!isTopicMatch && problem.tags && Array.isArray(problem.tags)) {
+      isTopicMatch = problem.tags.some((t) => normalizeTopic(t) === normReqTopic);
+    }
+
+    // Explicit valid canonical aliases (NOT broad categories)
+    if (!isTopicMatch) {
+      const topicAliases: Record<string, string[]> = {
+        'search element in array': ['linear search', 'binary search', 'search in array', 'array search'],
+        'linear search': ['search element in array', 'search in array'],
+        'binary search': ['search in rotated sorted array', 'search element in array', 'binary search in array'],
+        'pointers memory management': ['pointers', 'memory management', 'pointers and memory management'],
+        'pointers': ['pointers memory management', 'pointers and memory management'],
+        'arrays': ['array', 'arrays and strings'],
+        'linked list': ['linked lists', 'singly linked list', 'doubly linked list'],
+        'trees': ['binary tree', 'binary search tree', 'tree traversal'],
+        'graphs': ['graph', 'graph algorithms', 'bfs dfs'],
+        'dynamic programming': ['dp', 'dynamic programming memoization'],
+      };
+
+      const allowedAliases = topicAliases[normReqTopic] || [];
+      if (allowedAliases.includes(normProbTopic)) {
+        isTopicMatch = true;
+      }
+    }
+
+    if (!isTopicMatch) {
+      reasons.push(`Topic mismatch: requested "${reqTopic}", got "${problem.topic}"`);
+    }
+  }
+
+  // 3. Validate Difficulty (AUTHORITATIVE REQUIREMENT)
+  if (reqDiff && reqDiff !== 'All') {
+    if ((problem.difficulty || '').trim().toLowerCase() !== reqDiff.toLowerCase()) {
+      reasons.push(`Difficulty mismatch: requested "${reqDiff}", got "${problem.difficulty}"`);
+    }
+  }
+
+  return {
+    compatible: reasons.length === 0,
+    reasons,
+  };
+}
 
 /**
  * Dynamic Topic-Tailored Fallback Synthesizer
@@ -2069,69 +2496,70 @@ export function createTopicTailoredFallback(
 ): CodingProblem {
   const cleanSubject = (subject || 'DSA').trim();
   const cleanTopic = (topic || 'Algorithms').trim();
-  const id = `fallback_${cleanTopic.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${difficulty.toLowerCase()}_${Date.now()}`;
-  const funcName = `solve${cleanTopic.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const id = `tailored_${cleanTopic.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${difficulty.toLowerCase()}_${Date.now()}`;
+  const funcName = `solve${cleanTopic.replace(/[^a-zA-Z0-9]/g, '') || 'Challenge'}`;
 
   return {
     id,
-    title: `${cleanTopic} Challenge: Optimize & Evaluate`,
+    title: `${cleanTopic}: ${difficulty} Algorithmic Challenge`,
     difficulty,
     subject: cleanSubject,
     topic: cleanTopic,
     tags: [cleanSubject, cleanTopic, difficulty],
     description: `### Problem Description
-You are given a dataset or collection of operations requiring you to implement an efficient solution centered on **${cleanTopic}** under the subject of **${cleanSubject}**.
+You are given a challenge centered on **${cleanTopic}** under the subject of **${cleanSubject}**.
 
-Your objective is to design and implement an algorithm or query to solve the problem for the given inputs while satisfying the time and space complexity constraints for a **${difficulty}** level challenge.
+Your objective is to design and implement an optimal solution for the problem satisfying the constraints for a **${difficulty}** level challenge in **${cleanTopic}**.
 
 #### Input Format
-- An array or structured collection representing initial data elements or state parameters.
+- An array \`nums\` or collection representing input elements for ${cleanTopic}.
+- A parameter \`target\` or query value.
 
 #### Output Format
-- Return the processed result or computed optimal value conforming to the problem specifications.`,
+- Return the processed result or computed optimal value conforming to ${cleanTopic} specifications.`,
     examples: [
       {
-        input: 'data = [10, 20, 30, 40, 50], target = 50',
-        output: '50',
-        explanation: `Optimal evaluation of the ${cleanTopic} logic yields 50.`,
+        input: 'nums = [10, 20, 30, 40, 50], target = 30',
+        output: '2',
+        explanation: `Optimal evaluation of the ${cleanTopic} logic yields the correct index/result.`,
       },
       {
-        input: 'data = [5, 1, 8, 3], target = 8',
-        output: '8',
+        input: 'nums = [5, 1, 8, 3], target = 8',
+        output: '2',
         explanation: `Evaluation produces the expected target result.`,
       },
     ],
     constraints: [
-      '1 <= data.length <= 10^5',
-      '-10^4 <= data[i] <= 10^4',
+      '1 <= nums.length <= 10^5',
+      '-10^4 <= nums[i] <= 10^4',
       'Memory Limit: 256 MB',
       'Time Limit: 2.0 seconds',
     ],
     expectedComplexity: {
-      time: difficulty === 'Easy' ? 'O(N)' : difficulty === 'Medium' ? 'O(N log N)' : 'O(N)',
+      time: difficulty === 'Easy' ? 'O(N)' : difficulty === 'Medium' ? 'O(log N) or O(N log N)' : 'O(N)',
       space: difficulty === 'Easy' ? 'O(1)' : 'O(N)',
     },
     functionSignature: {
-      C: `int ${funcName}(int* data, int dataSize, int target)`,
-      'C++': `int ${funcName}(vector<int>& data, int target)`,
-      Java: `public int ${funcName}(int[] data, int target)`,
-      Python: `def ${funcName}(self, data: List[int], target: int) -> int:`,
-      JavaScript: `function ${funcName}(data, target)`,
+      C: `int ${funcName}(int* nums, int numsSize, int target)`,
+      'C++': `int ${funcName}(vector<int>& nums, int target)`,
+      Java: `public int ${funcName}(int[] nums, int target)`,
+      Python: `def ${funcName}(self, nums: List[int], target: int) -> int:`,
+      JavaScript: `function ${funcName}(nums, target)`,
       SQL: `-- Write your ${cleanTopic} SQL query below`,
     },
     starterCode: {
-      C: `#include <stdio.h>\n#include <stdlib.h>\n\nint ${funcName}(int* data, int dataSize, int target) {\n    // Implement your ${cleanTopic} solution below\n    return 0;\n}`,
-      'C++': `#include <iostream>\n#include <vector>\n#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    int ${funcName}(vector<int>& data, int target) {\n        // Implement your ${cleanTopic} solution below\n        return 0;\n    }\n};`,
-      Java: `import java.util.*;\n\nclass Solution {\n    public int ${funcName}(int[] data, int target) {\n        // Implement your ${cleanTopic} solution below\n        return 0;\n    }\n}`,
-      Python: `from typing import List\n\nclass Solution:\n    def ${funcName}(self, data: List[int], target: int) -> int:\n        # Implement your ${cleanTopic} solution below\n        pass`,
-      JavaScript: `/**\n * @param {number[]} data\n * @param {number} target\n * @return {number}\n */\nfunction ${funcName}(data, target) {\n  // Implement your ${cleanTopic} solution below\n  return 0;\n}`,
+      C: `#include <stdio.h>\n#include <stdlib.h>\n\nint ${funcName}(int* nums, int numsSize, int target) {\n    // Implement your ${cleanTopic} solution below\n    return 0;\n}`,
+      'C++': `#include <iostream>\n#include <vector>\n#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    int ${funcName}(vector<int>& nums, int target) {\n        // Implement your ${cleanTopic} solution below\n        return 0;\n    }\n};`,
+      Java: `import java.util.*;\n\nclass Solution {\n    public int ${funcName}(int[] nums, int target) {\n        // Implement your ${cleanTopic} solution below\n        return 0;\n    }\n}`,
+      Python: `from typing import List\n\nclass Solution:\n    def ${funcName}(self, nums: List[int], target: int) -> int:\n        # Implement your ${cleanTopic} solution below\n        pass`,
+      JavaScript: `/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number}\n */\nfunction ${funcName}(nums, target) {\n  // Implement your ${cleanTopic} solution below\n  return 0;\n}`,
       SQL: `-- Write your SQL query for ${cleanTopic} below\nSELECT \n    *\nFROM \n    records;\n`,
     },
     hiddenTestCases: [
-      { id: 'tc_1', input: 'data = [10, 20, 30, 40, 50], target = 50', expectedOutput: '50', isHidden: false },
-      { id: 'tc_2', input: 'data = [5, 1, 8, 3], target = 8', expectedOutput: '8', isHidden: false },
-      { id: 'tc_3', input: 'data = [100], target = 100', expectedOutput: '100', isHidden: true },
-      { id: 'tc_4', input: 'data = [-5, -10, 0, 5], target = 0', expectedOutput: '0', isHidden: true },
+      { id: 'tc_1', input: 'nums = [10, 20, 30, 40, 50], target = 30', expectedOutput: '2', isHidden: false },
+      { id: 'tc_2', input: 'nums = [5, 1, 8, 3], target = 8', expectedOutput: '2', isHidden: false },
+      { id: 'tc_3', input: 'nums = [100], target = 100', expectedOutput: '0', isHidden: true },
+      { id: 'tc_4', input: 'nums = [-5, -10, 0, 5], target = 0', expectedOutput: '2', isHidden: true },
     ],
     hints: [
       `Carefully consider the properties of ${cleanTopic} when designing your approach.`,
@@ -2139,7 +2567,7 @@ Your objective is to design and implement an algorithm or query to solve the pro
     ],
     editorial: {
       approach: `Applies fundamental ${cleanTopic} algorithmic techniques for optimal execution.`,
-      timeComplexity: difficulty === 'Easy' ? 'O(N)' : difficulty === 'Medium' ? 'O(N log N)' : 'O(N)',
+      timeComplexity: difficulty === 'Easy' ? 'O(N)' : difficulty === 'Medium' ? 'O(log N)' : 'O(N)',
       spaceComplexity: difficulty === 'Easy' ? 'O(1)' : 'O(N)',
     },
     created_at: new Date().toISOString(),
@@ -2148,38 +2576,23 @@ Your objective is to design and implement an algorithm or query to solve the pro
 
 /**
  * Helper: Find questions matching subject, topic, and optional difficulty
+ * Strictly ensures returned questions are compatible with requested subject and topic
  */
 export function getQuestionsForTopic(
   subject: string,
   topic: string,
   difficulty?: string
 ): CodingProblem[] {
-  const cleanSubj = (subject || 'DSA').toLowerCase().trim();
-  const cleanTopic = (topic || '').toLowerCase().trim();
+  const cleanSubj = (subject || 'DSA').trim();
+  const cleanTopic = (topic || '').trim();
 
   let filtered = DEFAULT_CODING_QUESTION_BANK.filter((p) => {
-    const pSubj = (p.subject || '').toLowerCase().trim();
-    const pTopic = (p.topic || '').toLowerCase().trim();
-
-    const subjMatch =
-      pSubj === cleanSubj ||
-      (cleanSubj === 'dsa' && (pSubj === 'dsa' || pSubj === '')) ||
-      (cleanSubj.includes('os') && pSubj.includes('operating')) ||
-      (cleanSubj.includes('dbms') && (pSubj === 'dbms' || pSubj === 'sql'));
-
-    const topicMatch =
-      !cleanTopic ||
-      pTopic === cleanTopic ||
-      pTopic.includes(cleanTopic) ||
-      cleanTopic.includes(pTopic) ||
-      (p.tags && p.tags.some((t) => t.toLowerCase().includes(cleanTopic)));
-
-    return subjMatch && topicMatch;
+    return isProblemCompatible(p, {
+      subject: cleanSubj,
+      topic: cleanTopic,
+      difficulty: difficulty && difficulty !== 'All' ? difficulty : undefined,
+    }).compatible;
   });
-
-  if (difficulty && difficulty !== 'All') {
-    filtered = filtered.filter((p) => p.difficulty.toLowerCase() === difficulty.toLowerCase());
-  }
 
   return filtered;
 }

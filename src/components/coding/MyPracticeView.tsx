@@ -27,7 +27,9 @@ import {
   X,
   Layers,
   Trophy,
-  Lock
+  Lock,
+  Cloud,
+  CloudOff
 } from 'lucide-react';
 import {
   CodingSubmission,
@@ -120,6 +122,16 @@ export const MyPracticeView: React.FC<MyPracticeViewProps> = ({
   const handleRefresh = () => {
     setIsRefreshing(true);
     loadData();
+  };
+
+  const handleRetryCloudSync = async (sub: CodingSubmission, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await codingService.saveSubmission(sub);
+      if (res.cloudSynced) {
+        setSubmissions((prev) => prev.map((s) => (s.id === res.id ? res : s)));
+      }
+    } catch (_) {}
   };
 
   const handleViewSubmission = async (sub: CodingSubmission) => {
@@ -722,6 +734,33 @@ export const MyPracticeView: React.FC<MyPracticeViewProps> = ({
 
                         <span className="text-slate-400">•</span>
                         <span>{formatDate(sub.created_at)}</span>
+
+                        <span className="text-slate-400">•</span>
+                        {sub.cloudSynced ? (
+                          <span
+                            title="Synced to Supabase Cloud"
+                            className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium"
+                          >
+                            <Cloud className="w-3.5 h-3.5" />
+                            <span>Synced</span>
+                          </span>
+                        ) : (
+                          <span
+                            title={sub.cloudSyncError || 'Saved locally only. Click Retry to sync to cloud.'}
+                            className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-medium"
+                          >
+                            <CloudOff className="w-3.5 h-3.5" />
+                            <span>Local only</span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleRetryCloudSync(sub, e)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              <RefreshCw className="w-2.5 h-2.5" />
+                              <span>Retry</span>
+                            </button>
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

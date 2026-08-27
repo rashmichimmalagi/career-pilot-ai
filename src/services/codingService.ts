@@ -27,6 +27,9 @@ import {
   findQuestionById,
   TopicQuestionCount,
   createTopicTailoredFallback,
+  isProblemCompatible,
+  normalizeTopic,
+  normalizeSubject,
 } from '../data/codingQuestionBank';
 
 export const SUBJECTS: CodingSubject[] = [
@@ -1045,7 +1048,13 @@ export const codingService = {
             (prob.id && solvedIds.has(prob.id)) ||
             (prob.title && solvedTitles.has(prob.title.trim().toLowerCase()));
 
-          if (!isAlreadySolved) {
+          const compatCheck = isProblemCompatible(prob, {
+            subject: config.subject,
+            topic: finalTopic,
+            difficulty: config.difficulty,
+          });
+
+          if (!isAlreadySolved && compatCheck.compatible) {
             // Ensure starterCode has all languages sanitized to pure empty skeletons
             if (!prob.starterCode) prob.starterCode = {};
 
@@ -1064,6 +1073,8 @@ export const codingService = {
             } catch (_) {}
 
             return prob;
+          } else if (!compatCheck.compatible) {
+            console.warn('[Coding Arena] Received incompatible problem from API:', compatCheck.reasons);
           }
         }
       }
@@ -1418,7 +1429,8 @@ export const codingService = {
   },
 
   /**
-   * Save a coding submission to database (Supabase + backend API + local storage in parallel)
+   * Save a coding submission to database (Supabase is Authoritative Single Source of Truth)
+   * Flow: Execution Result -> Create Canonical Submission -> Supabase UPSERT -> Verify Response -> Update Local Cache -> Return
    */
   async saveSubmission(submission: CodingSubmission): Promise<CodingSubmission> {
     const totalTC = typeof submission.total_test_cases === 'number' && submission.total_test_cases > 0
@@ -1432,7 +1444,7 @@ export const codingService = {
     const rawStatus = (submission.status || '').toLowerCase().trim();
     if (passedTC === totalTC && totalTC > 0) {
       status = 'accepted';
-    } else if (rawStatus === 'compilation_error') {
+    } else if (rawStatus === 'compilation_error' || rawStatus === 'compile_error') {
       status = 'compilation_error';
     } else if (rawStatus === 'runtime_error') {
       status = 'runtime_error';
@@ -1442,151 +1454,169 @@ export const codingService = {
       status = 'wrong_answer';
     }
 
-    const statusText = status === 'accepted' ? 'Accepted' : (submission.status_text || (status === 'compilation_error' ? 'Compilation Error' : status === 'runtime_error' ? 'Runtime Error' : status === 'time_limit_exceeded' ? 'Time Limit Exceeded' : 'Wrong Answer'));
+    const statusText = status === 'accepted'
+      ? 'Accepted'
+      : (submission.status_text || (status === 'compilation_error' ? 'Compilation Error' : status === 'runtime_error' ? 'Runtime Error' : status === 'time_limit_exceeded' ? 'Time Limit Exceeded' : 'Wrong Answer'));
+
+    const codeToSave = String(submission.submitted_code || submission.code || '');
+
+    // Resolve authenticated Supabase user ID if available
+    let effectiveUserId = submission.user_id || 'guest';
+    if (isSupabaseConfigured() && (!effectiveUserId || effectiveUserId === 'guest')) {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          effectiveUserId = authData.user.id;
+        } else {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session?.user?.id) {
+            effectiveUserId = sessionData.session.user.id;
+          }
+        }
+      } catch (_) {}
+    }
+
+    const stableId = submission.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     const formattedSubmission: CodingSubmission = {
       ...submission,
-      id: submission.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: stableId,
+      user_id: effectiveUserId,
       status,
       status_text: statusText,
+      code: codeToSave,
+      submitted_code: codeToSave,
       test_cases_passed: passedTC,
       total_test_cases: totalTC,
       test_cases_failed: Math.max(0, totalTC - passedTC),
       score: status === 'accepted' ? 100 : Math.round((passedTC / totalTC) * 100),
       pass_rate: Math.round((passedTC / totalTC) * 100),
       created_at: submission.created_at || new Date().toISOString(),
+      cloudSynced: false,
     };
 
-    const uId = formattedSubmission.user_id || 'guest';
-    const key = `careerpilot_subs_${uId}`;
+    // Required Debug Logging
+    console.log('[CODING SUBMISSION]', {
+      userId: effectiveUserId,
+      problemId: formattedSubmission.problem_id,
+      submissionId: formattedSubmission.id,
+      language: formattedSubmission.language,
+      status: formattedSubmission.status,
+      testCasesPassed: formattedSubmission.test_cases_passed,
+    });
 
-    // 1. Instant local persistence for zero-latency UI response
+    // 1. Authoritative Supabase persistence
+    if (isSupabaseConfigured() && effectiveUserId && effectiveUserId !== 'guest') {
+      console.log('[SUPABASE SAVE] attempting:', {
+        submissionId: formattedSubmission.id,
+        userId: effectiveUserId,
+        status: formattedSubmission.status,
+      });
+
+      try {
+        // Payload strictly matching Supabase coding_submissions columns
+        const dbPayload = {
+          id: formattedSubmission.id,
+          user_id: effectiveUserId,
+          problem_id: String(formattedSubmission.problem_id || formattedSubmission.id),
+          problem_title: String(formattedSubmission.problem_title || 'Coding Problem'),
+          difficulty: String(formattedSubmission.difficulty || 'Medium'),
+          language: String(formattedSubmission.language || 'Python'),
+          code: codeToSave,
+          status: formattedSubmission.status,
+          status_text: String(formattedSubmission.status_text || formattedSubmission.status),
+          test_cases_passed: formattedSubmission.test_cases_passed,
+          total_test_cases: formattedSubmission.total_test_cases,
+          time_complexity: formattedSubmission.ai_feedback?.timeComplexity || (formattedSubmission.ai_feedback as any)?.complexity?.currentTime || formattedSubmission.time_complexity || '',
+          space_complexity: formattedSubmission.ai_feedback?.spaceComplexity || (formattedSubmission.ai_feedback as any)?.complexity?.currentSpace || formattedSubmission.space_complexity || '',
+          execution_time_ms: Number(formattedSubmission.runtime_ms || formattedSubmission.execution_time || 0),
+          runtime_ms: Number(formattedSubmission.runtime_ms || formattedSubmission.execution_time || 0),
+          memory_used_kb: Number(formattedSubmission.memory_kb || formattedSubmission.memory_used || 0),
+          memory_kb: Number(formattedSubmission.memory_kb || formattedSubmission.memory_used || 0),
+          topic: String(formattedSubmission.topic || formattedSubmission.subject || 'DSA'),
+          ai_feedback: formattedSubmission.ai_feedback || {},
+          submitted_at: formattedSubmission.created_at || new Date().toISOString(),
+          created_at: formattedSubmission.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        const { data: upsertData, error: upsertError } = await supabase
+          .from('coding_submissions')
+          .upsert(dbPayload, { onConflict: 'id' })
+          .select();
+
+        if (upsertError) {
+          console.error('[SUPABASE SAVE] error:', upsertError);
+          formattedSubmission.cloudSynced = false;
+          formattedSubmission.cloudSyncError = upsertError.message || 'Supabase write error';
+          persistenceManager.enqueueOfflineMutation({
+            id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            userId: effectiveUserId,
+            type: 'save_coding_submission',
+            payload: formattedSubmission,
+            timestamp: new Date().toISOString(),
+            attempts: 0,
+          });
+        } else {
+          console.log('[SUPABASE SAVE] success:', {
+            submissionId: formattedSubmission.id,
+            returnedRow: upsertData?.[0]?.id || formattedSubmission.id,
+          });
+          formattedSubmission.cloudSynced = true;
+          formattedSubmission.cloudSyncError = undefined;
+        }
+      } catch (err: any) {
+        console.error('[SUPABASE SAVE] error:', err);
+        formattedSubmission.cloudSynced = false;
+        formattedSubmission.cloudSyncError = err?.message || 'Network error saving to Supabase';
+        persistenceManager.enqueueOfflineMutation({
+          id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          userId: effectiveUserId,
+          type: 'save_coding_submission',
+          payload: formattedSubmission,
+          timestamp: new Date().toISOString(),
+          attempts: 0,
+        });
+      }
+    } else {
+      formattedSubmission.cloudSynced = false;
+      formattedSubmission.cloudSyncError = effectiveUserId === 'guest'
+        ? 'Sign in to persist submissions across devices'
+        : 'Supabase is not configured';
+    }
+
+    // 2. Update local cache with canonical submission
+    const key = `careerpilot_subs_${effectiveUserId}`;
     try {
       const stored: CodingSubmission[] = JSON.parse(localStorage.getItem(key) || '[]');
       const updated = [formattedSubmission, ...stored.filter((s: any) => s.id !== formattedSubmission.id)];
       localStorage.setItem(key, JSON.stringify(updated));
     } catch (_) {}
 
-    // Record immediately in codingHistoryService for the active problem & language
+    // 3. Record in codingHistoryService for the active problem & language
     try {
       const probId = String(formattedSubmission.problem_id || formattedSubmission.id);
-      const codeToSave = String(formattedSubmission.submitted_code || formattedSubmission.code || '');
       if (probId && codeToSave) {
-        codingHistoryService.saveSubmittedCode(uId, probId, formattedSubmission.language, codeToSave);
+        codingHistoryService.saveSubmittedCode(effectiveUserId, probId, formattedSubmission.language, codeToSave);
       }
     } catch (_) {}
 
     // Invalidate cached submissions so next fetch is fresh
-    if (cachedSubmissions && cachedSubmissions.key.startsWith(uId)) {
+    if (cachedSubmissions && cachedSubmissions.key.startsWith(effectiveUserId)) {
       cachedSubmissions = null;
     }
 
-    // 2. Parallel remote persistence (Supabase via PersistenceManager + Backend API concurrently)
-    const remoteTasks: Promise<any>[] = [];
+    // 4. Background notification to backend API for multi-tier redundancy
+    fetchWithTimeout('/api/coding/save-submission', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeoutMs: 6000,
+      body: JSON.stringify(formattedSubmission),
+    }).catch(() => {});
 
-    if (isSupabaseConfigured() && uId && uId !== 'guest') {
-      remoteTasks.push(
-        (async () => {
-          try {
-            const dbPayload = {
-              id: formattedSubmission.id,
-              user_id: uId,
-              problem_id: String(formattedSubmission.problem_id || formattedSubmission.id),
-              problem_title: String(formattedSubmission.problem_title || 'Coding Problem'),
-              difficulty: String(formattedSubmission.difficulty || 'Medium'),
-              language: String(formattedSubmission.language || 'Python'),
-              code: String(formattedSubmission.submitted_code || formattedSubmission.code || ''),
-              submitted_code: String(formattedSubmission.submitted_code || formattedSubmission.code || ''),
-              subject: formattedSubmission.subject || null,
-              topic: formattedSubmission.topic || null,
-              status: formattedSubmission.status,
-              status_text: formattedSubmission.status_text || formattedSubmission.status,
-              test_cases_passed: formattedSubmission.test_cases_passed,
-              total_test_cases: formattedSubmission.total_test_cases,
-              score: typeof formattedSubmission.score === 'number' ? formattedSubmission.score : (formattedSubmission.status === 'accepted' ? 100 : 0),
-              pass_rate: typeof formattedSubmission.pass_rate === 'number' ? formattedSubmission.pass_rate : 100,
-              time_complexity: formattedSubmission.ai_feedback?.timeComplexity || (formattedSubmission.ai_feedback as any)?.complexity?.currentTime || formattedSubmission.time_complexity || null,
-              space_complexity: formattedSubmission.ai_feedback?.spaceComplexity || (formattedSubmission.ai_feedback as any)?.complexity?.currentSpace || formattedSubmission.space_complexity || null,
-              execution_time_ms: Number(formattedSubmission.runtime_ms || formattedSubmission.execution_time || 0),
-              runtime_ms: Number(formattedSubmission.runtime_ms || formattedSubmission.execution_time || 0),
-              memory_used_kb: Number(formattedSubmission.memory_kb || formattedSubmission.memory_used || 0),
-              memory_kb: Number(formattedSubmission.memory_kb || formattedSubmission.memory_used || 0),
-              ai_feedback: formattedSubmission.ai_feedback || {},
-              submitted_at: formattedSubmission.created_at || new Date().toISOString(),
-              created_at: formattedSubmission.created_at || new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            };
-
-            const { error } = await supabase
-              .from('coding_submissions')
-              .upsert(dbPayload, { onConflict: 'id' });
-
-            if (error) {
-              console.warn('[CodingService] Supabase submission upsert notice, trying base payload:', error.message);
-              // Fallback to strict minimal column schema in case custom columns don't exist
-              const basePayload = {
-                id: dbPayload.id,
-                user_id: dbPayload.user_id,
-                problem_id: dbPayload.problem_id,
-                problem_title: dbPayload.problem_title,
-                difficulty: dbPayload.difficulty,
-                language: dbPayload.language,
-                code: dbPayload.code,
-                status: dbPayload.status,
-                status_text: dbPayload.status_text,
-                test_cases_passed: dbPayload.test_cases_passed,
-                total_test_cases: dbPayload.total_test_cases,
-                score: dbPayload.score,
-                pass_rate: dbPayload.pass_rate,
-                execution_time_ms: dbPayload.execution_time_ms,
-                runtime_ms: dbPayload.runtime_ms,
-                memory_kb: dbPayload.memory_kb,
-                ai_feedback: dbPayload.ai_feedback,
-                created_at: dbPayload.created_at,
-                updated_at: dbPayload.updated_at,
-              };
-              const fallbackRes = await supabase.from('coding_submissions').upsert(basePayload, { onConflict: 'id' });
-              if (fallbackRes.error) {
-                persistenceManager.enqueueOfflineMutation({
-                  id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                  userId: uId,
-                  type: 'save_coding_submission',
-                  payload: formattedSubmission,
-                  timestamp: new Date().toISOString(),
-                  attempts: 0,
-                });
-              }
-            }
-          } catch (err) {
-            console.warn('[CodingService] Error saving submission to Supabase, enqueued:', err);
-            persistenceManager.enqueueOfflineMutation({
-              id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-              userId: uId,
-              type: 'save_coding_submission',
-              payload: formattedSubmission,
-              timestamp: new Date().toISOString(),
-              attempts: 0,
-            });
-          }
-        })()
-      );
-    }
-
-    remoteTasks.push(
-      fetchWithTimeout('/api/coding/save-submission', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        timeoutMs: 6000,
-        body: JSON.stringify(formattedSubmission),
-      }).catch(() => {})
-    );
-
-    // Run remote saves in parallel without throwing
-    Promise.allSettled(remoteTasks).catch(() => {});
-
-    // Notify activity updated
+    // 5. Notify activity updated across app
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('careerpilot_activity_updated', { detail: { studentId: uId } }));
+      window.dispatchEvent(new CustomEvent('careerpilot_activity_updated', { detail: { studentId: effectiveUserId } }));
     }
 
     return formattedSubmission;
@@ -1709,10 +1739,24 @@ export const codingService = {
   },
 
   /**
-   * Fetch user's saved coding submissions with deduplication, in-memory cache, and parallel storage queries
+   * Fetch user's saved coding submissions with Supabase as the Authoritative Single Source of Truth
    */
   async getSubmissions(userId: string = 'guest', problemId?: string, forceRefresh: boolean = false): Promise<CodingSubmission[]> {
-    const effectiveUserId = userId || 'guest';
+    let effectiveUserId = userId || 'guest';
+    if (isSupabaseConfigured() && (!effectiveUserId || effectiveUserId === 'guest')) {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          effectiveUserId = authData.user.id;
+        } else {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session?.user?.id) {
+            effectiveUserId = sessionData.session.user.id;
+          }
+        }
+      } catch (_) {}
+    }
+
     const reqKey = `${effectiveUserId}_${problemId || 'all'}`;
 
     // 1. Check short-lived in-memory cache if not forced
@@ -1732,7 +1776,7 @@ export const codingService = {
       const localList: CodingSubmission[] = [];
 
       // Helper to reconcile and sanitize any submission record
-      const reconcileSubmission = (raw: any): CodingSubmission => {
+      const reconcileSubmission = (raw: any, isFromCloud: boolean = false): CodingSubmission => {
         const totalTC = typeof raw.total_test_cases === 'number' && raw.total_test_cases > 0
           ? raw.total_test_cases
           : (typeof raw.totalTestCases === 'number' && raw.totalTestCases > 0 ? raw.totalTestCases : 5);
@@ -1758,6 +1802,8 @@ export const codingService = {
           ? 'Accepted'
           : (raw.status_text || raw.statusText || (status === 'compilation_error' ? 'Compilation Error' : status === 'runtime_error' ? 'Runtime Error' : status === 'time_limit_exceeded' ? 'Time Limit Exceeded' : 'Wrong Answer'));
 
+        const codeVal = raw.code || raw.submitted_code || raw.submittedCode || '';
+
         return {
           id: raw.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           user_id: raw.user_id || effectiveUserId,
@@ -1765,8 +1811,8 @@ export const codingService = {
           problem_title: raw.problem_title || raw.problemTitle || 'Coding Problem',
           difficulty: raw.difficulty || 'Medium',
           language: raw.language || 'Python',
-          code: raw.code || raw.submitted_code || raw.submittedCode || '',
-          submitted_code: raw.submitted_code || raw.submittedCode || raw.code || '',
+          code: codeVal,
+          submitted_code: codeVal,
           status: status,
           status_text: statusText,
           test_cases_passed: passedTC,
@@ -1781,17 +1827,19 @@ export const codingService = {
           subject: raw.subject || undefined,
           topic: raw.topic || undefined,
           ai_feedback: raw.ai_feedback || raw.aiFeedback || undefined,
+          cloudSynced: isFromCloud ? true : Boolean(raw.cloudSynced),
+          cloudSyncError: isFromCloud ? undefined : raw.cloudSyncError,
           created_at: raw.created_at || raw.submitted_at || new Date().toISOString(),
         };
       };
 
-      // 3. Immediately load from localStorage for instant display
+      // 3. Load local cache to seed initial results
       try {
         const stored: CodingSubmission[] = JSON.parse(localStorage.getItem(localKey) || '[]');
         if (Array.isArray(stored)) {
           for (const s of stored) {
             if (s && (s.id || s.problem_id)) {
-              const reconciled = reconcileSubmission(s);
+              const reconciled = reconcileSubmission(s, Boolean(s.cloudSynced));
               const itemKey = reconciled.id || `loc_${reconciled.problem_id}_${reconciled.created_at}`;
               localList.push(reconciled);
               if (!problemId || reconciled.problem_id === problemId) {
@@ -1802,65 +1850,63 @@ export const codingService = {
         }
       } catch (_) {}
 
-      // 4. Run remote queries (Supabase & Backend API) in PARALLEL
-      const remoteQueries: Promise<any>[] = [];
+      // 4. Query Supabase (Authoritative single source of truth)
       const supabaseFetchedIds = new Set<string>();
+      let cloudSubmissionsCount = 0;
 
-      // Supabase Query
       if (isSupabaseConfigured() && effectiveUserId !== 'guest') {
-        remoteQueries.push(
-          (async () => {
-            try {
-              let query = supabase
-                .from('coding_submissions')
-                .select('*')
-                .eq('user_id', effectiveUserId)
-                .order('created_at', { ascending: false });
+        try {
+          let query = supabase
+            .from('coding_submissions')
+            .select('*')
+            .eq('user_id', effectiveUserId)
+            .order('created_at', { ascending: false });
 
-              if (problemId) {
-                query = query.eq('problem_id', problemId);
-              }
+          if (problemId) {
+            query = query.eq('problem_id', problemId);
+          }
 
-              const { data, error } = await query;
-              if (!error && Array.isArray(data)) {
-                for (const raw of data) {
-                  const mapped = reconcileSubmission(raw);
-                  resultsMap.set(mapped.id, mapped);
-                  supabaseFetchedIds.add(mapped.id);
-                }
-              }
-            } catch (err) {
-              console.warn('[CodingService] Error fetching submissions from Supabase:', err);
+          const { data, error } = await query;
+          if (!error && Array.isArray(data)) {
+            cloudSubmissionsCount = data.length;
+            for (const raw of data) {
+              const mapped = reconcileSubmission(raw, true);
+              resultsMap.set(mapped.id, mapped);
+              supabaseFetchedIds.add(mapped.id);
             }
-          })()
-        );
+          } else if (error) {
+            console.warn('[CodingService] Supabase query notice:', error.message);
+          }
+        } catch (err) {
+          console.warn('[CodingService] Error fetching submissions from Supabase:', err);
+        }
       }
 
-      // Backend API Query
-      remoteQueries.push(
-        (async () => {
-          try {
-            const url = problemId
-              ? `/api/coding/submissions?userId=${encodeURIComponent(effectiveUserId)}&problemId=${encodeURIComponent(problemId)}`
-              : `/api/coding/submissions?userId=${encodeURIComponent(effectiveUserId)}`;
-            const res = await fetchWithTimeout(url, { timeoutMs: 6000 });
-            if (res.ok) {
-              const json = await res.json();
-              if (json.success && Array.isArray(json.data)) {
-                for (const s of json.data) {
-                  const mapped = reconcileSubmission(s);
-                  if (!resultsMap.has(mapped.id)) {
-                    resultsMap.set(mapped.id, mapped);
-                  }
-                }
+      // Backend API query for fallback redundancy
+      try {
+        const url = problemId
+          ? `/api/coding/submissions?userId=${encodeURIComponent(effectiveUserId)}&problemId=${encodeURIComponent(problemId)}`
+          : `/api/coding/submissions?userId=${encodeURIComponent(effectiveUserId)}`;
+        const res = await fetchWithTimeout(url, { timeoutMs: 4000 });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            for (const s of json.data) {
+              const mapped = reconcileSubmission(s, true);
+              if (!resultsMap.has(mapped.id)) {
+                resultsMap.set(mapped.id, mapped);
               }
             }
-          } catch (_) {}
-        })()
-      );
+          }
+        }
+      } catch (_) {}
 
-      // Await both remote sources concurrently
-      await Promise.allSettled(remoteQueries);
+      // Required Debug Logging
+      console.log('[CODING HISTORY LOAD]', {
+        userId: effectiveUserId,
+        cloudSubmissionCount: cloudSubmissionsCount,
+        localCacheCount: localList.length,
+      });
 
       const allSubmissions = Array.from(resultsMap.values());
       allSubmissions.sort((a, b) => {
@@ -1869,7 +1915,7 @@ export const codingService = {
         return timeB - timeA;
       });
 
-      // Update local storage cache with complete merged data
+      // Update local storage cache with authoritative data from Supabase
       try {
         if (effectiveUserId !== 'guest') {
           localStorage.setItem(localKey, JSON.stringify(allSubmissions));
@@ -1903,23 +1949,22 @@ export const codingService = {
                 language: String(s.language || 'Python'),
                 code: String(s.submitted_code || s.code || ''),
                 status: s.status,
-                status_text: s.status_text || s.status,
+                status_text: String(s.status_text || s.status),
                 test_cases_passed: s.test_cases_passed,
                 total_test_cases: s.total_test_cases,
-                score: typeof s.score === 'number' ? s.score : (s.status === 'accepted' ? 100 : 0),
-                pass_rate: typeof s.pass_rate === 'number' ? s.pass_rate : 100,
-                time_complexity: s.ai_feedback?.timeComplexity || (s.ai_feedback as any)?.complexity?.currentTime || s.time_complexity || null,
-                space_complexity: s.ai_feedback?.spaceComplexity || (s.ai_feedback as any)?.complexity?.currentSpace || s.space_complexity || null,
+                time_complexity: s.ai_feedback?.timeComplexity || (s.ai_feedback as any)?.complexity?.currentTime || s.time_complexity || '',
+                space_complexity: s.ai_feedback?.spaceComplexity || (s.ai_feedback as any)?.complexity?.currentSpace || s.space_complexity || '',
                 execution_time_ms: Number(s.runtime_ms || s.execution_time || 0),
                 runtime_ms: Number(s.runtime_ms || s.execution_time || 0),
                 memory_used_kb: Number(s.memory_kb || s.memory_used || 0),
                 memory_kb: Number(s.memory_kb || s.memory_used || 0),
+                topic: String(s.topic || s.subject || 'DSA'),
                 ai_feedback: s.ai_feedback || {},
                 submitted_at: s.created_at || new Date().toISOString(),
                 created_at: s.created_at || new Date().toISOString(),
                 updated_at: new Date().toISOString(),
               }));
-              await supabase.from('coding_submissions').upsert(rows);
+              await supabase.from('coding_submissions').upsert(rows, { onConflict: 'id' });
             } catch (_) {}
           })();
         }
@@ -2222,6 +2267,7 @@ export const codingService = {
     currentProblemId?: string;
     excludeProblemIds?: string[];
     strictTopic?: boolean;
+    language?: CodingLanguage;
   }): Promise<CodingProblem | null> {
     const effectiveUserId = params.userId || 'guest';
     const { ids: solvedIds, titles: solvedTitles } = await this.getSolvedProblemSet(effectiveUserId);
@@ -2266,45 +2312,15 @@ export const codingService = {
       }
     }
 
-    // If strictTopic is requested, do not fall back to other topics or global bank
-    if (params.strictTopic) {
-      return null;
-    }
-
-    // 3. Unsolved in same subject across all topics
-    const cleanSubj = subject.toLowerCase().trim();
-    const subjectPool = DEFAULT_CODING_QUESTION_BANK.filter((p) => {
-      const pSubj = (p.subject || '').toLowerCase().trim();
-      return (
-        pSubj === cleanSubj ||
-        (cleanSubj === 'dsa' && (pSubj === 'dsa' || pSubj === '')) ||
-        (cleanSubj.includes('os') && pSubj.includes('operating')) ||
-        (cleanSubj.includes('dbms') && (pSubj === 'dbms' || pSubj === 'sql'))
-      );
-    });
-    const unsolvedSubject = subjectPool.filter((p) => !isSolved(p) && !excludeSet.has(p.id));
-    if (unsolvedSubject.length > 0) {
-      return unsolvedSubject[0];
-    }
-
-    // 4. Any unsolved problem in entire Question Bank
-    const allUnsolved = DEFAULT_CODING_QUESTION_BANK.filter((p) => !isSolved(p) && !excludeSet.has(p.id));
-    if (allUnsolved.length > 0) {
-      return allUnsolved[0];
-    }
-
-    const allUnsolvedAny = DEFAULT_CODING_QUESTION_BANK.filter((p) => !isSolved(p));
-    if (allUnsolvedAny.length > 0) {
-      return allUnsolvedAny[0];
-    }
-
-    return null;
+    // STRICT TOPIC REQUIREMENT: Never fall back to unrelated topics or global question bank!
+    // Synthesize an authentic, tailored problem for this exact topic & difficulty.
+    return createTopicTailoredFallback(subject, topic, difficulty, params.language || 'Python');
   },
 
   /**
    * Helper: Select initial problem on session startup / login or page load.
-   * If current problem is already solved, automatically switches to next unsolved question.
-   * If current problem is unsolved, preserves the in-progress question.
+   * Checks compatibility with requested filters: if incompatible or already solved, switches to next unsolved question.
+   * If current problem is compatible and unsolved, preserves the in-progress question.
    */
   async selectInitialOrNextProblem(params: {
     currentActiveProblem?: CodingProblem | null;
@@ -2312,32 +2328,46 @@ export const codingService = {
     topic?: string;
     difficulty?: CodingDifficulty;
     userId?: string;
+    language?: CodingLanguage;
   }): Promise<CodingProblem> {
     const effectiveUserId = params.userId || 'guest';
     const current = params.currentActiveProblem;
 
+    const targetSubject = params.subject || current?.subject || 'DSA';
+    const targetTopic = params.topic || current?.topic || 'Arrays';
+    const targetDiff = params.difficulty || current?.difficulty || 'Medium';
+
     if (current) {
-      const solved = await this.isProblemSolved(current, effectiveUserId);
-      if (!solved) {
-        // Current question is not solved yet -> preserve student's active work
-        return current;
+      const compat = isProblemCompatible(current, {
+        subject: targetSubject,
+        topic: targetTopic,
+        difficulty: targetDiff,
+      });
+
+      if (compat.compatible) {
+        const solved = await this.isProblemSolved(current, effectiveUserId);
+        if (!solved) {
+          // Current question matches topic/difficulty and is not solved yet -> preserve student's active work
+          return current;
+        }
       }
     }
 
-    // Current is null OR already solved -> pick next unsolved question
+    // Current is null, incompatible, OR already solved -> pick next unsolved question
     const nextUnsolved = await this.getNextUnsolvedProblem({
-      subject: params.subject || current?.subject || 'DSA',
-      topic: params.topic || current?.topic || 'Arrays',
-      difficulty: params.difficulty || current?.difficulty || 'Easy',
+      subject: targetSubject,
+      topic: targetTopic,
+      difficulty: targetDiff,
       userId: effectiveUserId,
       currentProblemId: current?.id,
+      language: params.language,
     });
 
     if (nextUnsolved) {
       return nextUnsolved;
     }
 
-    return current || DEFAULT_CODING_QUESTION_BANK[0];
+    return createTopicTailoredFallback(targetSubject, targetTopic, targetDiff, params.language || 'Python');
   },
 
   /**
@@ -2353,7 +2383,17 @@ export const codingService = {
     const effectiveUserId = userId || 'guest';
 
     // 1. Fetch curated problems from Question Bank
-    const bankQuestions = getQuestionsForTopic(subject, topic, difficulty);
+    let bankQuestions = getQuestionsForTopic(subject, topic, difficulty);
+    if (bankQuestions.length === 0) {
+      const allTopicQuestions = getQuestionsForTopic(subject, topic);
+      if (allTopicQuestions.length > 0) {
+        bankQuestions = allTopicQuestions;
+      } else {
+        // Synthesize tailored questions for this topic across Easy, Medium, Hard
+        const diffs: CodingDifficulty[] = ['Easy', 'Medium', 'Hard'];
+        bankQuestions = diffs.map((d) => createTopicTailoredFallback(subject, topic, d, language));
+      }
+    }
 
     // 2. Fetch user submissions & saved bookmarks concurrently
     const [submissions, savedQuestions] = await Promise.all([

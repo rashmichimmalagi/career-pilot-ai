@@ -17,7 +17,10 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  Lock
+  Lock,
+  Cloud,
+  CloudOff,
+  RefreshCw
 } from 'lucide-react';
 import { CodingProblem, CodingSubmission, CodingLanguage } from '../../types/coding';
 
@@ -27,6 +30,7 @@ interface ProblemViewProps {
   submissions?: CodingSubmission[];
   hasSubmitted?: boolean;
   onRestoreCode?: (code: string) => void;
+  onRetryCloudSave?: (submission: CodingSubmission) => void;
 }
 
 export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
@@ -35,6 +39,7 @@ export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
   submissions = [],
   hasSubmitted = false,
   onRestoreCode,
+  onRetryCloudSave,
 }) => {
   if (process.env.NODE_ENV !== 'production') {
     console.log('[RENDER] ProblemView:', problem?.id, problem?.title);
@@ -472,9 +477,42 @@ export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
                         </span>
                       </div>
 
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {sub.created_at ? new Date(sub.created_at).toLocaleTimeString() : 'Just now'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {sub.cloudSynced ? (
+                          <span
+                            title="Synced to Supabase Cloud"
+                            className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium"
+                          >
+                            <Cloud className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Synced</span>
+                          </span>
+                        ) : (
+                          <span
+                            title={sub.cloudSyncError || 'Saved locally only. Click to retry syncing to cloud.'}
+                            className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-medium"
+                          >
+                            <CloudOff className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Local only</span>
+                            {onRetryCloudSave && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRetryCloudSave(sub);
+                                }}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <RefreshCw className="w-2.5 h-2.5" />
+                                <span>Retry</span>
+                              </button>
+                            )}
+                          </span>
+                        )}
+
+                        <span className="text-[11px] text-slate-400 font-mono">
+                          {sub.created_at ? new Date(sub.created_at).toLocaleTimeString() : 'Just now'}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-slate-600 dark:text-slate-400 pt-1">
