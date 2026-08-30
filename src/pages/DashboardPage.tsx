@@ -14,9 +14,9 @@ import {
   Calendar,
   Activity,
   CheckCircle2,
-  XCircle,
-  ShieldCheck,
-  X,
+  Briefcase,
+  Layers,
+  Award,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { EditProfileModal } from '../components/profile/EditProfileModal';
@@ -25,12 +25,22 @@ import {
   getCachedPreparationDashboardData,
 } from '../services/preparationDashboardService';
 import { PreparationDashboardData } from '../types/preparationDashboard';
+import { careerIntelligenceService } from '../services/careerIntelligenceService';
+import { UnifiedCareerIntelligence } from '../types/intelligence';
+
+// Intelligence Widgets
+import { CareerReadinessWidget } from '../components/intelligence/CareerReadinessWidget';
+import { TodaysFocusCard } from '../components/intelligence/TodaysFocusCard';
+import { JobMatchSection } from '../components/intelligence/JobMatchSection';
+import { InterviewWeaknessTracker } from '../components/intelligence/InterviewWeaknessTracker';
+import { AdaptiveInsightsWidget } from '../components/intelligence/AdaptiveInsightsWidget';
+import { WeeklyReportModal } from '../components/intelligence/WeeklyReportModal';
+
+// Existing Dashboard Components
 import { PreparationTopSection } from '../components/dashboard/PreparationTopSection';
 import { ModuleProgressGrid } from '../components/dashboard/ModuleProgressGrid';
-import { TodayPreparationSection } from '../components/dashboard/TodayPreparationSection';
 import { PerformanceInsightsSection } from '../components/dashboard/PerformanceInsightsSection';
 import { RecentActivitySection } from '../components/dashboard/RecentActivitySection';
-import { AIRecommendationCard } from '../components/dashboard/AIRecommendationCard';
 import { SendTestEmailCard } from '../components/common/SendTestEmailCard';
 
 // React Error Boundary for isolated error handling
@@ -94,9 +104,13 @@ interface DashboardPageProps {
   onOpenSetupGuide?: () => void;
 }
 
+type DashboardViewTab = 'overview' | 'focus' | 'job_match' | 'interview_tracker' | 'adaptive';
+
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { user, profile, loading: authLoading } = useAuth();
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+  const [isWeeklyReportOpen, setIsWeeklyReportOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<DashboardViewTab>('overview');
 
   // Authenticated Student ID for Scoped Calculation
   const studentId = user?.id || profile?.id || 'guest';
@@ -105,8 +119,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const [dashboardData, setDashboardData] = useState<PreparationDashboardData | null>(() => {
     return getCachedPreparationDashboardData(studentId);
   });
+  const [intelligence, setIntelligence] = useState<UnifiedCareerIntelligence | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(() => !dashboardData);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Ref to hold the latest profile without causing re-renders
+  const profileRef = React.useRef(profile);
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   const isMountedRef = React.useRef(true);
   const inFlightRef = React.useRef(false);
@@ -114,14 +135,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const loadDashboard = useCallback(async (isSilent = false) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
-    if (!isSilent && !dashboardData) {
+    if (!isSilent) {
       setIsLoading(true);
     }
     setLoadError(null);
     try {
-      const data = await getPreparationDashboardData(studentId, profile);
+      const curProfile = profileRef.current;
+      const [data, intel] = await Promise.all([
+        getPreparationDashboardData(studentId, curProfile),
+        careerIntelligenceService.getUnifiedIntelligence(studentId, {
+          forceRefresh: !isSilent,
+          profile: curProfile,
+        }),
+      ]);
+
       if (isMountedRef.current) {
         setDashboardData(data);
+        setIntelligence(intel);
       }
     } catch (err: any) {
       console.error('[Dashboard] Error fetching preparation dashboard data:', err);
@@ -134,11 +164,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         setIsLoading(false);
       }
     }
-  }, [studentId, profile, dashboardData]);
+  }, [studentId]);
 
   useEffect(() => {
     isMountedRef.current = true;
-    loadDashboard(Boolean(dashboardData));
+    loadDashboard(true);
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const handleDataUpdate = () => {
@@ -204,21 +234,38 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 p-4 sm:p-6 lg:p-8 font-sans space-y-8 transition-colors duration-300">
       <div className="max-w-7xl mx-auto space-y-8">
-        
         {/* Top Control Bar: Refresh & Profile Trigger */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="font-medium">Real-Time Student Analytics Active</span>
+            <span className="font-medium">Real-Time Career Intelligence Active</span>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsWeeklyReportOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer"
+              title="Open 7-Day Weekly Career Report"
+            >
+              <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+              <span className="hidden sm:inline">Weekly Report</span>
+            </button>
+
+            <button
+              onClick={() => onNavigate('analytics')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors shadow-xs cursor-pointer"
+              title="Deep Progress Analytics"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Analytics</span>
+            </button>
+
             <button
               onClick={() => onNavigate('study-planner')}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-600 text-white transition-all shadow-xs cursor-pointer"
               title="Open AI Daily Study Planner"
             >
               <Calendar className="w-3.5 h-3.5" />
-              <span>AI Study Planner</span>
+              <span>Study Planner</span>
             </button>
 
             <button
@@ -228,7 +275,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               title="Refresh Dashboard Data"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Refresh Data</span>
+              <span className="hidden sm:inline">Refresh</span>
             </button>
 
             <button
@@ -272,7 +319,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </div>
             <div className="space-y-1">
               <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base">
-                Loading your preparation dashboard...
+                Loading your unified preparation intelligence...
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
                 Aggregating real-time performance across Coding, Aptitude, Mock Interviews, Resume, and Target Company benchmarks...
@@ -281,7 +328,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </div>
         ) : dashboardData ? (
           <DashboardErrorBoundary onReset={loadDashboard}>
-            {/* 1. TOP SECTION: Greeting, Overall Score, Target Meta */}
+            {/* 1. TOP SECTION: Greeting, Target Meta & Overview */}
             <section aria-label="Student Preparation Overview">
               <PreparationTopSection
                 data={dashboardData}
@@ -290,120 +337,120 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               />
             </section>
 
-            {/* Quick-Start Cards for New Students with 0 activities */}
-            {dashboardData.totalActivitiesCount === 0 && (
-              <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-r from-indigo-50/80 via-purple-50/80 to-blue-50/80 dark:from-indigo-950/40 dark:via-purple-950/40 dark:to-blue-950/40 border border-indigo-200/80 dark:border-indigo-800/60 space-y-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                    <h3 className="font-extrabold text-slate-900 dark:text-white text-base">
-                      Your preparation journey starts here.
-                    </h3>
-                  </div>
-                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300">
-                    Complete your first activity to unlock personalized analytics.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                  <button
-                    onClick={() => onNavigate('coding')}
-                    className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-500/50 hover:shadow-xs transition-all text-left flex items-center justify-between group cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
-                        <Code2 className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                          Start Coding
-                        </div>
-                        <div className="text-[11px] text-slate-500">DSA & Algorithms</div>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all" />
-                  </button>
-
-                  <button
-                    onClick={() => onNavigate('placement')}
-                    className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-purple-500/50 hover:shadow-xs transition-all text-left flex items-center justify-between group cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400">
-                        <Brain className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
-                          Practice Aptitude
-                        </div>
-                        <div className="text-[11px] text-slate-500">Timed Placement Tests</div>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
-                  </button>
-
-                  <button
-                    onClick={() => onNavigate('interview')}
-                    className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-cyan-500/50 hover:shadow-xs transition-all text-left flex items-center justify-between group cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400">
-                        <Cpu className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
-                          Take Interview
-                        </div>
-                        <div className="text-[11px] text-slate-500">Technical & HR Mock</div>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-600 group-hover:translate-x-0.5 transition-all" />
-                  </button>
-                </div>
-              </div>
+            {/* 2. CAREER READINESS SCORE ENGINE */}
+            {intelligence?.readiness && (
+              <section aria-label="Career Readiness Score">
+                <CareerReadinessWidget
+                  readiness={intelligence.readiness}
+                  onNavigate={onNavigate}
+                  onRefresh={() => loadDashboard(false)}
+                />
+              </section>
             )}
 
-            {/* 2. AI RECOMMENDATION CARD: Rule-based, performance grounded */}
-            <section aria-label="AI Strategic Recommendation">
-              <AIRecommendationCard
-                recommendation={dashboardData.aiRecommendation}
-                onNavigate={onNavigate}
-              />
-            </section>
+            {/* Quick Navigation Tabs for Intelligence Suite */}
+            <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto scrollbar-none">
+              {[
+                { id: 'overview', label: 'Suite Overview', icon: Layers },
+                { id: 'focus', label: "Today's Focus", icon: Sparkles },
+                { id: 'job_match', label: 'Job ↔ Resume Match', icon: Briefcase },
+                { id: 'interview_tracker', label: 'Interview Weakness Tracker', icon: Cpu },
+                { id: 'adaptive', label: 'Adaptive Insights', icon: Brain },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as DashboardViewTab)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-            {/* 3. TODAY'S PREPARATION FOCUS: Actionable daily recommendations */}
-            <section aria-label="Today's Preparation Focus">
-              <TodayPreparationSection
-                recommendations={dashboardData.todayRecommendations}
-                onNavigate={onNavigate}
-              />
-            </section>
+            {/* 3. TODAY'S FOCUS SECTION */}
+            {(activeTab === 'overview' || activeTab === 'focus') && intelligence?.todaysFocus && (
+              <section aria-label="Personalized Today's Focus">
+                <TodaysFocusCard
+                  todaysFocus={intelligence.todaysFocus}
+                  studentId={studentId}
+                  onNavigate={onNavigate}
+                  onTaskCompletionChange={() => loadDashboard(true)}
+                />
+              </section>
+            )}
 
-            {/* 4. MODULE PROGRESS GRID: 8 Core Modules */}
-            <section aria-label="Module Progress">
-              <ModuleProgressGrid
-                modules={dashboardData.modules}
-                onNavigate={onNavigate}
-              />
-            </section>
+            {/* 4. JOB MATCH ANALYZER SECTION */}
+            {(activeTab === 'overview' || activeTab === 'job_match') && (
+              <section aria-label="Job Description Match Analyzer">
+                <JobMatchSection
+                  studentId={studentId}
+                  resumes={intelligence?.analytics?.resume?.versionsList || []}
+                  onNavigate={onNavigate}
+                />
+              </section>
+            )}
 
-            {/* 5. PERFORMANCE INSIGHTS: Weak Areas & Strong Areas */}
-            <section aria-label="Performance Insights">
-              <PerformanceInsightsSection
-                weakAreas={dashboardData.weakAreas}
-                strongAreas={dashboardData.strongAreas}
-                onNavigate={onNavigate}
-              />
-            </section>
+            {/* 5. INTERVIEW WEAKNESS TRACKER SECTION */}
+            {(activeTab === 'overview' || activeTab === 'interview_tracker') && intelligence?.interviewWeakness && (
+              <section aria-label="Interview Weakness Tracker">
+                <InterviewWeaknessTracker
+                  data={intelligence.interviewWeakness}
+                  onNavigate={onNavigate}
+                />
+              </section>
+            )}
 
-            {/* 6. RECENT ACTIVITY TIMELINE: Real sorted activity logs */}
-            <section aria-label="Recent Activity">
-              <RecentActivitySection
-                activities={dashboardData.recentActivities}
-                onNavigate={onNavigate}
-              />
-            </section>
+            {/* 6. ADAPTIVE LEARNING INSIGHTS SECTION */}
+            {(activeTab === 'overview' || activeTab === 'adaptive') && intelligence?.adaptive && (
+              <section aria-label="Adaptive Learning Insights">
+                <AdaptiveInsightsWidget
+                  insights={intelligence.adaptive}
+                  onNavigate={onNavigate}
+                />
+              </section>
+            )}
 
-            {/* 7. EMAIL NOTIFICATIONS: Integration Placeholder */}
+            {/* 7. MODULE PROGRESS GRID: 8 Core Modules */}
+            {activeTab === 'overview' && (
+              <section aria-label="Module Progress">
+                <ModuleProgressGrid
+                  modules={dashboardData.modules}
+                  onNavigate={onNavigate}
+                />
+              </section>
+            )}
+
+            {/* 8. PERFORMANCE INSIGHTS */}
+            {activeTab === 'overview' && (
+              <section aria-label="Performance Insights">
+                <PerformanceInsightsSection
+                  weakAreas={dashboardData.weakAreas}
+                  strongAreas={dashboardData.strongAreas}
+                  onNavigate={onNavigate}
+                />
+              </section>
+            )}
+
+            {/* 9. RECENT ACTIVITY TIMELINE */}
+            {activeTab === 'overview' && (
+              <section aria-label="Recent Activity">
+                <RecentActivitySection
+                  activities={dashboardData.recentActivities}
+                  onNavigate={onNavigate}
+                />
+              </section>
+            )}
+
+            {/* 10. EMAIL NOTIFICATIONS */}
             <section aria-label="Notifications System" className="pt-2">
               <SendTestEmailCard />
             </section>
@@ -449,6 +496,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             setIsEditProfileOpen(false);
             loadDashboard();
           }}
+        />
+      )}
+
+      {/* Weekly Report Modal */}
+      {intelligence?.weeklyReport && (
+        <WeeklyReportModal
+          report={intelligence.weeklyReport}
+          isOpen={isWeeklyReportOpen}
+          onClose={() => setIsWeeklyReportOpen(false)}
+          onNavigate={onNavigate}
         />
       )}
     </div>

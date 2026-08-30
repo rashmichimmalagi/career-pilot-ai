@@ -26,6 +26,8 @@ export const ModuleProgressGrid: React.FC<ModuleProgressGridProps> = ({
   modules,
   onNavigate,
 }) => {
+  const safeModules = modules || [];
+
   const getModuleIcon = (category: string) => {
     switch (category) {
       case 'resume':
@@ -101,12 +103,12 @@ export const ModuleProgressGrid: React.FC<ModuleProgressGridProps> = ({
         </div>
 
         <div className="text-xs text-slate-500 font-medium">
-          {modules.filter((m) => m.hasData).length} of {modules.length} Modules Active
+          {safeModules.filter((m) => m.hasData).length} of {safeModules.length} Modules Active
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {modules.map((item) => (
+        {safeModules.map((item) => (
           <div
             key={item.id}
             onClick={() => onNavigate(item.route)}

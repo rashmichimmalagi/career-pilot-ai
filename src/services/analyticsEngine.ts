@@ -21,14 +21,11 @@ import { calculateStreaks } from './achievementService';
 import { calculateProfileCompletion } from './profileService';
 
 export const SCORE_WEIGHTS = {
-  resume: 0.20,
   coding: 0.25,
+  resume: 0.20,
   technicalInterview: 0.20,
-  hrInterview: 0.10,
-  aptitude: 0.10,
-  technicalMcq: 0.10,
-  companyPrep: 0.025,
-  roadmap: 0.025,
+  aptitude: 0.20,
+  roadmap: 0.15,
 };
 
 export function getScoreCategory(score: number): PerformanceScoreCategory {
@@ -613,48 +610,58 @@ export async function getPerformanceAnalyticsSummary(
   const streakDays = Math.max(currentStreak, longestStreak);
   const profileCompletion = calculateProfileCompletion(profile);
 
-  // Total Activities
+  // Total Authentic Activities Count: STRICTLY authenticated user actions
+  const placementTestsCount = placementSessions.length > 0 
+    ? placementSessions.length 
+    : ((placementStats as any)?.totalTestsTaken || (placementStats as any)?.testsTaken || 0);
+
   const totalActivitiesCount =
     (hasResumeAnalysis ? (resumesList.length || 1) : 0) +
     totalSubmissions +
-    placementStats.totalQuestionsSolved +
+    placementTestsCount +
     interviewReports.length +
-    totalCompanyTargets +
     completedTasksCount +
-    completedMilestoneCount +
-    mentorInteractionsCount;
+    completedMilestoneCount;
 
   // ----------------------------------------------------
   // CANONICAL OVERALL PREPARATION SCORE (0-100)
   // Single deterministic value across the entire application.
+  // Formula: Coding (25%) + Resume ATS (20%) + Technical Interview (20%) + Placement Aptitude (20%) + Roadmap (15%) = 100%
+  // Requires minimum evidence threshold (at least 2 active dimensions or >= 3 authentic activities).
   // ----------------------------------------------------
-  const hasAnyActivity =
-    hasResumeAnalysis ||
-    totalSubmissions > 0 ||
-    aptitudeHasData ||
-    techMcqHasData ||
-    interviewReports.length > 0 ||
-    hasCompanyData ||
-    hasRoadmapData;
+  const activeDimensions: string[] = [];
+  if (hasResumeAnalysis && resumeScore !== null) activeDimensions.push('Resume');
+  if (totalSubmissions > 0 && codingScore !== null) activeDimensions.push('Coding');
+  if (technicalReports.length > 0 && techAvgScore !== null) activeDimensions.push('Technical Interview');
+  if ((aptitudeHasData && aptitudePerformance.score !== null) || (techMcqHasData && technicalMcqPerformance.score !== null)) {
+    activeDimensions.push('Placement Aptitude');
+  }
+  if (hasRoadmapData && roadmapProgressPercent !== null && (completedTasksCount > 0 || completedMilestoneCount > 0)) {
+    activeDimensions.push('Roadmap');
+  }
+
+  const activeDimensionsCount = activeDimensions.length;
+  const hasEnoughDataForOverallScore =
+    activeDimensionsCount >= 2 || (activeDimensionsCount >= 1 && totalActivitiesCount >= 3);
 
   let overallScore: number | null = null;
   let overallScoreCategory: PerformanceScoreCategory = 'Getting Started';
-  let overallScoreDescription = 'Complete more practice activities across modules to calculate your preparation score.';
+  let overallScoreDescription = 'Complete practice activities across modules to calculate your preparation score.';
 
-  if (hasAnyActivity) {
+  if (hasEnoughDataForOverallScore) {
     let weightedScoreSum = 0;
     let activeWeightSum = 0;
 
-    // 1. Resume (20%)
-    if (hasResumeAnalysis && resumeScore !== null) {
-      weightedScoreSum += resumeScore * SCORE_WEIGHTS.resume;
-      activeWeightSum += SCORE_WEIGHTS.resume;
-    }
-
-    // 2. Coding Arena (25%)
+    // 1. Coding Arena (25%)
     if (totalSubmissions > 0 && codingScore !== null) {
       weightedScoreSum += codingScore * SCORE_WEIGHTS.coding;
       activeWeightSum += SCORE_WEIGHTS.coding;
+    }
+
+    // 2. Resume ATS (20%)
+    if (hasResumeAnalysis && resumeScore !== null) {
+      weightedScoreSum += resumeScore * SCORE_WEIGHTS.resume;
+      activeWeightSum += SCORE_WEIGHTS.resume;
     }
 
     // 3. Technical Interview (20%)
@@ -663,32 +670,24 @@ export async function getPerformanceAnalyticsSummary(
       activeWeightSum += SCORE_WEIGHTS.technicalInterview;
     }
 
-    // 4. HR Interview (10%)
-    if (hrReports.length > 0 && hrAvgScore !== null) {
-      weightedScoreSum += hrAvgScore * SCORE_WEIGHTS.hrInterview;
-      activeWeightSum += SCORE_WEIGHTS.hrInterview;
-    }
-
-    // 5. Aptitude (10%)
+    // 4. Placement Aptitude (20%)
+    const placementScores: number[] = [];
     if (aptitudeHasData && aptitudePerformance.score !== null) {
-      weightedScoreSum += aptitudePerformance.score * SCORE_WEIGHTS.aptitude;
+      placementScores.push(aptitudePerformance.score);
+    }
+    if (techMcqHasData && technicalMcqPerformance.score !== null) {
+      placementScores.push(technicalMcqPerformance.score);
+    }
+    if (placementScores.length > 0) {
+      const combinedPlacementScore = Math.round(
+        placementScores.reduce((a, b) => a + b, 0) / placementScores.length
+      );
+      weightedScoreSum += combinedPlacementScore * SCORE_WEIGHTS.aptitude;
       activeWeightSum += SCORE_WEIGHTS.aptitude;
     }
 
-    // 5b. Technical MCQs (10%)
-    if (techMcqHasData && technicalMcqPerformance.score !== null) {
-      weightedScoreSum += technicalMcqPerformance.score * SCORE_WEIGHTS.technicalMcq;
-      activeWeightSum += SCORE_WEIGHTS.technicalMcq;
-    }
-
-    // 6. Company Preparation (2.5%)
-    if (hasCompanyData && companyPrepPerformance.progressPercentage !== null) {
-      weightedScoreSum += companyPrepPerformance.progressPercentage * SCORE_WEIGHTS.companyPrep;
-      activeWeightSum += SCORE_WEIGHTS.companyPrep;
-    }
-
-    // 7. Roadmap (2.5%)
-    if (hasRoadmapData && roadmapProgressPercent !== null) {
+    // 5. Roadmap (15%)
+    if (hasRoadmapData && roadmapProgressPercent !== null && (completedTasksCount > 0 || completedMilestoneCount > 0)) {
       weightedScoreSum += roadmapProgressPercent * SCORE_WEIGHTS.roadmap;
       activeWeightSum += SCORE_WEIGHTS.roadmap;
     }
@@ -698,6 +697,19 @@ export async function getPerformanceAnalyticsSummary(
       overallScoreCategory = getScoreCategory(overallScore);
       overallScoreDescription = getScoreDescription(overallScoreCategory);
     }
+  } else if (totalActivitiesCount === 1) {
+    overallScore = null;
+    overallScoreCategory = 'Getting Started';
+    const activeName = activeDimensions[0] || 'Coding';
+    overallScoreDescription = `Early progress recorded in ${activeName} (1 verified submission). Complete practice in at least one other area (Resume, Placement, or Interview) to calculate an authoritative multi-dimensional score.`;
+  } else if (totalActivitiesCount === 2) {
+    overallScore = null;
+    overallScoreCategory = 'Building Foundations';
+    overallScoreDescription = `2 verified activities recorded. Complete an assessment in another core module to generate your comprehensive Career Readiness score.`;
+  } else {
+    overallScore = null;
+    overallScoreCategory = 'Getting Started';
+    overallScoreDescription = 'No verified activities recorded yet. Complete your first practice activity to begin calculating your readiness.';
   }
 
   // ----------------------------------------------------

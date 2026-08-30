@@ -20,7 +20,8 @@ import {
   Target,
   BarChart2,
   RefreshCw,
-  FolderOpen
+  FolderOpen,
+  Loader2
 } from 'lucide-react';
 import {
   CodingSubject,
@@ -59,6 +60,7 @@ interface TopicQuestionSeriesViewProps {
   isGeneratingAI: boolean;
   onOpenSavedModal: () => void;
   savedCount: number;
+  savingBookmarkId?: string | null;
 }
 
 export const TopicQuestionSeriesView: React.FC<TopicQuestionSeriesViewProps> = ({
@@ -79,6 +81,7 @@ export const TopicQuestionSeriesView: React.FC<TopicQuestionSeriesViewProps> = (
   isGeneratingAI,
   onOpenSavedModal,
   savedCount,
+  savingBookmarkId,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'solved' | 'unsolved' | 'saved'>('all');
@@ -553,16 +556,19 @@ export const TopicQuestionSeriesView: React.FC<TopicQuestionSeriesViewProps> = (
                     {/* Bookmark toggle button */}
                     <button
                       onClick={() => onToggleSaveBookmark(item.problem)}
-                      title={item.isSaved ? 'Remove Bookmark' : 'Save for Later'}
+                      disabled={savingBookmarkId === item.id}
+                      title={savingBookmarkId === item.id ? 'Syncing with Supabase cloud...' : item.isSaved ? 'Remove Bookmark' : 'Save to Supabase cloud'}
                       id={`bookmark-btn-${item.id}`}
-                      className={`p-2 rounded-xl border transition-all ${
+                      className={`p-2 rounded-xl border transition-all cursor-pointer ${
                         item.isSaved
                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
                           : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-amber-300 hover:border-amber-500/30'
                       }`}
                     >
-                      {item.isSaved ? (
-                        <BookmarkCheck className="w-4 h-4 text-amber-400" />
+                      {savingBookmarkId === item.id ? (
+                        <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                      ) : item.isSaved ? (
+                        <BookmarkCheck className="w-4 h-4 text-amber-400 fill-amber-400" />
                       ) : (
                         <Bookmark className="w-4 h-4" />
                       )}

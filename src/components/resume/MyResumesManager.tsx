@@ -28,6 +28,7 @@ interface MyResumesManagerProps {
   onMakeCurrent: (resume: ResumeVersionItem) => void;
   onDeleteResume: (resume: ResumeVersionItem) => Promise<void>;
   onPrintResume?: (resume: ResumeVersionItem) => void;
+  onEditResume?: (resume: ResumeVersionItem) => void;
   onTriggerUpload: () => void;
   onTriggerCreateResume?: () => void;
   isLoading?: boolean;
@@ -41,6 +42,7 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
   onMakeCurrent,
   onDeleteResume,
   onPrintResume,
+  onEditResume,
   onTriggerUpload,
   onTriggerCreateResume,
   isLoading = false,
@@ -200,6 +202,17 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
             {/* Action Buttons */}
             <div className="md:col-span-5 flex items-center justify-start md:justify-end gap-2 flex-wrap pt-2 md:pt-0">
               
+              {onEditResume && (
+                <button
+                  onClick={() => onEditResume(currentResume)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                  title="Open in Live Resume Editor"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Edit Live</span>
+                </button>
+              )}
+
               <button
                 onClick={() => onViewResume(currentResume)}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-xs transition-all cursor-pointer"
@@ -211,7 +224,7 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
 
               <button
                 onClick={() => onSelectResumeToAnalyze(currentResume)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-bold text-indigo-600 dark:text-indigo-400 shadow-xs transition-all cursor-pointer"
                 title="Run AI Analysis on this resume"
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -353,9 +366,20 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
                   {/* Right: Actions */}
                   <div className="flex items-center gap-2 shrink-0 flex-wrap">
                     
+                    {onEditResume && (
+                      <button
+                        onClick={() => onEditResume(prevResume)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition-all cursor-pointer"
+                        title="Edit in Live Resume Editor"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => onMakeCurrent(prevResume)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition-all cursor-pointer"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-all cursor-pointer"
                       title="Make this the current active resume"
                     >
                       <Check className="w-3.5 h-3.5" />

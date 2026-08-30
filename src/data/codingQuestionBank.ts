@@ -1,6 +1,320 @@
 import { CodingProblem, CodingDifficulty, CodingSubject, CodingLanguage } from '../types/coding';
+import { resolveTopicConcept, validateProblemSemantics } from './codingTopicContracts';
 
 export const DEFAULT_CODING_QUESTION_BANK: CodingProblem[] = [
+  // ==========================================
+  // CONTROL FLOW — ELSE IF STATEMENT (EASY)
+  // ==========================================
+  {
+    id: 'dsa_ctrl_01',
+    title: 'Student Grade Classification via Else-If Ladder',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'Else if statement',
+    tags: ['Else if statement', 'Conditional Statements', 'Basic Programming', 'Branching'],
+    description: `Given a student's numerical score \`marks\` (between 0 and 100), write a function to determine their academic grade based on the following standard grading ladder:
+
+- **\`marks >= 90\`**: Return **\`'A'\`**
+- **\`75 <= marks < 90\`**: Return **\`'B'\`**
+- **\`60 <= marks < 75\`**: Return **\`'C'\`**
+- **\`45 <= marks < 60\`**: Return **\`'D'\`**
+- **\`marks < 45\`**: Return **\`'F'\`**
+
+Your solution should evaluate the conditions sequentially using an **if / else if / else** conditional ladder.`,
+    examples: [
+      { input: 'marks = 95', output: "'A'", explanation: 'Score 95 is >= 90, so grade is A.' },
+      { input: 'marks = 82', output: "'B'", explanation: 'Score 82 is between 75 and 89, so grade is B.' },
+      { input: 'marks = 64', output: "'C'", explanation: 'Score 64 is between 60 and 74, so grade is C.' },
+      { input: 'marks = 50', output: "'D'", explanation: 'Score 50 is between 45 and 59, so grade is D.' },
+      { input: 'marks = 32', output: "'F'", explanation: 'Score 32 is below 45, so grade is F.' },
+    ],
+    constraints: ['0 <= marks <= 100', 'marks is an integer'],
+    expectedComplexity: { time: 'O(1)', space: 'O(1)' },
+    functionSignature: {
+      C: 'char classifyGrade(int marks)',
+      'C++': 'char classifyGrade(int marks)',
+      Java: 'public char classifyGrade(int marks)',
+      Python: 'def classifyGrade(self, marks: int) -> str:',
+      JavaScript: 'function classifyGrade(marks)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nchar classifyGrade(int marks) {\n    // Implement your if / else if / else branching logic below\n    return 'F';\n}`,
+      'C++': `#include <iostream>\nusing namespace std;\n\nclass Solution {\npublic:\n    char classifyGrade(int marks) {\n        // Implement your if / else if / else branching logic below\n        return 'F';\n    }\n};`,
+      Java: `class Solution {\n    public char classifyGrade(int marks) {\n        // Implement your if / else if / else branching logic below\n        return 'F';\n    }\n}`,
+      Python: `class Solution:\n    def classifyGrade(self, marks: int) -> str:\n        # Implement your if / elif / else branching logic below\n        pass`,
+      JavaScript: `/**\n * @param {number} marks\n * @return {string}\n */\nfunction classifyGrade(marks) {\n  // Implement your if / else if / else branching logic below\n  return 'F';\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'marks = 95', expectedOutput: "'A'", isHidden: false },
+      { id: 'tc_2', input: 'marks = 82', expectedOutput: "'B'", isHidden: false },
+      { id: 'tc_3', input: 'marks = 64', expectedOutput: "'C'", isHidden: true },
+      { id: 'tc_4', input: 'marks = 45', expectedOutput: "'D'", isHidden: true },
+      { id: 'tc_5', input: 'marks = 20', expectedOutput: "'F'", isHidden: true },
+    ],
+    hints: [
+      'Start by checking the highest threshold (marks >= 90) first.',
+      'Use else if (marks >= 75) for the second tier, as marks < 90 is already guaranteed by the preceding if.',
+      "Conclude with a final else branch for marks < 45 returning 'F'.",
+    ],
+    editorial: {
+      approach: 'Sequential if/else if/else ladder testing score boundary thresholds in O(1) constant time.',
+      timeComplexity: 'O(1)',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  // ==========================================
+  // CONTROL FLOW — IF STATEMENT (EASY)
+  // ==========================================
+  {
+    id: 'dsa_ctrl_02',
+    title: 'Check Voting Eligibility and Age Condition',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'If statement',
+    tags: ['If statement', 'Conditionals', 'Basic Programming'],
+    description: `Given an integer \`age\` representing a citizen's age, write a function using a conditional **if statement** to check if the person is eligible to vote in national elections.
+
+A person is eligible to vote if and only if their \`age >= 18\`. Return \`true\` if eligible, otherwise return \`false\`.`,
+    examples: [
+      { input: 'age = 20', output: 'true', explanation: 'Age 20 is >= 18, so eligible.' },
+      { input: 'age = 16', output: 'false', explanation: 'Age 16 is < 18, so not eligible.' },
+      { input: 'age = 18', output: 'true', explanation: 'Age 18 meets the exact threshold.' },
+    ],
+    constraints: ['0 <= age <= 150'],
+    expectedComplexity: { time: 'O(1)', space: 'O(1)' },
+    functionSignature: {
+      C: 'bool isEligibleToVote(int age)',
+      'C++': 'bool isEligibleToVote(int age)',
+      Java: 'public boolean isEligibleToVote(int age)',
+      Python: 'def isEligibleToVote(self, age: int) -> bool:',
+      JavaScript: 'function isEligibleToVote(age)',
+    },
+    starterCode: {
+      C: `#include <stdbool.h>\n\nbool isEligibleToVote(int age) {\n    // Implement using if statement\n    return false;\n}`,
+      'C++': `#include <iostream>\nusing namespace std;\n\nclass Solution {\npublic:\n    bool isEligibleToVote(int age) {\n        // Implement using if statement\n        return false;\n    }\n};`,
+      Java: `class Solution {\n    public boolean isEligibleToVote(int age) {\n        // Implement using if statement\n        return false;\n    }\n}`,
+      Python: `class Solution:\n    def isEligibleToVote(self, age: int) -> bool:\n        # Implement using if statement\n        pass`,
+      JavaScript: `function isEligibleToVote(age) {\n  // Implement using if statement\n  return false;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'age = 20', expectedOutput: 'true', isHidden: false },
+      { id: 'tc_2', input: 'age = 17', expectedOutput: 'false', isHidden: false },
+      { id: 'tc_3', input: 'age = 18', expectedOutput: 'true', isHidden: true },
+      { id: 'tc_4', input: 'age = 0', expectedOutput: 'false', isHidden: true },
+    ],
+    hints: ['Check if age >= 18 using an if statement.'],
+    editorial: {
+      approach: 'Single boolean condition evaluation in O(1) time.',
+      timeComplexity: 'O(1)',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  // ==========================================
+  // PARITY & MODULO — EVEN / ODD (EASY)
+  // ==========================================
+  {
+    id: 'dsa_parity_01',
+    title: 'Check Even or Odd Integer Parity',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'Even/Odd',
+    tags: ['Even/Odd', 'Parity', 'Modulo', 'Basic Programming'],
+    description: `Given an integer \`n\`, write a function to determine whether \`n\` is **Even** or **Odd**.
+
+- If \`n\` is divisible by 2 with no remainder (\`n % 2 == 0\`), return **\`"Even"\`**.
+- Otherwise, return **\`"Odd"\`**.
+
+Remember that \`0\` is an even integer, and negative numbers follow standard parity rules (e.g. \`-4\` is Even, \`-7\` is Odd).`,
+    examples: [
+      { input: 'n = 8', output: '"Even"', explanation: '8 % 2 == 0, so it is Even.' },
+      { input: 'n = 7', output: '"Odd"', explanation: '7 % 2 != 0, so it is Odd.' },
+      { input: 'n = 0', output: '"Even"', explanation: '0 is divisible by 2, so it is Even.' },
+      { input: 'n = -5', output: '"Odd"', explanation: '-5 has odd parity.' },
+    ],
+    constraints: ['-10^9 <= n <= 10^9'],
+    expectedComplexity: { time: 'O(1)', space: 'O(1)' },
+    functionSignature: {
+      C: 'const char* checkEvenOrOdd(int n)',
+      'C++': 'string checkEvenOrOdd(int n)',
+      Java: 'public String checkEvenOrOdd(int n)',
+      Python: 'def checkEvenOrOdd(self, n: int) -> str:',
+      JavaScript: 'function checkEvenOrOdd(n)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nconst char* checkEvenOrOdd(int n) {\n    // Implement even / odd parity check\n    return "";\n}`,
+      'C++': `#include <iostream>\n#include <string>\nusing namespace std;\n\nclass Solution {\npublic:\n    string checkEvenOrOdd(int n) {\n        // Implement even / odd parity check\n        return "";\n    }\n};`,
+      Java: `class Solution {\n    public String checkEvenOrOdd(int n) {\n        // Implement even / odd parity check\n        return "";\n    }\n}`,
+      Python: `class Solution:\n    def checkEvenOrOdd(self, n: int) -> str:\n        # Implement even / odd parity check\n        pass`,
+      JavaScript: `/**\n * @param {number} n\n * @return {string}\n */\nfunction checkEvenOrOdd(n) {\n  // Implement even / odd parity check\n  return "";\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'n = 8', expectedOutput: '"Even"', isHidden: false },
+      { id: 'tc_2', input: 'n = 7', expectedOutput: '"Odd"', isHidden: false },
+      { id: 'tc_3', input: 'n = 0', expectedOutput: '"Even"', isHidden: true },
+      { id: 'tc_4', input: 'n = -13', expectedOutput: '"Odd"', isHidden: true },
+      { id: 'tc_5', input: 'n = -42', expectedOutput: '"Even"', isHidden: true },
+    ],
+    hints: [
+      'Use the remainder modulo operator: n % 2 == 0 indicates even numbers.',
+      'Note that for negative numbers in C/C++/Java, n % 2 might return -1 for odd numbers, so check n % 2 == 0 or use abs(n) % 2 == 1.',
+    ],
+    editorial: {
+      approach: 'Compute n % 2 to verify parity in O(1) time and O(1) space.',
+      timeComplexity: 'O(1)',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  // ==========================================
+  // ITERATION — FOR LOOP (EASY)
+  // ==========================================
+  {
+    id: 'dsa_loop_01',
+    title: 'Calculate Sum of First N Natural Numbers using For Loop',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'For loop',
+    tags: ['For loop', 'Iteration', 'Basic Programming', 'Loops'],
+    description: `Given a positive integer \`n\`, write a function using a **for loop** to calculate and return the sum of all natural numbers from \`1\` up to \`n\` inclusive:
+
+\`\`\`
+Sum = 1 + 2 + 3 + ... + n
+\`\`\`
+
+You must solve this iteratively using a loop accumulator.`,
+    examples: [
+      { input: 'n = 5', output: '15', explanation: '1 + 2 + 3 + 4 + 5 = 15' },
+      { input: 'n = 10', output: '55', explanation: 'Sum of numbers from 1 to 10 is 55.' },
+      { input: 'n = 1', output: '1', explanation: 'Sum of 1 is 1.' },
+    ],
+    constraints: ['1 <= n <= 10^5'],
+    expectedComplexity: { time: 'O(N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'long long sumOfNaturalNumbers(int n)',
+      'C++': 'long long sumOfNaturalNumbers(int n)',
+      Java: 'public long sumOfNaturalNumbers(int n)',
+      Python: 'def sumOfNaturalNumbers(self, n: int) -> int:',
+      JavaScript: 'function sumOfNaturalNumbers(n)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nlong long sumOfNaturalNumbers(int n) {\n    // Implement your for loop accumulator below\n    return 0;\n}`,
+      'C++': `#include <iostream>\nusing namespace std;\n\nclass Solution {\npublic:\n    long long sumOfNaturalNumbers(int n) {\n        // Implement your for loop accumulator below\n        return 0;\n    }\n};`,
+      Java: `class Solution {\n    public long sumOfNaturalNumbers(int n) {\n        // Implement your for loop accumulator below\n        return 0;\n    }\n}`,
+      Python: `class Solution:\n    def sumOfNaturalNumbers(self, n: int) -> int:\n        # Implement your for loop accumulator below\n        pass`,
+      JavaScript: `function sumOfNaturalNumbers(n) {\n  // Implement your for loop accumulator below\n  return 0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'n = 5', expectedOutput: '15', isHidden: false },
+      { id: 'tc_2', input: 'n = 10', expectedOutput: '55', isHidden: false },
+      { id: 'tc_3', input: 'n = 100', expectedOutput: '5050', isHidden: true },
+      { id: 'tc_4', input: 'n = 1000', expectedOutput: '500500', isHidden: true },
+    ],
+    hints: ['Initialize a 64-bit sum accumulator to 0.', 'Iterate with for (int i = 1; i <= n; i++) and add i to sum.'],
+    editorial: {
+      approach: 'Iterate from 1 to N accumulating the sum in O(N) time.',
+      timeComplexity: 'O(N)',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  // ==========================================
+  // ITERATION — WHILE LOOP (EASY)
+  // ==========================================
+  {
+    id: 'dsa_loop_02',
+    title: 'Reverse Digits of an Integer using While Loop',
+    difficulty: 'Easy',
+    subject: 'DSA',
+    topic: 'While loop',
+    tags: ['While loop', 'Iteration', 'Basic Programming', 'Loops'],
+    description: `Given a non-negative integer \`n\`, write a function using a **while loop** to reverse its digits and return the resulting integer.
+
+For example, if \`n = 1234\`, reversing its digits gives \`4321\`.
+If the reversed number has leading zeros (e.g. \`1200\` -> \`0021\`), the integer value should be \`21\`. If \`n = 0\`, return \`0\`.`,
+    examples: [
+      { input: 'n = 1234', output: '4321', explanation: 'Digits reversed: 1234 -> 4321.' },
+      { input: 'n = 9870', output: '789', explanation: '9870 reversed is 0789, which is 789.' },
+      { input: 'n = 5', output: '5', explanation: 'Single digit reverses to itself.' },
+    ],
+    constraints: ['0 <= n <= 2 * 10^9'],
+    expectedComplexity: { time: 'O(log10 N)', space: 'O(1)' },
+    functionSignature: {
+      C: 'long long reverseIntegerDigits(long long n)',
+      'C++': 'long long reverseIntegerDigits(long long n)',
+      Java: 'public long reverseIntegerDigits(long n)',
+      Python: 'def reverseIntegerDigits(self, n: int) -> int:',
+      JavaScript: 'function reverseIntegerDigits(n)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nlong long reverseIntegerDigits(long long n) {\n    // Implement using while (n > 0)\n    return 0;\n}`,
+      'C++': `#include <iostream>\nusing namespace std;\n\nclass Solution {\npublic:\n    long long reverseIntegerDigits(long long n) {\n        // Implement using while (n > 0)\n        return 0;\n    }\n};`,
+      Java: `class Solution {\n    public long reverseIntegerDigits(long n) {\n        // Implement using while (n > 0)\n        return 0;\n    }\n}`,
+      Python: `class Solution:\n    def reverseIntegerDigits(self, n: int) -> int:\n        # Implement using while loop\n        pass`,
+      JavaScript: `function reverseIntegerDigits(n) {\n  // Implement using while loop\n  return 0;\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: 'n = 1234', expectedOutput: '4321', isHidden: false },
+      { id: 'tc_2', input: 'n = 9870', expectedOutput: '789', isHidden: false },
+      { id: 'tc_3', input: 'n = 0', expectedOutput: '0', isHidden: true },
+      { id: 'tc_4', input: 'n = 1000000003', expectedOutput: '3000000001', isHidden: true },
+    ],
+    hints: [
+      'Extract the last digit using digit = n % 10.',
+      'Append to reversed number using rev = rev * 10 + digit.',
+      'Divide n by 10 (n = n / 10) inside the while (n > 0) loop.',
+    ],
+    editorial: {
+      approach: 'While loop extracting least significant digit with % 10 and shifting with / 10 in O(log10 N) time.',
+      timeComplexity: 'O(log10 N)',
+      spaceComplexity: 'O(1)',
+    },
+  },
+  // ==========================================
+  // POINTERS & MEMORY MANAGEMENT (EASY)
+  // ==========================================
+  {
+    id: 'dsa_ptr_01',
+    title: 'Swap Two Integer Values Using Pointers',
+    difficulty: 'Easy',
+    subject: 'C/C++',
+    topic: 'Pointers & Memory Management',
+    tags: ['Pointers & Memory Management', 'Pointers', 'C/C++', 'Memory Management'],
+    description: `Given pointers to two integer variables \`a\` and \`b\`, write a function to swap the values stored in the two memory locations using pointer dereferencing.
+
+After calling the function, the memory location pointed to by \`a\` should hold the original value of \`b\`, and the memory location pointed to by \`b\` should hold the original value of \`a\`.`,
+    examples: [
+      { input: '*a = 5, *b = 10', output: '*a = 10, *b = 5', explanation: 'The memory locations were swapped in place.' },
+      { input: '*a = -1, *b = 99', output: '*a = 99, *b = -1', explanation: 'Swapped in place.' },
+    ],
+    constraints: ['-10^9 <= *a, *b <= 10^9'],
+    expectedComplexity: { time: 'O(1)', space: 'O(1)' },
+    functionSignature: {
+      C: 'void swapByPointers(int* a, int* b)',
+      'C++': 'void swapByPointers(int* a, int* b)',
+      Java: 'public int[] swapByPointers(int a, int b)',
+      Python: 'def swapByPointers(self, a: int, b: int) -> Tuple[int, int]:',
+      JavaScript: 'function swapByPointers(a, b)',
+    },
+    starterCode: {
+      C: `#include <stdio.h>\n\nvoid swapByPointers(int* a, int* b) {\n    // Dereference pointers to swap values in place\n}`,
+      'C++': `#include <iostream>\nusing namespace std;\n\nclass Solution {\npublic:\n    void swapByPointers(int* a, int* b) {\n        // Dereference pointers to swap values in place\n    }\n};`,
+      Java: `class Solution {\n    public int[] swapByPointers(int a, int b) {\n        return new int[]{b, a};\n    }\n}`,
+      Python: `class Solution:\n    def swapByPointers(self, a: int, b: int):\n        # Return swapped tuple\n        pass`,
+      JavaScript: `function swapByPointers(a, b) {\n  return [b, a];\n}`,
+    },
+    hiddenTestCases: [
+      { id: 'tc_1', input: '*a = 5, *b = 10', expectedOutput: '*a = 10, *b = 5', isHidden: false },
+      { id: 'tc_2', input: '*a = -7, *b = 42', expectedOutput: '*a = 42, *b = -7', isHidden: true },
+    ],
+    hints: [
+      'Store the dereferenced value *a in a temporary variable.',
+      'Assign *b to *a.',
+      'Assign the temporary variable to *b.',
+    ],
+    editorial: {
+      approach: 'Dereference pointers using the * operator and swap with a temporary variable in O(1) time.',
+      timeComplexity: 'O(1)',
+      spaceComplexity: 'O(1)',
+    },
+  },
   // ==========================================
   // ARRAYS — EASY
   // ==========================================
@@ -823,12 +1137,14 @@ An **Anagram** is a word or phrase formed by rearranging the letters of a differ
     constraints: ['1 <= strs.length <= 10^4', '0 <= strs[i].length <= 100', 'strs[i] consists of lowercase English letters.'],
     expectedComplexity: { time: 'O(N * K log K)', space: 'O(N * K)' },
     functionSignature: {
+      C: 'char*** groupAnagrams(char** strs, int strsSize, int* returnSize, int** returnColumnSizes)',
       'C++': 'vector<vector<string>> groupAnagrams(vector<string>& strs)',
       Java: 'public List<List<String>> groupAnagrams(String[] strs)',
       Python: 'def groupAnagrams(self, strs: List[str]) -> List[List[str]]:',
       JavaScript: 'function groupAnagrams(strs)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nchar*** groupAnagrams(char** strs, int strsSize, int* returnSize, int** returnColumnSizes) {\n    // Write your solution here\n    *returnSize = 0;\n    return NULL;\n}`,
       'C++': `#include <vector>\n#include <string>\n#include <unordered_map>\n#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    vector<vector<string>> groupAnagrams(vector<string>& strs) {\n        // Write your solution here\n        return {};\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public List<List<String>> groupAnagrams(String[] strs) {\n        // Write your solution here\n        return new ArrayList<>();\n    }\n}`,
       Python: `from typing import List\nfrom collections import defaultdict\n\nclass Solution:\n    def groupAnagrams(self, strs: List[str]) -> List[List[str]]:\n        # Write your solution here\n        pass`,
@@ -1070,7 +1386,7 @@ A binary tree's **maximum depth** is the number of nodes along the longest path 
       JavaScript: 'function maxDepth(root)',
     },
     starterCode: {
-      C: `int maxDepth(struct TreeNode* root) {\n    if (!root) return 0;\n    int left = maxDepth(root->left);\n    int right = maxDepth(root->right);\n    return (left > right ? left : right) + 1;\n}`,
+      C: `int maxDepth(struct TreeNode* root) {\n    // Write recursive DFS or BFS here\n    return 0;\n}`,
       'C++': `class Solution {\npublic:\n    int maxDepth(TreeNode* root) {\n        // Write recursive DFS or BFS here\n        return 0;\n    }\n};`,
       Java: `class Solution {\n    public int maxDepth(TreeNode root) {\n        // Write solution here\n        return 0;\n    }\n}`,
       Python: `class Solution:\n    def maxDepth(self, root: Optional[TreeNode]) -> int:\n        # Write solution here\n        pass`,
@@ -1364,12 +1680,14 @@ Return an array \`[avgWaitingTime, avgTurnaroundTime]\` rounded to 2 decimal pla
     constraints: ['1 <= processes.length <= 100', '1 <= timeQuantum <= 10'],
     expectedComplexity: { time: 'O(Total Burst / Quantum)', space: 'O(N)' },
     functionSignature: {
+      C: 'double* roundRobinScheduling(int** processes, int processesSize, int* processesColSize, int timeQuantum, int* returnSize)',
       'C++': 'vector<double> roundRobinScheduling(vector<vector<int>>& processes, int timeQuantum)',
       Java: 'public double[] roundRobinScheduling(int[][] processes, int timeQuantum)',
       Python: 'def roundRobinScheduling(self, processes: List[List[int]], timeQuantum: int) -> List[float]:',
       JavaScript: 'function roundRobinScheduling(processes, timeQuantum)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n\ndouble* roundRobinScheduling(int** processes, int processesSize, int* processesColSize, int timeQuantum, int* returnSize) {\n    // processes[i] = [pid, arrival_time, burst_time]\n    *returnSize = 2;\n    double* result = (double*)malloc(2 * sizeof(double));\n    result[0] = 0.0;\n    result[1] = 0.0;\n    return result;\n}`,
       'C++': `#include <vector>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    vector<double> roundRobinScheduling(vector<vector<int>>& processes, int timeQuantum) {\n        // Write Round Robin simulation\n        return {0.0, 0.0};\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public double[] roundRobinScheduling(int[][] processes, int timeQuantum) {\n        // Write Round Robin simulation\n        return new double[]{0.0, 0.0};\n    }\n}`,
       Python: `from typing import List\nfrom collections import deque\n\nclass Solution:\n    def roundRobinScheduling(self, processes: List[List[int]], timeQuantum: int) -> List[float]:\n        # Write Round Robin simulation\n        pass`,
@@ -1401,12 +1719,14 @@ Assume memory is initially empty.`,
     constraints: ['1 <= pages.length <= 1000', '1 <= capacity <= 50'],
     expectedComplexity: { time: 'O(N)', space: 'O(capacity)' },
     functionSignature: {
+      C: 'int lruPageFaults(int* pages, int pagesSize, int capacity)',
       'C++': 'int lruPageFaults(vector<int>& pages, int capacity)',
       Java: 'public int lruPageFaults(int[] pages, int capacity)',
       Python: 'def lruPageFaults(self, pages: List[int], capacity: int) -> int:',
       JavaScript: 'function lruPageFaults(pages, capacity)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n\nint lruPageFaults(int* pages, int pagesSize, int capacity) {\n    // Simulate LRU page replacement and return total page faults\n    return 0;\n}`,
       'C++': `#include <vector>\n#include <unordered_map>\n#include <list>\nusing namespace std;\n\nclass Solution {\npublic:\n    int lruPageFaults(vector<int>& pages, int capacity) {\n        // Write LRU simulation\n        return 0;\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public int lruPageFaults(int[] pages, int capacity) {\n        // Write LRU simulation\n        return 0;\n    }\n}`,
       Python: `from typing import List\nfrom collections import OrderedDict\n\nclass Solution:\n    def lruPageFaults(self, pages: List[int], capacity: int) -> int:\n        # Write LRU simulation\n        pass`,
@@ -1554,12 +1874,14 @@ Given a string \`s\`, return \`true\` *if it is a palindrome*, or \`false\` *oth
     constraints: ['The number of nodes in the tree is in the range [0, 2000].', '-1000 <= Node.val <= 1000'],
     expectedComplexity: { time: 'O(N)', space: 'O(N)' },
     functionSignature: {
+      C: 'int** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes)',
       'C++': 'vector<vector<int>> levelOrder(TreeNode* root)',
       Java: 'public List<List<Integer>> levelOrder(TreeNode root)',
       Python: 'def levelOrder(self, root: Optional[TreeNode]) -> List[List[int]]:',
       JavaScript: 'function levelOrder(root)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n\nint** levelOrder(struct TreeNode* root, int* returnSize, int** returnColumnSizes) {\n    // BFS level by level\n    *returnSize = 0;\n    return NULL;\n}`,
       'C++': `#include <vector>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    vector<vector<int>> levelOrder(TreeNode* root) {\n        // BFS level by level\n        return {};\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public List<List<Integer>> levelOrder(TreeNode root) {\n        // BFS level by level\n        return new ArrayList<>();\n    }\n}`,
       Python: `from typing import Optional, List\nfrom collections import deque\n\nclass Solution:\n    def levelOrder(self, root: Optional[TreeNode]) -> List[List[int]]:\n        # BFS level by level\n        pass`,
@@ -1593,12 +1915,14 @@ A **valid BST** is defined as follows:
     constraints: ['The number of nodes in the tree is in the range [1, 10^4].', '-2^31 <= Node.val <= 2^31 - 1'],
     expectedComplexity: { time: 'O(N)', space: 'O(H)' },
     functionSignature: {
+      C: 'bool isValidBST(struct TreeNode* root)',
       'C++': 'bool isValidBST(TreeNode* root)',
       Java: 'public boolean isValidBST(TreeNode root)',
       Python: 'def isValidBST(self, root: Optional[TreeNode]) -> bool:',
       JavaScript: 'function isValidBST(root)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdbool.h>\n\nbool isValidBST(struct TreeNode* root) {\n    // Inorder or min/max range check\n    return true;\n}`,
       'C++': `class Solution {\npublic:\n    bool isValidBST(TreeNode* root) {\n        // Inorder or min/max range check\n        return true;\n    }\n};`,
       Java: `class Solution {\n    public boolean isValidBST(TreeNode root) {\n        // Inorder or min/max range check\n        return true;\n    }\n}`,
       Python: `class Solution:\n    def isValidBST(self, root: Optional[TreeNode]) -> bool:\n        # Write solution here\n        pass`,
@@ -1631,12 +1955,14 @@ Given the \`root\` of a binary tree, return *the maximum **path sum** of any non
     constraints: ['The number of nodes in the tree is in the range [1, 3 * 10^4].', '-1000 <= Node.val <= 1000'],
     expectedComplexity: { time: 'O(N)', space: 'O(H)' },
     functionSignature: {
+      C: 'int maxPathSum(struct TreeNode* root)',
       'C++': 'int maxPathSum(TreeNode* root)',
       Java: 'public int maxPathSum(TreeNode root)',
       Python: 'def maxPathSum(self, root: Optional[TreeNode]) -> int:',
       JavaScript: 'function maxPathSum(root)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n#include <limits.h>\n\nint maxPathSum(struct TreeNode* root) {\n    // Write recursive solution\n    return 0;\n}`,
       'C++': `#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    int maxPathSum(TreeNode* root) {\n        // Write recursive solution\n        return 0;\n    }\n};`,
       Java: `class Solution {\n    public int maxPathSum(TreeNode root) {\n        // Write recursive solution\n        return 0;\n    }\n}`,
       Python: `class Solution:\n    def maxPathSum(self, root: Optional[TreeNode]) -> int:\n        # Write recursive solution\n        pass`,
@@ -1671,12 +1997,14 @@ Given \`edges\` and the integers \`n\`, \`source\`, and \`destination\`, return 
     constraints: ['1 <= n <= 2 * 10^5', '0 <= edges.length <= 2 * 10^5', 'edges[i].length == 2', '0 <= source, destination < n'],
     expectedComplexity: { time: 'O(V + E)', space: 'O(V + E)' },
     functionSignature: {
+      C: 'bool validPath(int n, int** edges, int edgesSize, int* edgesColSize, int source, int destination)',
       'C++': 'bool validPath(int n, vector<vector<int>>& edges, int source, int destination)',
       Java: 'public boolean validPath(int n, int[][] edges, int source, int destination)',
       Python: 'def validPath(self, n: int, edges: List[List[int]], source: int, destination: int) -> bool:',
       JavaScript: 'function validPath(n, edges, source, destination)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n\nbool validPath(int n, int** edges, int edgesSize, int* edgesColSize, int source, int destination) {\n    // BFS / DFS or Disjoint Set\n    return false;\n}`,
       'C++': `#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    bool validPath(int n, vector<vector<int>>& edges, int source, int destination) {\n        // BFS / DFS or Disjoint Set\n        return false;\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public boolean validPath(int n, int[][] edges, int source, int destination) {\n        // BFS / DFS or Disjoint Set\n        return false;\n    }\n}`,
       Python: `from typing import List\n\nclass Solution:\n    def validPath(self, n: int, edges: List[List[int]], source: int, destination: int) -> bool:\n        # BFS / DFS or Disjoint Set\n        pass`,
@@ -1707,12 +2035,14 @@ Return \`true\` *if you can finish all courses*. Otherwise, return \`false\`.`,
     constraints: ['1 <= numCourses <= 2000', '0 <= prerequisites.length <= 5000', 'prerequisites[i].length == 2', 'All prerequisite pairs are unique.'],
     expectedComplexity: { time: 'O(V + E)', space: 'O(V + E)' },
     functionSignature: {
+      C: 'bool canFinish(int numCourses, int** prerequisites, int prerequisitesSize, int* prerequisitesColSize)',
       'C++': 'bool canFinish(int numCourses, vector<vector<int>>& prerequisites)',
       Java: 'public boolean canFinish(int numCourses, int[][] prerequisites)',
       Python: 'def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:',
       JavaScript: 'function canFinish(numCourses, prerequisites)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n\nbool canFinish(int numCourses, int** prerequisites, int prerequisitesSize, int* prerequisitesColSize) {\n    // Kahn's algorithm or 3-color DFS cycle detection\n    return true;\n}`,
       'C++': `#include <vector>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    bool canFinish(int numCourses, vector<vector<int>>& prerequisites) {\n        // Kahn's algorithm or 3-color DFS cycle detection\n        return true;\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public boolean canFinish(int numCourses, int[][] prerequisites) {\n        // Kahn's algorithm or 3-color DFS cycle detection\n        return true;\n    }\n}`,
       Python: `from typing import List\n\nclass Solution:\n    def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:\n        # Write topological sort\n        pass`,
@@ -1746,12 +2076,14 @@ Given two words, \`beginWord\` and \`endWord\`, and a dictionary \`wordList\`, r
     constraints: ['1 <= beginWord.length <= 10', 'endWord.length == beginWord.length', '1 <= wordList.length <= 5000', 'wordList[i].length == beginWord.length', 'beginWord != endWord'],
     expectedComplexity: { time: 'O(M^2 * N)', space: 'O(M * N)' },
     functionSignature: {
+      C: 'int ladderLength(char* beginWord, char* endWord, char** wordList, int wordListSize)',
       'C++': 'int ladderLength(string beginWord, string endWord, vector<string>& wordList)',
       Java: 'public int ladderLength(String beginWord, String endWord, List<String> wordList)',
       Python: 'def ladderLength(self, beginWord: str, endWord: str, wordList: List[str]) -> int:',
       JavaScript: 'function ladderLength(beginWord, endWord, wordList)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nint ladderLength(char* beginWord, char* endWord, char** wordList, int wordListSize) {\n    // Bi-directional BFS\n    return 0;\n}`,
       'C++': `#include <string>\n#include <vector>\n#include <unordered_set>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    int ladderLength(string beginWord, string endWord, vector<string>& wordList) {\n        // Bi-directional BFS\n        return 0;\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public int ladderLength(String beginWord, String endWord, List<String> wordList) {\n        // BFS shortest path\n        return 0;\n    }\n}`,
       Python: `from typing import List\nfrom collections import deque\n\nclass Solution:\n    def ladderLength(self, beginWord: str, endWord: str, wordList: List[str]) -> int:\n        # BFS shortest path\n        pass`,
@@ -1953,12 +2285,14 @@ Can you solve it without sorting in \`O(n log k)\` or \`O(n)\` average time?`,
     constraints: ['1 <= k <= nums.length <= 10^5', '-10^4 <= nums[i] <= 10^4'],
     expectedComplexity: { time: 'O(N log K)', space: 'O(K)' },
     functionSignature: {
+      C: 'int findKthLargest(int* nums, int numsSize, int k)',
       'C++': 'int findKthLargest(vector<int>& nums, int k)',
       Java: 'public int findKthLargest(int[] nums, int k)',
       Python: 'def findKthLargest(self, nums: List[int], k: int) -> int:',
       JavaScript: 'function findKthLargest(nums, k)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n\nint findKthLargest(int* nums, int numsSize, int k) {\n    // Min-heap of size K or Quickselect\n    return 0;\n}`,
       'C++': `#include <vector>\n#include <queue>\nusing namespace std;\n\nclass Solution {\npublic:\n    int findKthLargest(vector<int>& nums, int k) {\n        // Min-heap of size K\n        return 0;\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public int findKthLargest(int[] nums, int k) {\n        // Min-heap of size K\n        return 0;\n    }\n}`,
       Python: `from typing import List\nimport heapq\n\nclass Solution:\n    def findKthLargest(self, nums: List[int], k: int) -> int:\n        # Min-heap of size K\n        pass`,
@@ -2037,12 +2371,14 @@ Implement the \`ParkingSystem\` class:
     constraints: ['0 <= big, medium, small <= 1000', 'carType is 1, 2, or 3', 'At most 1000 calls will be made to addCar'],
     expectedComplexity: { time: 'O(1) per call', space: 'O(1)' },
     functionSignature: {
+      C: 'ParkingSystem* parkingSystemCreate(int big, int medium, int small); bool parkingSystemAddCar(ParkingSystem* obj, int carType); void parkingSystemFree(ParkingSystem* obj);',
       'C++': 'class ParkingSystem { public: ParkingSystem(int big, int medium, int small); bool addCar(int carType); };',
       Java: 'class ParkingSystem { public ParkingSystem(int big, int medium, int small) {} public boolean addCar(int carType) {} }',
       Python: 'class ParkingSystem:\n    def __init__(self, big: int, medium: int, small: int):\n    def addCar(self, carType: int) -> bool:',
       JavaScript: 'class ParkingSystem { constructor(big, medium, small) {} addCar(carType) {} }',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n\ntypedef struct {\n    int big;\n    int medium;\n    int small;\n} ParkingSystem;\n\nParkingSystem* parkingSystemCreate(int big, int medium, int small) {\n    ParkingSystem* obj = (ParkingSystem*)malloc(sizeof(ParkingSystem));\n    obj->big = big;\n    obj->medium = medium;\n    obj->small = small;\n    return obj;\n}\n\nbool parkingSystemAddCar(ParkingSystem* obj, int carType) {\n    // Write slot decrement check\n    return false;\n}\n\nvoid parkingSystemFree(ParkingSystem* obj) {\n    if (obj) free(obj);\n}`,
       'C++': `class ParkingSystem {\nprivate:\n    int slots[4];\npublic:\n    ParkingSystem(int big, int medium, int small) {\n        slots[1] = big;\n        slots[2] = medium;\n        slots[3] = small;\n    }\n    bool addCar(int carType) {\n        // Write slot decrement check\n        return false;\n    }\n};`,
       Java: `class ParkingSystem {\n    private int[] slots;\n    public ParkingSystem(int big, int medium, int small) {\n        slots = new int[]{0, big, medium, small};\n    }\n    public boolean addCar(int carType) {\n        // Write slot decrement check\n        return false;\n    }\n}`,
       Python: `class ParkingSystem:\n    def __init__(self, big: int, medium: int, small: int):\n        self.slots = [0, big, medium, small]\n\n    def addCar(self, carType: int) -> bool:\n        # Write slot decrement check\n        pass`,
@@ -2269,12 +2605,14 @@ You must write a solution in \`O(log(m * n))\` time complexity.
     ],
     expectedComplexity: { time: 'O(log(M * N))', space: 'O(1)' },
     functionSignature: {
+      C: 'bool searchMatrix(int** matrix, int matrixSize, int* matrixColSize, int target)',
       'C++': 'bool searchMatrix(vector<vector<int>>& matrix, int target)',
       Java: 'public boolean searchMatrix(int[][] matrix, int target)',
       Python: 'def searchMatrix(self, matrix: List[List[int]], target: int) -> bool:',
       JavaScript: 'function searchMatrix(matrix, target)',
     },
     starterCode: {
+      C: `#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n\nbool searchMatrix(int** matrix, int matrixSize, int* matrixColSize, int target) {\n    // Treat matrix as 1D virtual array of size matrixSize * (*matrixColSize)\n    return false;\n}`,
       'C++': `#include <iostream>\n#include <vector>\nusing namespace std;\n\nclass Solution {\npublic:\n    bool searchMatrix(vector<vector<int>>& matrix, int target) {\n        // Treat matrix as 1D virtual array of size m * n\n        return false;\n    }\n};`,
       Java: `import java.util.*;\n\nclass Solution {\n    public boolean searchMatrix(int[][] matrix, int target) {\n        // Treat matrix as 1D virtual array of size m * n\n        return false;\n    }\n}`,
       Python: `from typing import List\n\nclass Solution:\n    def searchMatrix(self, matrix: List[List[int]], target: int) -> bool:\n        # Treat matrix as 1D virtual array of size m * n\n        pass`,
@@ -2477,6 +2815,14 @@ export function isProblemCompatible(
     }
   }
 
+  // 4. Validate Semantic Integrity against Topic Concept Contract
+  if (reqTopic && reqTopic !== 'Custom Topic') {
+    const semanticCheck = validateProblemSemantics(problem, reqTopic, reqSubj, reqDiff);
+    if (!semanticCheck.valid && semanticCheck.reason) {
+      reasons.push(`Semantic concept mismatch: ${semanticCheck.reason}`);
+    }
+  }
+
   return {
     compatible: reasons.length === 0,
     reasons,
@@ -2496,79 +2842,35 @@ export function createTopicTailoredFallback(
 ): CodingProblem {
   const cleanSubject = (subject || 'DSA').trim();
   const cleanTopic = (topic || 'Algorithms').trim();
+  const contract = resolveTopicConcept(cleanTopic, cleanSubject);
+  const sample = contract.sampleProblem;
+
   const id = `tailored_${cleanTopic.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${difficulty.toLowerCase()}_${Date.now()}`;
-  const funcName = `solve${cleanTopic.replace(/[^a-zA-Z0-9]/g, '') || 'Challenge'}`;
 
   return {
     id,
-    title: `${cleanTopic}: ${difficulty} Algorithmic Challenge`,
+    title: sample.title,
     difficulty,
     subject: cleanSubject,
     topic: cleanTopic,
-    tags: [cleanSubject, cleanTopic, difficulty],
-    description: `### Problem Description
-You are given a challenge centered on **${cleanTopic}** under the subject of **${cleanSubject}**.
-
-Your objective is to design and implement an optimal solution for the problem satisfying the constraints for a **${difficulty}** level challenge in **${cleanTopic}**.
-
-#### Input Format
-- An array \`nums\` or collection representing input elements for ${cleanTopic}.
-- A parameter \`target\` or query value.
-
-#### Output Format
-- Return the processed result or computed optimal value conforming to ${cleanTopic} specifications.`,
-    examples: [
-      {
-        input: 'nums = [10, 20, 30, 40, 50], target = 30',
-        output: '2',
-        explanation: `Optimal evaluation of the ${cleanTopic} logic yields the correct index/result.`,
-      },
-      {
-        input: 'nums = [5, 1, 8, 3], target = 8',
-        output: '2',
-        explanation: `Evaluation produces the expected target result.`,
-      },
-    ],
-    constraints: [
-      '1 <= nums.length <= 10^5',
-      '-10^4 <= nums[i] <= 10^4',
-      'Memory Limit: 256 MB',
-      'Time Limit: 2.0 seconds',
-    ],
+    tags: [cleanSubject, cleanTopic, difficulty, contract.canonicalConcept],
+    description: sample.description,
+    problem_statement: sample.description,
+    examples: sample.examples,
+    constraints: sample.constraints,
     expectedComplexity: {
-      time: difficulty === 'Easy' ? 'O(N)' : difficulty === 'Medium' ? 'O(log N) or O(N log N)' : 'O(N)',
-      space: difficulty === 'Easy' ? 'O(1)' : 'O(N)',
+      time: difficulty === 'Easy' ? 'O(1) to O(N)' : 'O(N) or O(N log N)',
+      space: 'O(1)',
     },
-    functionSignature: {
-      C: `int ${funcName}(int* nums, int numsSize, int target)`,
-      'C++': `int ${funcName}(vector<int>& nums, int target)`,
-      Java: `public int ${funcName}(int[] nums, int target)`,
-      Python: `def ${funcName}(self, nums: List[int], target: int) -> int:`,
-      JavaScript: `function ${funcName}(nums, target)`,
-      SQL: `-- Write your ${cleanTopic} SQL query below`,
-    },
-    starterCode: {
-      C: `#include <stdio.h>\n#include <stdlib.h>\n\nint ${funcName}(int* nums, int numsSize, int target) {\n    // Implement your ${cleanTopic} solution below\n    return 0;\n}`,
-      'C++': `#include <iostream>\n#include <vector>\n#include <algorithm>\nusing namespace std;\n\nclass Solution {\npublic:\n    int ${funcName}(vector<int>& nums, int target) {\n        // Implement your ${cleanTopic} solution below\n        return 0;\n    }\n};`,
-      Java: `import java.util.*;\n\nclass Solution {\n    public int ${funcName}(int[] nums, int target) {\n        // Implement your ${cleanTopic} solution below\n        return 0;\n    }\n}`,
-      Python: `from typing import List\n\nclass Solution:\n    def ${funcName}(self, nums: List[int], target: int) -> int:\n        # Implement your ${cleanTopic} solution below\n        pass`,
-      JavaScript: `/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number}\n */\nfunction ${funcName}(nums, target) {\n  // Implement your ${cleanTopic} solution below\n  return 0;\n}`,
-      SQL: `-- Write your SQL query for ${cleanTopic} below\nSELECT \n    *\nFROM \n    records;\n`,
-    },
-    hiddenTestCases: [
-      { id: 'tc_1', input: 'nums = [10, 20, 30, 40, 50], target = 30', expectedOutput: '2', isHidden: false },
-      { id: 'tc_2', input: 'nums = [5, 1, 8, 3], target = 8', expectedOutput: '2', isHidden: false },
-      { id: 'tc_3', input: 'nums = [100], target = 100', expectedOutput: '0', isHidden: true },
-      { id: 'tc_4', input: 'nums = [-5, -10, 0, 5], target = 0', expectedOutput: '2', isHidden: true },
-    ],
-    hints: [
-      `Carefully consider the properties of ${cleanTopic} when designing your approach.`,
-      `Evaluate edge cases such as single-element inputs and extreme boundary values.`,
-    ],
+    functionSignature: sample.signatures,
+    starterCode: sample.starterCodes,
+    starter_templates: sample.starterCodes,
+    hiddenTestCases: sample.testCases,
+    hints: sample.hints,
     editorial: {
-      approach: `Applies fundamental ${cleanTopic} algorithmic techniques for optimal execution.`,
-      timeComplexity: difficulty === 'Easy' ? 'O(N)' : difficulty === 'Medium' ? 'O(log N)' : 'O(N)',
-      spaceComplexity: difficulty === 'Easy' ? 'O(1)' : 'O(N)',
+      approach: contract.conceptSummary,
+      timeComplexity: difficulty === 'Easy' ? 'O(1) to O(N)' : 'O(N)',
+      spaceComplexity: 'O(1)',
     },
     created_at: new Date().toISOString(),
   };

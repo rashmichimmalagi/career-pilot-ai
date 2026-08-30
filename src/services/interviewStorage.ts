@@ -1,5 +1,6 @@
 import { MockInterviewReport } from '../types/interview';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { persistenceManager } from './persistenceManager';
 
 const STORAGE_KEY_PREFIX = 'careerpilot_mock_interviews_';
 
@@ -78,10 +79,26 @@ export const interviewStorage = {
       const updated = [normalized, ...existingReports.filter((r) => r.id !== normalized.id)];
       localStorage.setItem(studentKey, JSON.stringify(updated));
 
-      // Asynchronous remote persistence to Supabase
+      // Asynchronous remote persistence to Supabase with offline queue fallback
       if (isSupabaseConfigured() && effectiveStudentId && effectiveStudentId !== 'guest') {
         (async () => {
           try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const authUser = session?.user;
+            if (!authUser || !authUser.id) {
+              persistenceManager.enqueueOfflineMutation({
+                id: `mut_intv_${normalized.id}`,
+                userId: effectiveStudentId,
+                type: 'save_mock_interview',
+                payload: normalized,
+                timestamp: new Date().toISOString(),
+                attempts: 0,
+              });
+              return;
+            }
+
+            const activeUserId = authUser.id;
+            const nowIso = new Date().toISOString();
             const rawType = (normalized.subject || 'technical').toLowerCase();
             const normalizedType = rawType.includes('hr') || rawType.includes('behavioral') ? 'hr' : 'technical';
             const overallScore = normalized.overall_score || 0;
@@ -91,10 +108,16 @@ export const interviewStorage = {
 
             const dbPayload = {
               id: normalized.id,
-              user_id: effectiveStudentId,
+              user_id: activeUserId,
+              student_id: activeUserId,
+              target_role: normalized.subject || 'Software Engineer',
               interview_type: normalizedType,
+              difficulty: normalized.difficulty || 'Medium',
               topic: normalized.topic || 'General',
               subject: normalized.subject || 'Technical Interview',
+              started_at: normalized.completed_at || nowIso,
+              completed_at: normalized.completed_at || nowIso,
+              duration_seconds: (normalized as any).duration_seconds || (normalized as any).durationSeconds || 0,
               overall_score: overallScore,
               technical_score: techScore,
               technical_accuracy_score: techScore,
@@ -119,14 +142,32 @@ export const interviewStorage = {
                 : [],
               question_evaluations: normalized.question_evaluations || [],
               full_report: normalized,
-              created_at: normalized.completed_at || new Date().toISOString(),
-              completed_at: normalized.completed_at || new Date().toISOString(),
-              updated_at: new Date().toISOString(),
+              created_at: normalized.completed_at || nowIso,
+              updated_at: nowIso,
             };
 
-            await supabase.from('mock_interviews').upsert(dbPayload, { onConflict: 'id' });
+            const { error } = await supabase.from('mock_interviews').upsert(dbPayload, { onConflict: 'id' });
+            if (error) {
+              console.warn('[InterviewStorage] Error persisting to Supabase, enqueuing offline mutation:', error);
+              persistenceManager.enqueueOfflineMutation({
+                id: `mut_intv_${normalized.id}`,
+                userId: activeUserId,
+                type: 'save_mock_interview',
+                payload: normalized,
+                timestamp: new Date().toISOString(),
+                attempts: 0,
+              });
+            }
           } catch (err) {
-            console.warn('[InterviewStorage] Error persisting to Supabase:', err);
+            console.warn('[InterviewStorage] Network exception persisting to Supabase, enqueuing offline mutation:', err);
+            persistenceManager.enqueueOfflineMutation({
+              id: `mut_intv_${normalized.id}`,
+              userId: effectiveStudentId,
+              type: 'save_mock_interview',
+              payload: normalized,
+              timestamp: new Date().toISOString(),
+              attempts: 0,
+            });
           }
         })();
       }

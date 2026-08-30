@@ -16,12 +16,17 @@ import {
   UploadCloud,
   DownloadCloud,
   ArrowRightLeft,
-  Code2,
   ChevronDown,
   ChevronUp,
   FileCode,
+  CloudCheck,
+  HardDrive,
 } from 'lucide-react';
-import { CareerPilotDiagnosticReport } from '../../services/diagnosticService';
+import {
+  CareerPilotDiagnosticReport,
+  PersistenceSyncStatus,
+  ModulePersistenceAuditRow,
+} from '../../services/diagnosticService';
 import { cloudSyncService, CloudSyncResult } from '../../services/cloudSyncService';
 import { SUPABASE_SETUP_SQL } from '../../data/supabaseSqlScript';
 
@@ -84,7 +89,7 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
         companyPrepRecordCount: report.companyPrepRecordCount,
         studyPlannerRecordCount: report.studyPlannerRecordCount,
       },
-      modules: report.modules,
+      auditRows: report.modules,
       rlsErrors: report.rlsErrors,
       warnings: report.warnings,
       overallStatus: report.overallStatus,
@@ -174,6 +179,41 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
     }
   };
 
+  const getSyncStatusBadge = (syncStatus: PersistenceSyncStatus) => {
+    switch (syncStatus) {
+      case 'Cloud Synced':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+            <CheckCircle2 className="w-3 h-3" /> Cloud Synced
+          </span>
+        );
+      case 'Pending Sync':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-500/20 whitespace-nowrap">
+            <UploadCloud className="w-3 h-3" /> Pending Sync
+          </span>
+        );
+      case 'Cloud Error':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-500/20 whitespace-nowrap">
+            <XCircle className="w-3 h-3" /> Cloud Error
+          </span>
+        );
+      case 'Local Only':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700 whitespace-nowrap">
+            <HardDrive className="w-3 h-3" /> Local Only
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+            N/A
+          </span>
+        );
+    }
+  };
+
   return (
     <div
       id="persistence-diagnostics-modal-backdrop"
@@ -181,7 +221,7 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
     >
       <div
         id="persistence-diagnostics-modal-content"
-        className="w-full max-w-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto"
       >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
@@ -192,12 +232,12 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
             <div>
               <div className="flex items-center gap-2.5">
                 <h3 className="font-bold text-slate-900 dark:text-white text-lg">
-                  CareerPilot Read-Only Diagnostics
+                  CareerPilot Persistence Audit
                 </h3>
                 {report && getStatusBadge(report.overallStatus)}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Live Supabase Persistence, RLS & Authentication State Inspector
+                Authoritative Supabase Single Source of Truth & Synchronization Diagnostic
               </p>
             </div>
           </div>
@@ -215,7 +255,7 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
           <div className="py-16 text-center space-y-3">
             <RefreshCw className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin mx-auto" />
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Querying Supabase and inspecting module persistence...
+              Auditing Supabase persistence tables and inspecting local cache sync states...
             </p>
           </div>
         ) : (
@@ -269,15 +309,15 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
 
               {/* Profile Record Status */}
               <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800/80 space-y-1">
-                <div className="text-slate-400 font-medium">Profile Record in DB</div>
+                <div className="text-slate-400 font-medium">Profile in Supabase DB</div>
                 <div className="flex items-center gap-2">
                   {report.profileFound ? (
                     <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Record Found
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Profile Row Found
                     </span>
                   ) : (
                     <span className="font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                      <XCircle className="w-3.5 h-3.5" /> Not Found
+                      <XCircle className="w-3.5 h-3.5" /> No Profile Row
                     </span>
                   )}
                 </div>
@@ -301,10 +341,10 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
               <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800/80 space-y-1">
                 <div className="flex items-center gap-1.5 text-slate-400 font-medium">
                   <Layers className="w-3.5 h-3.5" />
-                  <span>Student Activities Total</span>
+                  <span>Student Cloud Activities Total</span>
                 </div>
                 <div className="font-bold text-slate-900 dark:text-slate-100 text-sm">
-                  {report.studentActivityLogCount} authentic log(s)
+                  {report.studentActivityLogCount} verified log(s)
                 </div>
               </div>
             </div>
@@ -357,17 +397,6 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
                   </div>
                 </div>
 
-                {/* Instructions Steps */}
-                <div className="pt-2 border-t border-amber-500/20 text-[11px] space-y-1 text-amber-800 dark:text-amber-300/80">
-                  <span className="font-semibold block">How to apply:</span>
-                  <ol className="list-decimal list-inside space-y-0.5">
-                    <li>Click <strong>Copy SQL Script</strong> above.</li>
-                    <li>Go to your <strong>Supabase Dashboard &rarr; SQL Editor</strong>.</li>
-                    <li>Paste the script into the query editor and click <strong>Run</strong>.</li>
-                    <li>Return here and click <strong>Re-test</strong> below to verify your cloud connection!</li>
-                  </ol>
-                </div>
-
                 {/* Collapsible SQL Viewer */}
                 {showSqlViewer && (
                   <div className="mt-3 p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono text-[10px] max-h-48 overflow-y-auto space-y-1">
@@ -392,10 +421,10 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2 font-bold text-indigo-900 dark:text-indigo-200 text-sm">
                     <ArrowRightLeft className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                    <span>Cloud Synchronization & Convergence</span>
+                    <span>Cloud Synchronization Actions</span>
                   </div>
                   <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                    Safely backfill local practice data to Supabase, or hydrate local cache from Supabase without data loss.
+                    Supabase is the single source of truth. Backfill local cache to cloud or pull cloud data to local cache.
                   </p>
                 </div>
 
@@ -424,39 +453,6 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
                 </div>
               </div>
 
-              {/* Local vs Cloud Comparison Pills */}
-              {report.localCounts && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
-                  <div className="p-2 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800/60 space-y-0.5">
-                    <span className="text-slate-400 block text-[10px]">Coding Submissions</span>
-                    <div className="font-bold text-slate-800 dark:text-slate-200">
-                      Local: <span className="text-indigo-600 dark:text-indigo-400">{report.localCounts.localCodingSubmissions}</span> | Cloud: <span className="text-emerald-600 dark:text-emerald-400">{report.codingSubmissionCount}</span>
-                    </div>
-                  </div>
-
-                  <div className="p-2 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800/60 space-y-0.5">
-                    <span className="text-slate-400 block text-[10px]">Resume Versions</span>
-                    <div className="font-bold text-slate-800 dark:text-slate-200">
-                      Local: <span className="text-indigo-600 dark:text-indigo-400">{report.localCounts.localResumes}</span> | Cloud: <span className="text-emerald-600 dark:text-emerald-400">{report.resumeCount}</span>
-                    </div>
-                  </div>
-
-                  <div className="p-2 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800/60 space-y-0.5">
-                    <span className="text-slate-400 block text-[10px]">Mock Interviews</span>
-                    <div className="font-bold text-slate-800 dark:text-slate-200">
-                      Local: <span className="text-indigo-600 dark:text-indigo-400">{report.localCounts.localMockInterviews}</span> | Cloud: <span className="text-emerald-600 dark:text-emerald-400">{report.mockInterviewTotalCount}</span>
-                    </div>
-                  </div>
-
-                  <div className="p-2 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800/60 space-y-0.5">
-                    <span className="text-slate-400 block text-[10px]">Placement Tests</span>
-                    <div className="font-bold text-slate-800 dark:text-slate-200">
-                      Local: <span className="text-indigo-600 dark:text-indigo-400">{report.localCounts.localPlacementSessions}</span> | Cloud: <span className="text-emerald-600 dark:text-emerald-400">{report.placementAttemptCount}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {syncStatusMsg && (
                 <div className="p-2.5 rounded-xl bg-indigo-100/60 dark:bg-indigo-900/40 text-indigo-900 dark:text-indigo-200 text-xs font-mono">
                   {syncStatusMsg}
@@ -464,58 +460,78 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
               )}
             </div>
 
-            {/* Read-Only Summary Table of Required Data Counts */}
+            {/* Persistence Audit Table */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Detailed Module Record Counts & Read Status
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Module Persistence Audit (Single Source of Truth)
                 </h4>
-                <span className="text-[11px] text-slate-400">Scoped to Authenticated User</span>
+                <span className="text-[11px] text-slate-400">
+                  {report.authenticatedUserId ? `User ID: ${report.authenticatedUserId.substring(0, 8)}...` : 'Guest Mode'}
+                </span>
               </div>
 
-              <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
-                {report.modules.map((m, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white dark:bg-slate-900 hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
-                  >
-                    <div className="space-y-0.5">
-                      <div className="font-bold text-slate-800 dark:text-slate-200">{m.name}</div>
-                      <div className="font-mono text-[10px] text-slate-400">{m.tableOrSource}</div>
-                      {m.errorDetails && (
-                        <div className="text-[11px] font-mono text-rose-600 dark:text-rose-400">
-                          {m.errorDetails}
-                        </div>
-                      )}
-                      {m.notes && (
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400">{m.notes}</div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-3 self-end sm:self-center">
-                      <span className="font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs">
-                        {m.count} {m.count === 1 ? 'record' : 'records'}
-                      </span>
-                      {m.status === 'ok' ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                      ) : m.status === 'empty' ? (
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/50">
-                          Empty
-                        </span>
-                      ) : m.status === 'not_found' ? (
-                        <span className="text-[10px] text-rose-600 dark:text-rose-400 font-semibold px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/50">
-                          Not Found
-                        </span>
-                      ) : m.status === 'missing_table' ? (
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20">
-                          Table Missing (Run SQL)
-                        </span>
-                      ) : (
-                        <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
-                      )}
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-950/80 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                      <th className="py-3 px-3.5">Module</th>
+                      <th className="py-3 px-3 text-center">Local Cache</th>
+                      <th className="py-3 px-3 text-center">Cloud Records</th>
+                      <th className="py-3 px-3 text-center">Sync Status</th>
+                      <th className="py-3 px-3 text-center">Last Cloud Sync</th>
+                      <th className="py-3 px-3 text-center">Pending</th>
+                      <th className="py-3 px-3">Errors / Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900 text-xs">
+                    {report.modules.map((row: ModulePersistenceAuditRow, idx: number) => (
+                      <tr
+                        key={idx}
+                        className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
+                      >
+                        <td className="py-3 px-3.5">
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">{row.module}</div>
+                          <div className="text-[10px] font-mono text-slate-400">{row.tableOrSource}</div>
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono font-medium text-slate-700 dark:text-slate-300">
+                          {row.localCache}
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono font-bold text-slate-900 dark:text-white">
+                          {row.cloudRecords}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          {getSyncStatusBadge(row.syncStatus)}
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                          {row.lastCloudSync}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          {row.pendingItems > 0 ? (
+                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md">
+                              {row.pendingItems}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-mono">0</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-[11px]">
+                          {row.errors ? (
+                            <span className="font-mono text-rose-600 dark:text-rose-400 block truncate max-w-xs" title={row.errors}>
+                              {row.errors}
+                            </span>
+                          ) : row.notes ? (
+                            <span className="text-slate-500 dark:text-slate-400 truncate block max-w-xs" title={row.notes}>
+                              {row.notes}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -560,12 +576,12 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
                   {copied ? (
                     <>
                       <Check className="w-3.5 h-3.5 text-emerald-400 dark:text-emerald-600" />
-                      <span>Copied JSON to Clipboard!</span>
+                      <span>Copied Audit to Clipboard!</span>
                     </>
                   ) : (
                     <>
                       <Copy className="w-3.5 h-3.5" />
-                      <span>Copy Diagnostics</span>
+                      <span>Copy Audit Report</span>
                     </>
                   )}
                 </button>
@@ -577,7 +593,7 @@ export const PersistenceDiagnosticModal: React.FC<PersistenceDiagnosticModalProp
                   className="px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                  <span>Re-test</span>
+                  <span>Re-test Audit</span>
                 </button>
               </div>
 

@@ -148,15 +148,15 @@ CREATE TABLE IF NOT EXISTS public.mock_interviews (
   id TEXT PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   student_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  target_role TEXT NOT NULL,
-  subject TEXT,
-  topic TEXT,
+  target_role TEXT DEFAULT 'Software Engineer',
+  subject TEXT DEFAULT 'Technical Interview',
+  topic TEXT DEFAULT 'General',
   custom_topic TEXT,
-  language TEXT,
-  interview_type TEXT NOT NULL,
-  difficulty TEXT NOT NULL,
-  started_at TIMESTAMPTZ NOT NULL,
-  completed_at TIMESTAMPTZ,
+  language TEXT DEFAULT 'General',
+  interview_type TEXT DEFAULT 'technical',
+  difficulty TEXT DEFAULT 'Medium',
+  started_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ DEFAULT NOW(),
   duration_seconds INTEGER DEFAULT 0,
   overall_score INTEGER NOT NULL DEFAULT 0,
   technical_accuracy_score INTEGER NOT NULL DEFAULT 0,
@@ -164,12 +164,12 @@ CREATE TABLE IF NOT EXISTS public.mock_interviews (
   communication_score INTEGER NOT NULL DEFAULT 0,
   problem_solving_score INTEGER NOT NULL DEFAULT 0,
   confidence_score INTEGER NOT NULL DEFAULT 0,
-  verdict TEXT,
+  verdict TEXT DEFAULT '',
   strengths JSONB DEFAULT '[]'::jsonb,
   improvements JSONB DEFAULT '[]'::jsonb,
   areas_to_improve JSONB DEFAULT '[]'::jsonb,
   ai_recommendations JSONB DEFAULT '[]'::jsonb,
-  detailed_feedback TEXT,
+  detailed_feedback TEXT DEFAULT '',
   answers_evaluated INTEGER DEFAULT 0,
   question_count INTEGER DEFAULT 0,
   answered_count INTEGER DEFAULT 0,
@@ -177,16 +177,21 @@ CREATE TABLE IF NOT EXISTS public.mock_interviews (
   questions JSONB DEFAULT '[]'::jsonb,
   answers JSONB DEFAULT '[]'::jsonb,
   question_evaluations JSONB DEFAULT '[]'::jsonb,
-  full_report JSONB,
+  full_report JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS student_id UUID;
-ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS subject TEXT;
-ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS topic TEXT;
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS target_role TEXT DEFAULT 'Software Engineer';
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS subject TEXT DEFAULT 'Technical Interview';
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS topic TEXT DEFAULT 'General';
 ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS custom_topic TEXT;
-ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS language TEXT;
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'General';
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS difficulty TEXT DEFAULT 'Medium';
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS duration_seconds INTEGER DEFAULT 0;
 ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS technical_score INTEGER DEFAULT 0;
 ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS areas_to_improve JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS ai_recommendations JSONB DEFAULT '[]'::jsonb;
@@ -195,7 +200,12 @@ ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS answered_count INTEG
 ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS skipped_count INTEGER DEFAULT 0;
 ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS answers JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS question_evaluations JSONB DEFAULT '[]'::jsonb;
-ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS full_report JSONB;
+ALTER TABLE public.mock_interviews ADD COLUMN IF NOT EXISTS full_report JSONB DEFAULT '{}'::jsonb;
+
+-- Ensure relaxed constraints for legacy schemas
+ALTER TABLE public.mock_interviews ALTER COLUMN target_role DROP NOT NULL;
+ALTER TABLE public.mock_interviews ALTER COLUMN started_at DROP NOT NULL;
+ALTER TABLE public.mock_interviews ALTER COLUMN difficulty DROP NOT NULL;
 
 -- Enable RLS for Mock Interviews
 ALTER TABLE public.mock_interviews ENABLE ROW LEVEL SECURITY;
@@ -320,7 +330,133 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_placement_sessions_user_id ON public.placement_sessions(user_id);
 
--- 6. Storage Buckets & Storage RLS Policies
+-- 6. Career Readiness Score History Snapshots Table
+CREATE TABLE IF NOT EXISTS public.career_readiness_history (
+  id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  score INTEGER NOT NULL,
+  coding_score INTEGER NOT NULL DEFAULT 0,
+  resume_score INTEGER NOT NULL DEFAULT 0,
+  aptitude_score INTEGER NOT NULL DEFAULT 0,
+  technical_interview_score INTEGER NOT NULL DEFAULT 0,
+  roadmap_score INTEGER NOT NULL DEFAULT 0,
+  status_category TEXT,
+  breakdown JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable RLS for Career Readiness History
+ALTER TABLE public.career_readiness_history ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'career_readiness_history' AND policyname = 'Users can view own readiness history') THEN
+    CREATE POLICY "Users can view own readiness history" ON public.career_readiness_history FOR SELECT USING (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'career_readiness_history' AND policyname = 'Users can insert own readiness history') THEN
+    CREATE POLICY "Users can insert own readiness history" ON public.career_readiness_history FOR INSERT WITH CHECK (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'career_readiness_history' AND policyname = 'Users can delete own readiness history') THEN
+    CREATE POLICY "Users can delete own readiness history" ON public.career_readiness_history FOR DELETE USING (auth.uid() = user_id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_readiness_history_user_created ON public.career_readiness_history(user_id, created_at);
+
+-- 7. Job Resume Matches Table for Match Analyzer
+CREATE TABLE IF NOT EXISTS public.job_resume_matches (
+  id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  resume_id TEXT REFERENCES public.resumes(id) ON DELETE SET NULL,
+  target_job_title TEXT NOT NULL,
+  company_name TEXT,
+  job_description TEXT NOT NULL,
+  match_score INTEGER NOT NULL DEFAULT 0,
+  matching_skills JSONB DEFAULT '[]'::jsonb,
+  missing_skills JSONB DEFAULT '[]'::jsonb,
+  keyword_gaps JSONB DEFAULT '[]'::jsonb,
+  recommendations JSONB DEFAULT '[]'::jsonb,
+  full_analysis JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable RLS for Job Resume Matches
+ALTER TABLE public.job_resume_matches ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'job_resume_matches' AND policyname = 'Users can view own job matches') THEN
+    CREATE POLICY "Users can view own job matches" ON public.job_resume_matches FOR SELECT USING (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'job_resume_matches' AND policyname = 'Users can insert own job matches') THEN
+    CREATE POLICY "Users can insert own job matches" ON public.job_resume_matches FOR INSERT WITH CHECK (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'job_resume_matches' AND policyname = 'Users can update own job matches') THEN
+    CREATE POLICY "Users can update own job matches" ON public.job_resume_matches FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'job_resume_matches' AND policyname = 'Users can delete own job matches') THEN
+    CREATE POLICY "Users can delete own job matches" ON public.job_resume_matches FOR DELETE USING (auth.uid() = user_id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_job_matches_user_created ON public.job_resume_matches(user_id, created_at DESC);
+
+-- 8. Mentor Conversations & Messages Tables
+CREATE TABLE IF NOT EXISTS public.mentor_conversations (
+  id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT 'Career Guidance Chat',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.mentor_conversations ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'mentor_conversations' AND policyname = 'Users can view own mentor conversations') THEN
+    CREATE POLICY "Users can view own mentor conversations" ON public.mentor_conversations FOR SELECT USING (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'mentor_conversations' AND policyname = 'Users can insert own mentor conversations') THEN
+    CREATE POLICY "Users can insert own mentor conversations" ON public.mentor_conversations FOR INSERT WITH CHECK (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'mentor_conversations' AND policyname = 'Users can update own mentor conversations') THEN
+    CREATE POLICY "Users can update own mentor conversations" ON public.mentor_conversations FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'mentor_conversations' AND policyname = 'Users can delete own mentor conversations') THEN
+    CREATE POLICY "Users can delete own mentor conversations" ON public.mentor_conversations FOR DELETE USING (auth.uid() = user_id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_mentor_convs_user_updated ON public.mentor_conversations(user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.mentor_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES public.mentor_conversations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('user', 'model', 'assistant', 'system')),
+  content TEXT NOT NULL,
+  context_snapshot JSONB,
+  recommended_actions JSONB,
+  suggested_prompts JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.mentor_messages ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'mentor_messages' AND policyname = 'Users can view own mentor messages') THEN
+    CREATE POLICY "Users can view own mentor messages" ON public.mentor_messages FOR SELECT USING (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'mentor_messages' AND policyname = 'Users can insert own mentor messages') THEN
+    CREATE POLICY "Users can insert own mentor messages" ON public.mentor_messages FOR INSERT WITH CHECK (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'mentor_messages' AND policyname = 'Users can delete own mentor messages') THEN
+    CREATE POLICY "Users can delete own mentor messages" ON public.mentor_messages FOR DELETE USING (auth.uid() = user_id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_mentor_msgs_conv_created ON public.mentor_messages(conversation_id, created_at ASC);
+
+-- 9. Storage Buckets & Storage RLS Policies
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
   'resumes',

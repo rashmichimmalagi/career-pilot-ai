@@ -31,7 +31,10 @@ export type TestCaseCategory =
   | 'max'
   | 'duplicate'
   | 'negative'
-  | 'empty_single';
+  | 'empty_single'
+  | 'small'
+  | 'boundary'
+  | string;
 
 export interface CodingTestCase {
   id: string;
@@ -52,6 +55,48 @@ export interface ProblemEditorial {
   spaceComplexity: string;
   keyInsights?: string[];
   codeSamples?: Partial<Record<CodingLanguage, string>>;
+}
+
+export type ProblemValidationStatus = 'DRAFT' | 'VALIDATING' | 'VALIDATED' | 'PUBLISHED' | 'REJECTED';
+
+export type ProblemDataType =
+  | 'integer'
+  | 'float'
+  | 'string'
+  | 'boolean'
+  | 'character'
+  | 'array_1d'
+  | 'array_2d'
+  | 'matrix'
+  | 'linked_list'
+  | 'binary_tree'
+  | 'graph_edges'
+  | 'hash_map'
+  | 'stack'
+  | 'queue'
+  | 'object'
+  | 'custom';
+
+export interface ProblemInputParam {
+  name: string;
+  type: ProblemDataType;
+  elementType?: string;
+  cParameterName?: string;
+  cDimensionNames?: string[];
+  description?: string;
+}
+
+export interface StructuredProblemSchema {
+  funcName: string;
+  inputs: ProblemInputParam[];
+  returnType: {
+    type: ProblemDataType;
+    cType?: string;
+    cppType?: string;
+    javaType?: string;
+    pythonType?: string;
+    jsType?: string;
+  };
 }
 
 export interface CodingProblem {
@@ -77,6 +122,10 @@ export interface CodingProblem {
   hints?: string[];
   editorial?: ProblemEditorial;
   explanation?: string;
+  referenceSolution?: Partial<Record<CodingLanguage, string>>;
+  structuredSchema?: StructuredProblemSchema;
+  validationStatus?: ProblemValidationStatus;
+  validationErrors?: string[];
   created_at?: string;
 }
 
@@ -157,8 +206,12 @@ export interface CodingSubmission {
   problem_data?: CodingProblem;
   cloudSynced?: boolean;
   cloudSyncError?: string;
+  persistenceStatus?: SubmissionPersistenceStatus;
   created_at?: string;
 }
+
+export type SubmissionEvaluationStatus = 'idle' | 'evaluating' | 'completed' | 'failed';
+export type SubmissionPersistenceStatus = 'not_saved' | 'saving' | 'synced' | 'pending' | 'failed';
 
 export interface CodingProgress {
   id: string;
@@ -300,7 +353,12 @@ export interface SavedQuestion {
   difficulty: CodingDifficulty;
   status?: QuestionStatus;
   question_data: CodingProblem;
+  notes?: string;
+  saved_at?: string;
   created_at: string;
+  cloudSynced?: boolean;
+  cloudSyncError?: string;
+  persistenceStatus?: SubmissionPersistenceStatus;
 }
 
 export interface TopicProgressSummary {

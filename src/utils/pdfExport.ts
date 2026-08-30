@@ -414,13 +414,24 @@ export function buildResumeJsPdf(resume: StructuredResumeData): jsPDF {
   if (hasCerts || hasAchs) {
     addSectionHeader('Certifications & Achievements', 40);
     if (hasCerts && resume.certifications) {
-      for (const cert of resume.certifications) {
-        if (!cert || !cert.trim()) continue;
+      for (const certItem of resume.certifications) {
+        if (!certItem) continue;
+        let certText = '';
+        if (typeof certItem === 'string') {
+          certText = certItem.trim();
+        } else if (certItem && typeof certItem === 'object') {
+          const parts = [certItem.name];
+          if (certItem.issuer) parts.push(certItem.issuer);
+          if (certItem.date) parts.push(certItem.date);
+          certText = parts.filter(Boolean).join(' – ');
+        }
+
+        if (!certText) continue;
         
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
         doc.setTextColor(30, 41, 59);
-        const certLines = doc.splitTextToSize(cert.trim(), contentWidth - 16);
+        const certLines = doc.splitTextToSize(certText, contentWidth - 16);
         checkPageBreak(certLines.length * 12 + 3);
 
         doc.text('•', marginLeft + 4, cursorY);

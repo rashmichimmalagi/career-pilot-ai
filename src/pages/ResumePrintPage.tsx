@@ -493,9 +493,10 @@ export const ResumePrintPage: React.FC<ResumePrintPageProps> = ({
                   Certifications & Achievements
                 </h2>
                 <ul className="list-disc list-outside ml-4 space-y-0.5 text-[11px] text-black font-serif">
-                  {certifications?.map((c, idx) => (
-                    <li key={`cert-${idx}`}>{c}</li>
-                  ))}
+                  {certifications?.map((c, idx) => {
+                    const certStr = typeof c === 'string' ? c : `${c.name}${c.issuer ? ` (${c.issuer})` : ''}${c.date ? ` - ${c.date}` : ''}`;
+                    return <li key={`cert-${idx}`}>{certStr}</li>;
+                  })}
                   {achievements?.map((a, idx) => (
                     <li key={`ach-${idx}`}>{a}</li>
                   ))}

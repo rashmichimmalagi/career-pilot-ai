@@ -32,7 +32,8 @@ import {
   Trophy,
   Bookmark,
   BookmarkCheck,
-  ListOrdered
+  ListOrdered,
+  AlertCircle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -46,7 +47,9 @@ import {
   Achievement,
   QuestionSeriesItem,
   SavedQuestion,
-  TopicProgressSummary
+  TopicProgressSummary,
+  SubmissionEvaluationStatus,
+  SubmissionPersistenceStatus
 } from '../types/coding';
 import {
   SUBJECTS,
@@ -140,6 +143,8 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
   });
   const [submissions, setSubmissions] = useState<CodingSubmission[]>([]);
   const [evaluationResult, setEvaluationResult] = useState<SubmissionEvaluationResult | null>(null);
+  const [evaluationStatus, setEvaluationStatus] = useState<SubmissionEvaluationStatus>('idle');
+  const [persistenceStatus, setPersistenceStatus] = useState<SubmissionPersistenceStatus>('not_saved');
   const [currentExecutionId, setCurrentExecutionId] = useState<string>('');
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -150,6 +155,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
   const [isLoadingSeries, setIsLoadingSeries] = useState<boolean>(false);
   const [topicProgress, setTopicProgress] = useState<TopicProgressSummary | null>(null);
   const [savedQuestions, setSavedQuestions] = useState<SavedQuestion[]>([]);
+  const [savingBookmarkId, setSavingBookmarkId] = useState<string | null>(null);
   const [isSavedModalOpen, setIsSavedModalOpen] = useState<boolean>(false);
 
   // Mobile / Tablet Tab Switcher (Problem vs Code Editor)
@@ -167,6 +173,8 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
 
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
+
+  const isGeneratingRef = useRef(false);
 
   if (process.env.NODE_ENV !== 'production') {
     console.log('[RENDER] CodingArena: activeProblem=', activeProblem?.id, activeProblem?.title, 'pageTab=', pageTab);
@@ -206,6 +214,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     generateAbortRef.current = abortController;
 
     setIsGenerating(true);
+    isGeneratingRef.current = true;
 
     try {
       const problem = await codingService.generateProblem(
@@ -229,6 +238,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         subject: config.subject,
         topic: config.topic,
         difficulty: config.difficulty,
+        language: config.language,
       });
 
       if (!compatCheck.compatible) {
@@ -279,6 +289,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       showToast('Generation Notice', errMsg, 'error');
     } finally {
       setIsGenerating(false);
+      isGeneratingRef.current = false;
       if (generateAbortRef.current === abortController) {
         generateAbortRef.current = null;
       }
@@ -299,6 +310,17 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     if (autoTriggeredRef.current) return;
 
     const searchParams = new URLSearchParams(window.location.search);
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'achievements' || tabParam === 'history' || tabParam === 'arena') {
+      setPageTab(tabParam as any);
+      if (tabParam === 'achievements') {
+        setTimeout(() => {
+          const el = document.getElementById('coding-achievements-section');
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 200);
+      }
+    }
+
     const subjectParam = searchParams.get('subject');
     const topicParam = searchParams.get('topic');
     const diffParam = searchParams.get('difficulty') as CodingDifficulty;
@@ -369,19 +391,21 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         });
       }
 
-      // 6. Auto-generate immediately if auto flag is present or topic is explicitly specified
-      if (autoParam === 'true' || autoParam === '1' || topicParam) {
+      // 6. Only auto-generate if explicit autoParam flag is set (e.g. from direct action button)
+      if (autoParam === 'true' || autoParam === '1') {
         const finalSubjVal = targetSubj === '+ Custom Subject' ? targetCustomSubj : targetSubj;
         const finalTopVal = targetTop === 'Custom Topic' ? targetCustomTop : targetTop;
 
-        executeGenerateProblem({
-          subject: finalSubjVal,
-          topic: finalTopVal,
-          difficulty: targetDiff,
-          language: targetLang,
-          targetCompany: companyParam || undefined,
-          targetRole: roleParam || undefined,
-        });
+        if (finalTopVal && finalTopVal.trim()) {
+          executeGenerateProblem({
+            subject: finalSubjVal,
+            topic: finalTopVal,
+            difficulty: targetDiff,
+            language: targetLang,
+            targetCompany: companyParam || undefined,
+            targetRole: roleParam || undefined,
+          });
+        }
       }
     }
   }, [user?.id]);
@@ -437,7 +461,58 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
   const finalTopic = isCustomTopicSelected ? customTopic.trim() : selectedTopic.trim();
   const displayTopic = isCustomTopicSelected ? (customTopic.trim() || 'Custom Topic') : selectedTopic;
 
-  // Load Question Series, Topic Progress, and Saved Bookmarks with Smart Progression
+  // Stale Question Protection: Detect if active problem matches the currently configured options
+  const isCurrentConfigStale = useMemo(() => {
+    if (!activeProblem) return false;
+    const targetSubjNorm = (finalSubject || '').trim().toLowerCase();
+    const targetTopicNorm = (finalTopic || '').trim().toLowerCase();
+    const probSubjNorm = (activeProblem.subject || '').trim().toLowerCase();
+    const probTopicNorm = (activeProblem.topic || '').trim().toLowerCase();
+    const probDiffNorm = (activeProblem.difficulty || '').trim().toLowerCase();
+    const targetDiffNorm = (selectedDifficulty || '').trim().toLowerCase();
+
+    // 1. Topic Stale Check
+    if (isCustomTopicSelected) {
+      if (customTopic.trim() && normalizeTopic(customTopic.trim()) !== normalizeTopic(probTopicNorm)) {
+        return true;
+      }
+    } else if (targetTopicNorm && targetTopicNorm !== 'custom topic' && probTopicNorm) {
+      if (normalizeTopic(targetTopicNorm) !== normalizeTopic(probTopicNorm)) {
+        return true;
+      }
+    }
+
+    // 2. Subject Stale Check
+    if (isCustomSubjectSelected) {
+      if (customSubject.trim() && normalizeSubject(customSubject.trim()) !== normalizeSubject(probSubjNorm)) {
+        return true;
+      }
+    } else if (targetSubjNorm && targetSubjNorm !== '+ custom subject' && probSubjNorm) {
+      if (normalizeSubject(targetSubjNorm) !== normalizeSubject(probSubjNorm)) {
+        return true;
+      }
+    }
+
+    // 3. Difficulty Stale Check
+    if (targetDiffNorm && probDiffNorm && targetDiffNorm !== probDiffNorm) {
+      return true;
+    }
+
+    return false;
+  }, [
+    activeProblem,
+    isCustomTopicSelected,
+    customTopic,
+    selectedTopic,
+    finalTopic,
+    isCustomSubjectSelected,
+    customSubject,
+    selectedSubject,
+    finalSubject,
+    selectedDifficulty,
+  ]);
+
+  // Load Question Series, Topic Progress, and Saved Bookmarks WITHOUT altering active problem
   useEffect(() => {
     let isMounted = true;
     const effectiveUserId = user?.id || 'guest';
@@ -445,112 +520,38 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     const loadSeriesData = async () => {
       setIsLoadingSeries(true);
       try {
-        const [series, progress, saved] = await Promise.all([
-          codingService.getQuestionSeries(
-            (isCustomSubjectSelected ? 'DSA' : selectedSubject) as CodingSubject,
-            finalTopic || 'Arrays',
-            selectedDifficulty,
-            selectedLanguageRef.current,
-            effectiveUserId
-          ),
-          codingService.getTopicProgress(
-            (isCustomSubjectSelected ? 'DSA' : selectedSubject) as CodingSubject,
-            finalTopic || 'Arrays',
-            effectiveUserId
-          ),
-          codingService.getSavedQuestions(effectiveUserId),
-        ]);
+        const topicToQuery = isCustomTopicSelected ? (customTopic.trim() || '') : selectedTopic.trim();
+        const subjectToQuery = (isCustomSubjectSelected ? (customSubject.trim() || 'DSA') : selectedSubject) as CodingSubject;
 
-        if (isMounted) {
-          setSeriesItems(series);
-          setTopicProgress(progress);
-          setSavedQuestions(saved);
+        if (topicToQuery && topicToQuery !== 'Custom Topic') {
+          const [series, progress, saved] = await Promise.all([
+            codingService.getQuestionSeries(
+              subjectToQuery,
+              topicToQuery,
+              selectedDifficulty,
+              selectedLanguageRef.current,
+              effectiveUserId
+            ),
+            codingService.getTopicProgress(
+              subjectToQuery,
+              topicToQuery,
+              effectiveUserId
+            ),
+            codingService.getSavedQuestions(effectiveUserId),
+          ]);
 
-          // Smart Question Progression Logic:
-          // Check if current active problem is null OR has already been solved by this student OR is incompatible with current filters
-          const currentProb = activeProblemRef.current;
-          let isCurrentSolved = false;
-          let isCurrentCompatible = false;
-
-          if (currentProb) {
-            const compat = isProblemCompatible(currentProb, {
-              subject: finalSubject,
-              topic: finalTopic || 'Arrays',
-              difficulty: selectedDifficulty,
-            });
-            isCurrentCompatible = compat.compatible;
-
-            if (isCurrentCompatible) {
-              // Check if solved in series list or in submission history
-              isCurrentSolved = series.some(
-                (s) =>
-                  (s.id === currentProb.id ||
-                    s.title.trim().toLowerCase() === currentProb.title.trim().toLowerCase()) &&
-                  s.status === 'solved'
-              );
-              if (!isCurrentSolved) {
-                isCurrentSolved = await codingService.isProblemSolved(currentProb, effectiveUserId);
-              }
-            }
+          if (isMounted) {
+            setSeriesItems(series);
+            setTopicProgress(progress);
+            setSavedQuestions(saved);
           }
-
-          // If no problem is loaded OR if the current problem is incompatible or already solved,
-          // automatically pick the next unsolved question for this student!
-          if (!currentProb || !isCurrentCompatible || isCurrentSolved) {
-            // 1. Check if series has an unsolved question
-            const firstUnsolvedInSeries = series.find((s) => s.status !== 'solved')?.problem;
-            let nextTargetProblem = firstUnsolvedInSeries;
-
-            // 2. If all in series are solved, look across topic / subject / question bank
-            if (!nextTargetProblem) {
-              nextTargetProblem =
-                (await codingService.getNextUnsolvedProblem({
-                  subject: (isCustomSubjectSelected ? 'DSA' : selectedSubject) as CodingSubject,
-                  topic: finalTopic || 'Arrays',
-                  difficulty: selectedDifficulty,
-                  userId: effectiveUserId,
-                  currentProblemId: currentProb?.id,
-                  language: selectedLanguageRef.current,
-                })) || undefined;
-            }
-
-            if (!nextTargetProblem) {
-              nextTargetProblem = createTopicTailoredFallback(
-                (isCustomSubjectSelected ? customSubject : selectedSubject) as string,
-                finalTopic || 'Arrays',
-                selectedDifficulty,
-                selectedLanguageRef.current
-              );
-            }
-
-            if (nextTargetProblem && isMounted) {
-              const currentLang = selectedLanguageRef.current;
-              const rawStarter =
-                nextTargetProblem.starterCode?.[currentLang] ||
-                nextTargetProblem.starter_templates?.[currentLang] ||
-                '';
-              const cleanStarter = sanitizeStarterCode(
-                rawStarter,
-                currentLang,
-                nextTargetProblem.title,
-                nextTargetProblem.functionSignature?.[currentLang]
-              );
-              setActiveProblem(nextTargetProblem);
-              setEvaluationResult(null);
-              setSubmissions([]);
-              setCurrentCode(cleanStarter);
-
-              console.log(
-                `[Coding Arena Diagnostics]\n` +
-                `Selected Configuration: Subject="${finalSubject}", Topic="${finalTopic}", Difficulty="${selectedDifficulty}", Language="${currentLang}"\n` +
-                `Opened Question: ID="${nextTargetProblem.id}", Title="${nextTargetProblem.title}", Subject="${nextTargetProblem.subject}", Topic="${nextTargetProblem.topic}", Difficulty="${nextTargetProblem.difficulty}"\n` +
-                `Compatibility Check: PASS`
-              );
-
-              try {
-                localStorage.setItem('careerpilot_active_coding_problem', JSON.stringify(nextTargetProblem));
-              } catch (_) {}
-            }
+        } else {
+          // If custom topic is empty or not yet entered, load saved bookmarks and clear series
+          const saved = await codingService.getSavedQuestions(effectiveUserId);
+          if (isMounted) {
+            setSeriesItems([]);
+            setTopicProgress(null);
+            setSavedQuestions(saved);
           }
         }
       } catch (err) {
@@ -593,14 +594,42 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     };
   }, [activeProblem?.id, user?.id]);
 
+  // Retry Save / Sync Bookmark for a Question
+  const handleRetrySaveBookmark = useCallback(async (problem: CodingProblem) => {
+    const effectiveUserId = user?.id || 'guest';
+    try {
+      setSavingBookmarkId(problem.id);
+      const newSaved = await codingService.saveQuestionBookmark(problem, effectiveUserId);
+      setSavedQuestions((prev) => [newSaved, ...prev.filter((q) => q.question_id !== problem.id && q.id !== problem.id)]);
+      setSeriesItems((prev) =>
+        prev.map((item) => (item.id === problem.id ? { ...item, isSaved: true } : item))
+      );
+      if (newSaved.cloudSynced) {
+        showToastRef.current('Question Synced', `"${problem.title}" saved and synced to Supabase cloud!`, 'success');
+      } else {
+        showToastRef.current(
+          'Cloud Sync Pending',
+          newSaved.cloudSyncError || 'Saved locally. Cloud sync pending.',
+          'warning'
+        );
+      }
+    } catch (err: any) {
+      showToastRef.current('Sync Error', err?.message || 'Failed to sync to cloud.', 'error');
+    } finally {
+      setSavingBookmarkId(null);
+    }
+  }, [user?.id]);
+
   // Bookmark Toggle Handler
   const handleToggleBookmark = useCallback(async (problem: CodingProblem) => {
+    if (savingBookmarkId === problem.id) return;
     const effectiveUserId = user?.id || 'guest';
     const isCurrentlySaved = savedQuestions.some(
       (q) => q.question_id === problem.id || q.id === problem.id || q.title.toLowerCase() === problem.title.toLowerCase()
     );
 
     try {
+      setSavingBookmarkId(problem.id);
       if (isCurrentlySaved) {
         await codingService.unsaveQuestionBookmark(problem.id, effectiveUserId);
         setSavedQuestions((prev) => prev.filter((q) => q.question_id !== problem.id && q.id !== problem.id));
@@ -610,17 +639,31 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         showToastRef.current('Bookmark Removed', `"${problem.title}" removed from bookmarks.`, 'info');
       } else {
         const newSaved = await codingService.saveQuestionBookmark(problem, effectiveUserId);
-        setSavedQuestions((prev) => [newSaved, ...prev]);
+        setSavedQuestions((prev) => [newSaved, ...prev.filter((q) => q.question_id !== problem.id && q.id !== problem.id)]);
         setSeriesItems((prev) =>
           prev.map((item) => (item.id === problem.id ? { ...item, isSaved: true } : item))
         );
-        showToastRef.current('Question Saved', `"${problem.title}" added to bookmarks.`, 'success');
+        if (newSaved.cloudSynced) {
+          showToastRef.current('Question Saved', `"${problem.title}" saved and synced to Supabase cloud.`, 'success');
+        } else {
+          showToastRef.current(
+            'Saved locally — cloud sync pending',
+            'Question saved locally. You can retry syncing anytime.',
+            'warning',
+            {
+              label: 'Retry Sync',
+              onClick: () => handleRetrySaveBookmark(problem),
+            }
+          );
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error toggling bookmark:', err);
-      showToastRef.current('Bookmark Notice', 'Updated locally.', 'info');
+      showToastRef.current('Bookmark Error', err?.message || 'Could not update bookmark.', 'error');
+    } finally {
+      setSavingBookmarkId(null);
     }
-  }, [savedQuestions, user?.id]);
+  }, [savedQuestions, user?.id, savingBookmarkId, handleRetrySaveBookmark]);
 
   // Remove Saved Question from modal
   const handleRemoveSavedQuestion = useCallback(async (questionId: string) => {
@@ -632,8 +675,9 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         prev.map((item) => (item.id === questionId ? { ...item, isSaved: false } : item))
       );
       showToastRef.current('Bookmark Removed', 'Question removed from saved collection.', 'info');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error removing bookmark:', err);
+      showToastRef.current('Error', err?.message || 'Could not remove bookmark.', 'error');
     }
   }, [user?.id]);
 
@@ -647,15 +691,17 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     );
   }, [activeProblem, seriesItems]);
 
-  const isCurrentActiveSaved = useMemo(() => {
-    if (!activeProblem) return false;
-    return savedQuestions.some(
+  const currentActiveSavedItem = useMemo(() => {
+    if (!activeProblem) return null;
+    return savedQuestions.find(
       (q) =>
         q.question_id === activeProblem.id ||
         q.id === activeProblem.id ||
         q.title.trim().toLowerCase() === activeProblem.title.trim().toLowerCase()
-    );
+    ) || null;
   }, [activeProblem, savedQuestions]);
+
+  const isCurrentActiveSaved = Boolean(currentActiveSavedItem);
 
   // Select problem from past history for fresh re-practice
   const handleSelectProblemForPractice = useCallback((problem: CodingProblem, preferredLanguage?: CodingLanguage) => {
@@ -804,7 +850,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
 
   // Real AI Problem Generator Handler
   const handleGenerateProblem = async () => {
-    if (isGenerating) return;
+    if (isGenerating || isGeneratingRef.current) return;
 
     // Validation 1: Custom Subject validation
     if (isCustomSubjectSelected && (!customSubject || !customSubject.trim())) {
@@ -812,8 +858,8 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       return;
     }
 
-    if (!finalSubject) {
-      showToastRef.current('Validation Error', 'Please enter a custom subject.', 'error');
+    if (!finalSubject || !finalSubject.trim()) {
+      showToastRef.current('Validation Error', 'Please select a subject.', 'error');
       return;
     }
 
@@ -823,19 +869,35 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       return;
     }
 
-    if (!finalTopic) {
-      showToastRef.current('Validation Error', 'Please enter a custom topic.', 'error');
+    if (!finalTopic || !finalTopic.trim()) {
+      showToastRef.current('Validation Error', 'Please select or enter a topic.', 'error');
       return;
     }
 
-    await executeGenerateProblem({
-      subject: finalSubject as CodingSubject,
-      topic: finalTopic,
-      difficulty: selectedDifficulty,
-      language: selectedLanguage,
-      targetCompany: activeCompanyContext?.company,
-      targetRole: activeCompanyContext?.role,
-    });
+    // Validation 3: Difficulty & Language validation
+    if (!selectedDifficulty) {
+      showToastRef.current('Validation Error', 'Please select a difficulty.', 'error');
+      return;
+    }
+
+    if (!selectedLanguage) {
+      showToastRef.current('Validation Error', 'Please select a language.', 'error');
+      return;
+    }
+
+    isGeneratingRef.current = true;
+    try {
+      await executeGenerateProblem({
+        subject: finalSubject as CodingSubject,
+        topic: finalTopic,
+        difficulty: selectedDifficulty,
+        language: selectedLanguage,
+        targetCompany: activeCompanyContext?.company,
+        targetRole: activeCompanyContext?.role,
+      });
+    } finally {
+      isGeneratingRef.current = false;
+    }
   };
 
   // Run Code against custom input or chosen example testcase
@@ -909,6 +971,8 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     setCurrentExecutionId(execId);
     setEvaluationResult(null); // Clear stale evaluation result immediately
     setIsSubmitting(true);
+    setEvaluationStatus('evaluating');
+    setPersistenceStatus('not_saved');
 
     try {
       if (process.env.NODE_ENV !== 'production') {
@@ -924,9 +988,13 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         execId
       );
 
-      if (abortController.signal.aborted) return null;
+      if (abortController.signal.aborted) {
+        setEvaluationStatus('idle');
+        return null;
+      }
 
-      // 1. Immediately update UI state with execution and evaluation results
+      // 1. Evaluation completed -> update state
+      setEvaluationStatus('completed');
       setEvaluationResult(evalResult);
 
       const effectiveUserId = user?.id || 'guest';
@@ -951,28 +1019,36 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         memory_kb: evalResult.memoryKb,
         ai_feedback: evalResult.aiFeedback,
         created_at: new Date().toISOString(),
+        persistenceStatus: 'saving',
       };
 
-      // 2. Authoritative Persistence via codingService
+      // 2. Start cloud persistence -> transition to saving state
+      setPersistenceStatus('saving');
+
+      // 3. Authoritative persistence via codingService (AWAITED)
       const savedSubmission = await codingService.saveSubmission(newSubmission);
 
+      // 4. Update submissions state with canonical savedSubmission
       setSubmissions((prev) => [savedSubmission, ...prev.filter((s) => s.id !== savedSubmission.id)]);
       setSubmissionCount((prev) => prev + 1);
 
+      // 5. Final Notification based on real Supabase response
       if (savedSubmission.cloudSynced) {
+        setPersistenceStatus('synced');
         if (evalResult.status === 'accepted') {
-          showToastRef.current('Accepted (Saved to Cloud)', `All ${evalResult.totalTestCases} test cases passed! Great job!`, 'success');
+          showToastRef.current('Accepted (Submission Synced)', `All ${evalResult.totalTestCases} test cases passed and saved to cloud!`, 'success');
         } else {
           showToastRef.current(
-            'Submission Saved to Cloud',
-            `${evalResult.statusText} (${evalResult.passedTestCases}/${evalResult.totalTestCases} passed). Review AI feedback.`,
+            'Submission Synced',
+            `${evalResult.statusText} (${evalResult.passedTestCases}/${evalResult.totalTestCases} passed). Saved to cloud.`,
             'info'
           );
         }
       } else {
+        setPersistenceStatus(effectiveUserId === 'guest' ? 'not_saved' : 'pending');
         if (effectiveUserId !== 'guest') {
           showToastRef.current(
-            'Saved Locally',
+            'Saved Locally — Cloud Sync Pending',
             'Submission completed, but cloud sync is pending. You can retry syncing anytime.',
             'warning',
             {
@@ -1008,6 +1084,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     } catch (error: any) {
       if (error?.name === 'AbortError') return null;
       console.error('Error submitting code:', error);
+      setEvaluationStatus('failed');
       showToastRef.current('Evaluation Error', error?.name === 'TimeoutError' ? 'Evaluation timed out. Please try again.' : 'Failed to evaluate code. Please retry.', 'error');
       return null;
     } finally {
@@ -1020,14 +1097,18 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
 
   const handleRetryCloudSave = useCallback(async (sub: CodingSubmission) => {
     try {
+      setPersistenceStatus('saving');
       const res = await codingService.saveSubmission(sub);
       if (res.cloudSynced) {
-        showToastRef.current('Cloud Sync Success', 'Submission successfully synced to Supabase!', 'success');
+        setPersistenceStatus('synced');
+        showToastRef.current('Submission Synced', 'Submission successfully synced to Supabase!', 'success');
         setSubmissions((prev) => prev.map((s) => (s.id === res.id ? res : s)));
       } else {
+        setPersistenceStatus('pending');
         showToastRef.current('Cloud Sync Notice', res.cloudSyncError || 'Could not sync to cloud.', 'warning');
       }
     } catch (err: any) {
+      setPersistenceStatus('failed');
       showToastRef.current('Cloud Sync Error', err.message || 'Retry failed.', 'error');
     }
   }, []);
@@ -1529,6 +1610,27 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                   )}
                 </button>
               </div>
+
+              {/* Stale Configuration Warning Banner */}
+              {isCurrentConfigStale && activeProblem && (
+                <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-start sm:items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+                    <span>
+                      Configuration changed: Current workspace is showing <strong>{activeProblem.topic} ({activeProblem.difficulty})</strong>. Click <strong>Generate Problem</strong> to load a problem for <strong>{displayTopic} ({selectedDifficulty})</strong>.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGenerateProblem}
+                    disabled={isGenerating}
+                    className="self-end sm:self-auto px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] transition-all cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-60"
+                  >
+                    <Zap className="w-3 h-3" />
+                    <span>Generate Now</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1553,6 +1655,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                 isGeneratingAI={isGenerating}
                 onOpenSavedModal={() => setIsSavedModalOpen(true)}
                 savedCount={savedQuestions.length}
+                savingBookmarkId={savingBookmarkId}
               />
             ) : (
               <div className="flex-1 min-h-0 flex flex-col space-y-4">
@@ -1590,7 +1693,14 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                       </span>
                     </div>
 
-                    {currentSeriesIndex !== -1 && (
+                    {isCurrentConfigStale && (
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold text-[11px] border border-amber-500/20 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 text-amber-500" />
+                        <span>Viewing: {activeProblem.topic}</span>
+                      </span>
+                    )}
+
+                    {currentSeriesIndex !== -1 && !isCurrentConfigStale && (
                       <span className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold text-[11px] border border-indigo-200/50 dark:border-indigo-800/40">
                         Question {currentSeriesIndex + 1} of {seriesItems.length}
                       </span>
@@ -1635,18 +1745,43 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                     <button
                       type="button"
                       onClick={() => activeProblem && handleToggleBookmark(activeProblem)}
+                      disabled={savingBookmarkId === activeProblem?.id}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
-                        isCurrentActiveSaved
+                        savingBookmarkId === activeProblem?.id
                           ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                          : isCurrentActiveSaved
+                          ? currentActiveSavedItem?.cloudSynced === false || currentActiveSavedItem?.persistenceStatus === 'pending'
+                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                            : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
                           : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
-                      title={isCurrentActiveSaved ? 'Question Saved' : 'Save Question'}
+                      title={
+                        savingBookmarkId === activeProblem?.id
+                          ? 'Persisting to Supabase cloud...'
+                          : isCurrentActiveSaved
+                          ? currentActiveSavedItem?.cloudSynced === false || currentActiveSavedItem?.persistenceStatus === 'pending'
+                            ? 'Saved locally (Cloud sync pending) - Click to toggle'
+                            : 'Question saved and synced to Supabase'
+                          : 'Save question to cloud'
+                      }
                     >
-                      {isCurrentActiveSaved ? (
+                      {savingBookmarkId === activeProblem?.id ? (
                         <>
-                          <BookmarkCheck className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                          <span>Saved</span>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                          <span>Saving...</span>
                         </>
+                      ) : isCurrentActiveSaved ? (
+                        currentActiveSavedItem?.cloudSynced === false || currentActiveSavedItem?.persistenceStatus === 'pending' ? (
+                          <>
+                            <BookmarkCheck className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                            <span>Sync Pending</span>
+                          </>
+                        ) : (
+                          <>
+                            <BookmarkCheck className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500" />
+                            <span>Saved</span>
+                          </>
+                        )
                       ) : (
                         <>
                           <Bookmark className="w-3.5 h-3.5" />
@@ -1738,6 +1873,8 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                       onRunCode={handleRunCode}
                       onSubmitSolution={handleSubmitSolution}
                       evaluationResult={evaluationResult}
+                      evaluationStatus={evaluationStatus}
+                      persistenceStatus={persistenceStatus}
                       executionId={currentExecutionId}
                       isRunning={isRunning}
                       isSubmitting={isSubmitting}
@@ -1762,6 +1899,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
           handleSelectProblemForPractice(problem, lang || selectedLanguage);
         }}
         onRemoveSaved={handleRemoveSavedQuestion}
+        onRetrySync={handleRetrySaveBookmark}
       />
 
       {/* Achievement Unlocked Toast Notification */}

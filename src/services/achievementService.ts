@@ -827,3 +827,22 @@ export function checkNewlyUnlockedAchievements(
 
   return newlyUnlocked;
 }
+
+/**
+ * Get formatted user achievements summary with recently unlocked items
+ */
+export function getUserAchievementsSummary(
+  submissions: CodingSubmission[],
+  userId: string = 'guest'
+): UserAchievementsSummary & { recentlyUnlocked: Achievement[] } {
+  const summary = calculateAchievements(submissions, userId);
+  const recentlyUnlocked = summary.achievements
+    .filter((a) => a.unlocked)
+    .sort((a, b) => (b.unlockedAt ? new Date(b.unlockedAt).getTime() : 0) - (a.unlockedAt ? new Date(a.unlockedAt).getTime() : 0))
+    .slice(0, 3);
+
+  return {
+    ...summary,
+    recentlyUnlocked,
+  };
+}

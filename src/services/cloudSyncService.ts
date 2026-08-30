@@ -77,10 +77,22 @@ export const cloudSyncService = {
 
     try {
       const allKeys: string[] = [];
+      const isSpecificUser = targetUserId && targetUserId !== 'guest';
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
-        if (key && key.startsWith('careerpilot_')) {
-          allKeys.push(key);
+        if (key && (key.startsWith('careerpilot_') || key.startsWith('careerPilot:'))) {
+          if (isSpecificUser) {
+            // Strict account isolation: only harvest keys for this specific user
+            if (
+              key.endsWith(`_${targetUserId}`) ||
+              key.includes(`:${targetUserId}:`) ||
+              key.includes(`_${targetUserId}_`)
+            ) {
+              allKeys.push(key);
+            }
+          } else {
+            allKeys.push(key);
+          }
         }
       }
 
@@ -367,7 +379,34 @@ export const cloudSyncService = {
       return result;
     }
 
-    const localData = this.harvestAllLocalData(userId);
+    // Step 1: Verify current authenticated Supabase session before executing cloud operations
+    let effectiveUserId = userId;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const authUser = session?.user;
+      if (!authUser || !authUser.id) {
+        result.success = false;
+        result.errors.push('Sync pending — active Supabase authentication session required.');
+        return result;
+      }
+      effectiveUserId = authUser.id;
+
+      // Safe development diagnostic (no sensitive credentials/tokens)
+      if (typeof console !== 'undefined' && console.info) {
+        console.info('[CloudSync:AuthVerified]', {
+          table: 'mock_interviews',
+          authenticatedUserId: effectiveUserId,
+          queuedUserId: userId,
+          payloadUserId: effectiveUserId,
+        });
+      }
+    } catch (authErr: any) {
+      result.success = false;
+      result.errors.push(`Authentication check failed: ${authErr?.message || 'Unknown auth error'}`);
+      return result;
+    }
+
+    const localData = this.harvestAllLocalData(effectiveUserId);
 
     // A. Sync Resumes
     try {
@@ -398,7 +437,7 @@ export const cloudSyncService = {
 
           const payload = {
             id: item.id,
-            user_id: userId,
+            user_id: effectiveUserId,
             file_name: item.fileName || item.versionLabel || 'Resume.pdf',
             target_role: item.targetRole || 'Software Developer',
             resume_text: item.resumeText || '',
@@ -415,6 +454,7 @@ export const cloudSyncService = {
           const { error } = await supabase.from('resumes').upsert(payload, { onConflict: 'id' });
           if (error) {
             console.warn('[CloudSync] Resume upsert warning:', error);
+            result.errors.push(`Resume ${item.id} upsert: ${error.message}`);
           } else {
             result.uploadedCounts.resumes++;
           }
@@ -448,7 +488,7 @@ export const cloudSyncService = {
 
           const payload = {
             id: submissionId,
-            user_id: userId,
+            user_id: effectiveUserId,
             problem_id: String(sub.problem_id || sub.problemId || submissionId),
             problem_title: sub.problem_title || sub.problemTitle || 'Coding Problem',
             language: sub.language || 'javascript',
@@ -473,6 +513,7 @@ export const cloudSyncService = {
           const { error } = await supabase.from('coding_submissions').upsert(payload, { onConflict: 'id' });
           if (error) {
             console.warn('[CloudSync] Coding submission upsert warning:', error);
+            result.errors.push(`Coding submission ${submissionId} upsert: ${error.message}`);
           } else {
             result.uploadedCounts.codingSubmissions++;
           }
@@ -486,20 +527,27 @@ export const cloudSyncService = {
     try {
       if (localData.savedQuestions.length > 0) {
         for (const q of localData.savedQuestions) {
-          const qId = q.problem_id || q.id || `saved_${Date.now()}`;
+          const qProblemId = String(q.problem_id || q.question_id || q.id || `prob_${Date.now()}`);
+          const recordId = `sq_${effectiveUserId}_${qProblemId}`;
+          const nowIso = new Date().toISOString();
           const payload = {
-            id: qId,
-            user_id: userId,
-            problem_id: String(q.problem_id || qId),
+            id: recordId,
+            user_id: effectiveUserId,
+            problem_id: qProblemId,
             problem_title: q.problem_title || q.title || 'Saved Problem',
             difficulty: q.difficulty || 'Medium',
-            topic: q.topic || 'DSA',
-            saved_at: q.saved_at || new Date().toISOString(),
+            topic: q.topic || 'General',
+            notes: typeof q.question_data === 'object' ? JSON.stringify(q.question_data) : (q.notes || ''),
+            saved_at: q.saved_at || q.created_at || nowIso,
+            created_at: q.created_at || q.saved_at || nowIso,
+            updated_at: nowIso,
           };
 
           const { error } = await supabase.from('saved_coding_questions').upsert(payload, { onConflict: 'id' });
           if (!error) {
             result.uploadedCounts.savedQuestions++;
+          } else {
+            result.errors.push(`Saved question ${recordId} upsert: ${error.message}`);
           }
         }
       }
@@ -530,12 +578,19 @@ export const cloudSyncService = {
           const ansCount = intv.answered_count !== undefined ? intv.answered_count : ((intv as any).questionsAnswered !== undefined ? (intv as any).questionsAnswered : qCount);
           const skipCount = intv.skipped_count !== undefined ? intv.skipped_count : ((intv as any).questionsSkipped !== undefined ? (intv as any).questionsSkipped : 0);
 
+          const nowIso = new Date().toISOString();
           const payload = {
             id: intvId,
-            user_id: userId,
+            user_id: effectiveUserId,
+            student_id: effectiveUserId,
+            target_role: (intv as any).target_role || (intv as any).targetRole || intv.subject || 'Software Engineer',
             interview_type: normalizedType,
+            difficulty: intv.difficulty || 'Medium',
             topic: intv.topic || 'General Technical',
             subject: intv.subject || intv.topic || 'Technical Interview',
+            started_at: (intv as any).started_at || (intv as any).startedAt || intv.created_at || nowIso,
+            completed_at: intv.completed_at || (intv as any).completedAt || nowIso,
+            duration_seconds: (intv as any).duration_seconds || (intv as any).durationSeconds || 0,
             overall_score: overallScore,
             technical_score: techScore,
             technical_accuracy_score: techScore,
@@ -556,9 +611,8 @@ export const cloudSyncService = {
             answers: Array.isArray(intv.answers) ? intv.answers : (intv.answers && typeof intv.answers === 'object' ? Object.values(intv.answers) : []),
             question_evaluations: Array.isArray(intv.question_evaluations) ? intv.question_evaluations : (Array.isArray((intv as any).questionEvaluations) ? (intv as any).questionEvaluations : []),
             full_report: intv,
-            created_at: intv.created_at || (intv as any).createdAt || (intv as any).completed_at || (intv as any).completedAt || new Date().toISOString(),
-            completed_at: intv.completed_at || (intv as any).completedAt || new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+            created_at: intv.created_at || (intv as any).createdAt || (intv as any).completed_at || (intv as any).completedAt || nowIso,
+            updated_at: nowIso,
           };
 
           const { error } = await supabase.from('mock_interviews').upsert(payload, { onConflict: 'id' });
@@ -581,7 +635,7 @@ export const cloudSyncService = {
           const sessId = sess.id || `sess_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
           const payload = {
             id: sessId,
-            user_id: userId,
+            user_id: effectiveUserId,
             category: sess.category || 'aptitude',
             subject: sess.subject || 'Quantitative Aptitude',
             difficulty: sess.difficulty || 'Medium',
@@ -598,6 +652,7 @@ export const cloudSyncService = {
           const { error } = await supabase.from('placement_sessions').upsert(payload, { onConflict: 'id' });
           if (error) {
             console.warn('[CloudSync] Placement session upsert warning:', error);
+            result.errors.push(`Placement session ${sessId} upsert: ${error.message}`);
           } else {
             result.uploadedCounts.placementSessions++;
           }
@@ -612,7 +667,7 @@ export const cloudSyncService = {
       const { data: existingProfile } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('id', effectiveUserId)
         .maybeSingle();
 
       const currentProfileData = (existingProfile?.profile_data as Record<string, any>) || {};
@@ -638,7 +693,7 @@ export const cloudSyncService = {
             career_goal: envelopeString,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', userId);
+          .eq('id', effectiveUserId);
 
         if (profUpErr && (profUpErr.code === '42703' || profUpErr.message?.includes('profile_data'))) {
           // Fallback to updating career_goal envelope
@@ -648,7 +703,7 @@ export const cloudSyncService = {
               career_goal: envelopeString,
               updated_at: new Date().toISOString(),
             })
-            .eq('id', userId);
+            .eq('id', effectiveUserId);
         }
         result.uploadedCounts.profileMeta = true;
       }
@@ -732,7 +787,12 @@ export const cloudSyncService = {
         .order('submitted_at', { ascending: false });
 
       if (Array.isArray(submissions) && submissions.length > 0) {
-        localStorage.setItem(`careerpilot_subs_${userId}`, JSON.stringify(submissions));
+        const syncedSubmissions = submissions.map((s) => ({
+          ...s,
+          cloudSynced: true,
+          persistenceStatus: 'synced',
+        }));
+        localStorage.setItem(`careerpilot_subs_${userId}`, JSON.stringify(syncedSubmissions));
       }
 
       // 3. Fetch Saved Questions
@@ -742,7 +802,38 @@ export const cloudSyncService = {
         .eq('user_id', userId);
 
       if (Array.isArray(savedQuestions) && savedQuestions.length > 0) {
-        localStorage.setItem(`careerpilot_saved_questions_${userId}`, JSON.stringify(savedQuestions));
+        const normalizedSaved = savedQuestions.map((row) => {
+          let problemData = null;
+          if (row.notes) {
+            try {
+              problemData = JSON.parse(row.notes);
+            } catch {
+              problemData = null;
+            }
+          }
+          return {
+            id: row.id,
+            user_id: row.user_id,
+            question_id: row.problem_id,
+            problem_id: row.problem_id,
+            title: row.problem_title || 'Saved Problem',
+            problem_title: row.problem_title || 'Saved Problem',
+            difficulty: row.difficulty || 'Medium',
+            topic: row.topic || 'General',
+            notes: row.notes || '',
+            saved_at: row.saved_at || row.created_at || new Date().toISOString(),
+            created_at: row.created_at || row.saved_at || new Date().toISOString(),
+            cloudSynced: true,
+            persistenceStatus: 'synced',
+            question_data: problemData || {
+              id: row.problem_id,
+              title: row.problem_title || 'Saved Problem',
+              difficulty: row.difficulty || 'Medium',
+              topic: row.topic || 'General',
+            },
+          };
+        });
+        localStorage.setItem(`careerpilot_saved_questions_${userId}`, JSON.stringify(normalizedSaved));
       }
 
       // 4. Fetch Mock Interviews
@@ -787,17 +878,36 @@ export const cloudSyncService = {
         if (metaObj.company_targets && Array.isArray(metaObj.company_targets)) {
           localStorage.setItem(`careerpilot_company_targets_${userId}`, JSON.stringify(metaObj.company_targets));
         }
+        if (metaObj.active_target_id) {
+          localStorage.setItem(`careerpilot_active_company_target_${userId}`, metaObj.active_target_id);
+        }
         if (metaObj.roadmap_tasks && Array.isArray(metaObj.roadmap_tasks)) {
           localStorage.setItem(`careerpilot_roadmap_tasks_${userId}`, JSON.stringify(metaObj.roadmap_tasks));
         }
         if (metaObj.completed_roadmap_items && Array.isArray(metaObj.completed_roadmap_items)) {
           localStorage.setItem(`careerpilot_roadmap_completed_items_${userId}`, JSON.stringify(metaObj.completed_roadmap_items));
         }
-        if (metaObj.unlocked_badges && Array.isArray(metaObj.unlocked_badges)) {
+        if (metaObj.unlocked_badges) {
           localStorage.setItem(`careerpilot_unlocked_badges_${userId}`, JSON.stringify(metaObj.unlocked_badges));
         }
         if (typeof metaObj.longest_streak === 'number') {
           localStorage.setItem(`careerpilot_longest_streak_${userId}`, String(metaObj.longest_streak));
+        }
+        if (metaObj.mentor_chat_history && Array.isArray(metaObj.mentor_chat_history)) {
+          localStorage.setItem(`careerpilot_mentor_chat_${userId}`, JSON.stringify(metaObj.mentor_chat_history));
+        }
+        if (typeof metaObj.daily_study_time === 'number') {
+          localStorage.setItem(`careerpilot_daily_study_time_${userId}`, String(metaObj.daily_study_time));
+        }
+        if (metaObj.study_plans && typeof metaObj.study_plans === 'object') {
+          Object.entries(metaObj.study_plans).forEach(([planKey, planVal]) => {
+            localStorage.setItem(`careerpilot_study_plan_${userId}_${planKey}`, JSON.stringify(planVal));
+          });
+        }
+        if (metaObj.study_plan_completions && typeof metaObj.study_plan_completions === 'object') {
+          Object.entries(metaObj.study_plan_completions).forEach(([dateStr, items]) => {
+            localStorage.setItem(`careerpilot_planner_manual_completions_${userId}_${dateStr}`, JSON.stringify(items));
+          });
         }
       }
 

@@ -66,7 +66,7 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Background non-blocking sync of authentic dashboard metrics on mount
+  // Background non-blocking sync of authentic dashboard metrics on mount and live events
   useEffect(() => {
     let isCancelled = false;
 
@@ -91,10 +91,36 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
 
     syncInitialData();
 
+    // Listen for live activity completions across modules (e.g. coding submission accepted, placement finished)
+    const handleActivityUpdated = async () => {
+      try {
+        const { plan: updatedPlan, dashboardData: updatedDash } = await getTodayStudyPlan(
+          studentId,
+          profile,
+          false
+        );
+        if (!isCancelled) {
+          setPlan(updatedPlan);
+          setDashboardData(updatedDash);
+        }
+      } catch (_) {}
+    };
+
+    const handlePlanUpdated = (e: any) => {
+      if (e.detail?.plan && !isCancelled) {
+        setPlan(e.detail.plan);
+      }
+    };
+
+    window.addEventListener('careerpilot_activity_updated', handleActivityUpdated);
+    window.addEventListener('careerpilot_study_plan_updated', handlePlanUpdated);
+
     return () => {
       isCancelled = true;
+      window.removeEventListener('careerpilot_activity_updated', handleActivityUpdated);
+      window.removeEventListener('careerpilot_study_plan_updated', handlePlanUpdated);
     };
-  }, [studentId]);
+  }, [studentId, profile]);
 
   // Clean up abort controller on unmount
   useEffect(() => {
@@ -819,28 +845,63 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
                         ⏱ {task.estimatedMinutes} min
                       </span>
 
-                      {/* Interactive Completion Toggle */}
-                      <button
-                        onClick={() => handleToggleTaskStatus(task)}
-                        title={isCompleted ? 'Mark as Pending' : 'Mark as Completed'}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      {/* Evidence-Based Progress / Verification Badge */}
+                      {task.isVerifiable !== false ? (
+                        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold ${
                           isCompleted
-                            ? 'bg-emerald-500 text-white shadow-xs'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-emerald-500 hover:text-white'
-                        }`}
-                      >
-                        {isCompleted ? (
-                          <>
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Completed</span>
-                          </>
-                        ) : (
-                          <>
-                            <Circle className="w-3.5 h-3.5" />
-                            <span>Mark Done</span>
-                          </>
-                        )}
-                      </button>
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                            : isInProgress
+                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+                        }`}>
+                          {isCompleted ? (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                              <span>Verified Complete</span>
+                            </>
+                          ) : isInProgress ? (
+                            <>
+                              <RotateCw className="w-3.5 h-3.5 text-amber-500 animate-spin" />
+                              <span>
+                                {typeof task.completedCount === 'number' && typeof task.requiredCount === 'number'
+                                  ? `${task.completedCount}/${task.requiredCount} Done`
+                                  : 'In Progress'}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Circle className="w-3.5 h-3.5 text-slate-400" />
+                              <span>
+                                {typeof task.completedCount === 'number' && typeof task.requiredCount === 'number'
+                                  ? `0/${task.requiredCount} Completed`
+                                  : 'Activity Required'}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleToggleTaskStatus(task)}
+                          title={isCompleted ? 'Mark as Pending' : 'Mark as Completed'}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            isCompleted
+                              ? 'bg-emerald-500 text-white shadow-xs'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-emerald-500 hover:text-white'
+                          }`}
+                        >
+                          {isCompleted ? (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Completed</span>
+                            </>
+                          ) : (
+                            <>
+                              <Circle className="w-3.5 h-3.5" />
+                              <span>Mark Done</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -860,6 +921,37 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
                       <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-1">
                         {task.description}
                       </p>
+                    )}
+
+                    {/* Completion Criteria / Evidence Requirement */}
+                    {task.completionCriteria && (
+                      <div className="mt-2.5 flex items-start gap-2 text-xs bg-indigo-50/60 dark:bg-indigo-950/40 p-2.5 rounded-lg border border-indigo-500/15">
+                        <Target className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                        <div className="space-y-1 w-full">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-indigo-900 dark:text-indigo-200">
+                              Completion Requirement:
+                            </span>
+                            {typeof task.completedCount === 'number' && typeof task.requiredCount === 'number' && (
+                              <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+                                {task.completedCount} / {task.requiredCount} completed
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-slate-600 dark:text-slate-400 text-[11px]">
+                            {task.completionCriteria}
+                          </p>
+                          {/* Mini Progress Bar for multi-item tasks */}
+                          {typeof task.completedCount === 'number' && typeof task.requiredCount === 'number' && task.requiredCount > 1 && (
+                            <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden mt-1.5">
+                              <div
+                                className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                                style={{ width: `${Math.min(100, Math.round((task.completedCount / task.requiredCount) * 100))}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     )}
                   </div>
 
@@ -884,15 +976,27 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
                           ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
                       }`}>
-                        {isCompleted ? '✓ Completed' : isInProgress ? '● In Progress' : '○ Pending'}
+                        {isCompleted ? '✓ Completed' : isInProgress ? '● In Progress' : '○ Not Started'}
                       </span>
                     </div>
 
                     <button
                       onClick={() => handleStartTask(task)}
-                      className="px-4 sm:px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer group"
+                      className={`px-4 sm:px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer group ${
+                        isCompleted
+                          ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                          : isInProgress
+                          ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                      }`}
                     >
-                      <span>{task.actionLabel || 'Start Practice'}</span>
+                      <span>
+                        {isCompleted
+                          ? 'Practice Again'
+                          : isInProgress
+                          ? 'Continue Activity'
+                          : task.actionLabel || 'Start Activity'}
+                      </span>
                       <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                     </button>
                   </div>

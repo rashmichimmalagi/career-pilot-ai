@@ -5,8 +5,13 @@ import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { ConfigMissingBanner } from './components/common/ConfigMissingBanner';
 import { SetupGuideModal } from './components/common/SetupGuideModal';
+import { InactivityWarningModal } from './components/common/InactivityWarningModal';
+import { OfflineNetworkBanner } from './components/common/OfflineNetworkBanner';
+import { useInactivityTimeout } from './hooks/useInactivityTimeout';
+import { useNetworkInterruption } from './hooks/useNetworkInterruption';
 import { LandingPage } from './pages/LandingPage';
 import { WelcomePage } from './pages/WelcomePage';
+import { AboutPage } from './pages/AboutPage';
 import { AuthPage } from './pages/AuthPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -20,7 +25,9 @@ import { CompanyPreparationPage } from './pages/CompanyPreparationPage';
 import { CareerRoadmapPage } from './pages/CareerRoadmapPage';
 import { CareerMentorPage } from './pages/CareerMentorPage';
 import { StudyPlannerPage } from './pages/StudyPlannerPage';
+import { ProgressAnalyticsPage } from './pages/ProgressAnalyticsPage';
 import { ResumePrintPage } from './pages/ResumePrintPage';
+import { ResumeEditorPage } from './pages/ResumeEditorPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { Loader2 } from 'lucide-react';
 
@@ -53,6 +60,16 @@ function normalizeRoute(raw: string): string {
     return 'resume-print';
   }
 
+  // Dedicated Live Resume Editor Route
+  if (
+    clean.startsWith('resume/editor') ||
+    clean.startsWith('resume-editor') ||
+    clean.startsWith('live-resume-editor') ||
+    clean.startsWith('resume-studio')
+  ) {
+    return 'resume-editor';
+  }
+
   const firstSegment = clean.split('/')[0];
 
   if (!firstSegment || firstSegment === 'welcome' || firstSegment === 'index' || firstSegment === 'index.html') {
@@ -61,6 +78,9 @@ function normalizeRoute(raw: string): string {
   if (firstSegment === 'home' || firstSegment === 'landing') {
     return 'home';
   }
+  if (firstSegment === 'about' || firstSegment === 'about-us' || firstSegment === 'about-careerpilot') {
+    return 'about';
+  }
   if (firstSegment === 'auth' || firstSegment === 'login' || firstSegment === 'signin' || firstSegment === 'signup') {
     return 'auth';
   }
@@ -68,6 +88,9 @@ function normalizeRoute(raw: string): string {
     return 'resume-analyzer';
   }
   if (firstSegment === 'coding' || firstSegment === 'coding-practice' || firstSegment === 'coding-arena') {
+    return 'coding';
+  }
+  if (firstSegment === 'achievements' || firstSegment === 'badges' || firstSegment === 'coding-achievements') {
     return 'coding';
   }
   if (firstSegment === 'interview' || firstSegment === 'technical-interview') {
@@ -128,7 +151,7 @@ function normalizeRoute(raw: string): string {
 }
 
 function AppContent() {
-  const { user, profile, loading, profileLoading, isConfigured, isEmailVerified } = useAuth();
+  const { user, profile, loading, profileLoading, isConfigured, isEmailVerified, signOut, showToast } = useAuth();
   
   const getPathFromLocation = (): string => {
     if (window.location.hash.includes('type=recovery')) {
@@ -156,12 +179,17 @@ function AppContent() {
     const cleanPage = normalizeRoute(pagePart);
     setCurrentPage(cleanPage);
 
+    let effectiveQuery = query || '';
+    if ((pagePart === 'achievements' || pagePart === 'badges') && !effectiveQuery.includes('tab=')) {
+      effectiveQuery = effectiveQuery ? `${effectiveQuery}&tab=achievements` : 'tab=achievements';
+    }
+
     let targetPath = cleanPage === 'welcome' ? '/' : `/${cleanPage}`;
     if (cleanPage === 'home') {
       targetPath = '/home';
     }
-    if (query) {
-      targetPath += `?${query}`;
+    if (effectiveQuery) {
+      targetPath += `?${effectiveQuery}`;
     }
 
     if (window.location.pathname + window.location.search !== targetPath) {
@@ -169,6 +197,30 @@ function AppContent() {
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Inactivity auto-logout hook
+  const { isWarningOpen, secondsRemaining, stayLoggedIn } = useInactivityTimeout({
+    user,
+    loading,
+    onSignOut: signOut,
+    onNavigate: navigateTo,
+    showToast,
+  });
+
+  // Network interruption & offline detection hook
+  const {
+    isOnline,
+    syncState,
+    currentQuote,
+    pendingQueueCount,
+    isSyncing,
+    syncError,
+    triggerSync,
+    nextQuote,
+  } = useNetworkInterruption({
+    user,
+    showToast,
+  });
 
   // Handle browser back/forward buttons
   useEffect(() => {
@@ -195,6 +247,7 @@ function AppContent() {
       'company-prep',
       'roadmap',
       'resume-analyzer',
+      'resume-editor',
       'career-mentor',
       'analytics',
     ];
@@ -314,6 +367,12 @@ function AppContent() {
           />
         )}
 
+        {currentPage === 'about' && (
+          <AboutPage
+            onNavigate={navigateTo}
+          />
+        )}
+
         {currentPage === 'auth' && (
           <AuthPage
             onNavigate={navigateTo}
@@ -344,6 +403,13 @@ function AppContent() {
         {(currentPage === 'resume-analyzer' || currentPage === 'resume') && (
           <ResumeAnalyzerPage
             onNavigate={navigateTo}
+          />
+        )}
+
+        {(currentPage === 'resume-editor' || currentPage === 'resume-studio') && (
+          <ResumeEditorPage
+            onNavigate={navigateTo}
+            resumeId={extractResumeIdFromPath(window.location.pathname) || extractResumeIdFromPath(window.location.hash) || extractResumeIdFromPath(window.location.href)}
           />
         )}
 
@@ -389,6 +455,12 @@ function AppContent() {
           />
         )}
 
+        {(currentPage === 'analytics' || currentPage === 'progress-analytics') && (
+          <ProgressAnalyticsPage
+            onNavigate={navigateTo}
+          />
+        )}
+
         {currentPage === 'reset-password' && (
           <ResetPasswordPage onNavigate={navigateTo} />
         )}
@@ -397,6 +469,7 @@ function AppContent() {
         {![
           'welcome',
           'home',
+          'about',
           'auth',
           'verify-email',
           'onboarding',
@@ -439,6 +512,25 @@ function AppContent() {
       <SetupGuideModal
         isOpen={setupGuideOpen}
         onClose={() => setSetupGuideOpen(false)}
+      />
+
+      {/* Inactivity Warning Modal */}
+      <InactivityWarningModal
+        isOpen={isWarningOpen}
+        secondsRemaining={secondsRemaining}
+        onStayLoggedIn={stayLoggedIn}
+      />
+
+      {/* Offline & Network Interruption Banner */}
+      <OfflineNetworkBanner
+        isOnline={isOnline}
+        syncState={syncState}
+        currentQuote={currentQuote}
+        pendingQueueCount={pendingQueueCount}
+        isSyncing={isSyncing}
+        syncError={syncError}
+        onRetrySync={triggerSync}
+        onNextQuote={nextQuote}
       />
 
     </div>

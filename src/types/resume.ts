@@ -58,34 +58,58 @@ export interface ResumeQuestionAnswer {
 }
 
 export interface StructuredResumeProject {
+  id?: string;
   title: string;
   roleOrSubtitle?: string;
   technologies?: string[];
   bulletPoints: string[];
   link?: string;
+  githubUrl?: string;
+  description?: string;
 }
 
 export interface StructuredResumeExperience {
+  id?: string;
   company: string;
   role: string;
   location?: string;
   duration?: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
   bulletPoints: string[];
+  achievements?: string[];
 }
 
 export interface StructuredResumeEducation {
+  id?: string;
   institution: string;
   degree: string;
+  field?: string;
   location?: string;
   durationOrYear?: string;
+  startDate?: string;
+  endDate?: string;
   gpaOrScore?: string;
   details?: string;
+  description?: string;
+}
+
+export interface StructuredResumeCertItem {
+  id?: string;
+  name: string;
+  issuer?: string;
+  date?: string;
+  credentialUrl?: string;
 }
 
 export interface StructuredResumeSkills {
+  id?: string;
   category: string;
   items: string[];
 }
+
+export type ResumeTemplateType = 'modern' | 'classic' | 'minimal' | 'executive';
 
 export interface StructuredResumeData {
   fullName: string;
@@ -103,8 +127,9 @@ export interface StructuredResumeData {
   projects: StructuredResumeProject[];
   experience?: StructuredResumeExperience[];
   education: StructuredResumeEducation[];
-  certifications?: string[];
+  certifications?: (string | StructuredResumeCertItem)[];
   achievements?: string[];
+  templateId?: ResumeTemplateType;
 }
 
 export interface ImprovedResumeResponse {

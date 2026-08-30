@@ -5,14 +5,27 @@ export interface MentorActionLink {
   description?: string;
 }
 
+export interface MentorConversation {
+  id: string;
+  userId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount?: number;
+  lastMessageSnippet?: string;
+}
+
 export interface MentorMessage {
   id: string;
-  sender: 'user' | 'mentor';
+  conversationId?: string;
+  sender: 'user' | 'mentor' | 'assistant';
   text: string;
   timestamp: string;
   suggestedFollowUps?: string[];
   actionLinks?: MentorActionLink[];
   quickActionUsed?: string;
+  syncStatus?: 'synced' | 'pending' | 'error';
+  errorMessage?: string;
 }
 
 export interface MentorQuickAction {

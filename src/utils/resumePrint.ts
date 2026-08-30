@@ -371,7 +371,12 @@ export function generateResumePrintHtml(resume: ResumeVersionItem): string {
 
   // Certifications & Achievements
   let certsHtml = '';
-  const allCerts = [...(certifications || []), ...(achievements || [])];
+  const certStrings = (certifications || []).map((c) =>
+    typeof c === 'string'
+      ? c
+      : `${c.name}${c.issuer ? ` (${c.issuer})` : ''}${c.date ? ` - ${c.date}` : ''}`
+  );
+  const allCerts = [...certStrings, ...(achievements || [])];
   if (allCerts.length > 0) {
     certsHtml = `
       <section class="section">

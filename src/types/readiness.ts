@@ -80,10 +80,12 @@ export interface PlacementReadinessReport {
     ring: string;
   };
   weights: {
-    resume: number; // 0.25
-    coding: number; // 0.30
-    technicalInterview: number; // 0.30
-    consistency: number; // 0.15
+    resume: number;
+    coding: number;
+    technicalInterview: number;
+    aptitude?: number;
+    roadmap?: number;
+    consistency?: number;
   };
   components: {
     resume: ResumeReadinessDetails;

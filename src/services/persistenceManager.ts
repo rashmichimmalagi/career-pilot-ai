@@ -285,23 +285,6 @@ class PersistenceManagerClass {
   }
 
   /**
-   * Save AI Mentor Chat Messages
-   */
-  public async saveMentorChatHistory(
-    userId: string,
-    messages: MentorMessage[]
-  ): Promise<void> {
-    if (!userId || userId === 'guest') return;
-
-    const trimmed = messages.slice(-50);
-    localStorage.setItem(`careerpilot_mentor_chat_${userId}`, JSON.stringify(trimmed));
-
-    await this.writeProfileMetadata(userId, {
-      mentor_chat_history: trimmed,
-    });
-  }
-
-  /**
    * Save Unlocked Badges and Streak
    */
   public async saveAchievements(
@@ -351,10 +334,18 @@ class PersistenceManagerClass {
 
   public async processOfflineQueue(targetUserId?: string): Promise<void> {
     if (this.isProcessingQueue || !isSupabaseConfigured()) return;
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
-    const userId = await this.getEffectiveUserId(targetUserId);
-    if (!userId) return;
+    // Step 1: Verify current authenticated Supabase session
+    let activeUserId: string | null = null;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      activeUserId = session?.user?.id || null;
+    } catch {
+      activeUserId = null;
+    }
+
+    const userId = activeUserId || (await this.getEffectiveUserId(targetUserId));
+    if (!userId || userId === 'guest') return;
 
     this.isProcessingQueue = true;
     try {
@@ -366,17 +357,23 @@ class PersistenceManagerClass {
 
       const remaining: OfflineMutation[] = [];
       for (const item of queue) {
+        // Enforce account isolation: only sync items that match the active authenticated user
+        if (activeUserId && item.userId && item.userId !== activeUserId) {
+          remaining.push(item);
+          continue;
+        }
+
+        const effectiveItemUserId = activeUserId || item.userId || userId;
+        let mutationSucceeded = false;
+
         try {
           if (item.type === 'save_profile_field') {
-            const ok = await this.writeProfileMetadata(item.userId, item.payload);
-            if (!ok && item.attempts < 5) {
-              remaining.push({ ...item, attempts: item.attempts + 1 });
-            }
+            mutationSucceeded = await this.writeProfileMetadata(effectiveItemUserId, item.payload);
           } else if (item.type === 'save_coding_submission') {
             const sub = item.payload;
             const payload = {
               id: sub.id,
-              user_id: sub.user_id || item.userId,
+              user_id: effectiveItemUserId,
               problem_id: String(sub.problem_id || sub.id),
               problem_title: String(sub.problem_title || 'Coding Problem'),
               difficulty: String(sub.difficulty || 'Medium'),
@@ -399,14 +396,144 @@ class PersistenceManagerClass {
               updated_at: new Date().toISOString(),
             };
             const { error } = await supabase.from('coding_submissions').upsert(payload, { onConflict: 'id' });
-            if (error && item.attempts < 5) {
-              remaining.push({ ...item, attempts: item.attempts + 1 });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              this.lastError = error.message;
             }
+          } else if (item.type === 'save_mock_interview') {
+            const intv = item.payload;
+            const intvId = intv.id || (intv as any).interview_id || `intv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+            const rawType = (intv.interview_type || (intv as any).interviewType || intv.subject || 'technical').toLowerCase();
+            const normalizedType = rawType.includes('hr') || rawType.includes('behavioral') ? 'hr' : 'technical';
+            const overallScore = typeof intv.overall_score === 'number' ? intv.overall_score : 75;
+            const techScore = typeof intv.technical_score === 'number' ? intv.technical_score : overallScore;
+            const commScore = typeof intv.communication_score === 'number' ? intv.communication_score : overallScore;
+            const probScore = typeof intv.problem_solving_score === 'number' ? intv.problem_solving_score : overallScore;
+            const nowIso = new Date().toISOString();
+
+            const payload = {
+              id: intvId,
+              user_id: effectiveItemUserId,
+              student_id: effectiveItemUserId,
+              target_role: (intv as any).target_role || (intv as any).targetRole || intv.subject || 'Software Engineer',
+              interview_type: normalizedType,
+              difficulty: intv.difficulty || 'Medium',
+              topic: intv.topic || 'General Technical',
+              subject: intv.subject || intv.topic || 'Technical Interview',
+              started_at: (intv as any).started_at || (intv as any).startedAt || intv.created_at || nowIso,
+              completed_at: intv.completed_at || (intv as any).completedAt || nowIso,
+              duration_seconds: (intv as any).duration_seconds || (intv as any).durationSeconds || 0,
+              overall_score: overallScore,
+              technical_score: techScore,
+              technical_accuracy_score: techScore,
+              communication_score: commScore,
+              problem_solving_score: probScore,
+              confidence_score: (intv as any).confidence_score || (intv as any).confidenceScore || 80,
+              verdict: intv.verdict || (overallScore >= 70 ? 'PASS' : 'NEEDS_WORK'),
+              strengths: Array.isArray(intv.strengths) ? intv.strengths : [],
+              improvements: Array.isArray(intv.areas_to_improve) ? intv.areas_to_improve : [],
+              areas_to_improve: Array.isArray(intv.areas_to_improve) ? intv.areas_to_improve : [],
+              ai_recommendations: Array.isArray((intv as any).ai_recommendations) ? (intv as any).ai_recommendations : [],
+              detailed_feedback: (intv as any).detailed_feedback || intv.recommendation || '',
+              answers_evaluated: intv.answered_count !== undefined ? intv.answered_count : 5,
+              question_count: intv.question_count || 5,
+              answered_count: intv.answered_count !== undefined ? intv.answered_count : 5,
+              skipped_count: intv.skipped_count !== undefined ? intv.skipped_count : 0,
+              questions: Array.isArray(intv.questions) ? intv.questions : [],
+              answers: Array.isArray(intv.answers) ? intv.answers : (intv.answers && typeof intv.answers === 'object' ? Object.values(intv.answers) : []),
+              question_evaluations: Array.isArray(intv.question_evaluations) ? intv.question_evaluations : [],
+              full_report: intv,
+              created_at: intv.created_at || (intv as any).createdAt || nowIso,
+              updated_at: nowIso,
+            };
+
+            const { error } = await supabase.from('mock_interviews').upsert(payload, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              this.lastError = error.message;
+            }
+          } else if (item.type === 'save_resume') {
+            const resItem = item.payload;
+            const payload = {
+              id: resItem.id,
+              user_id: effectiveItemUserId,
+              file_name: resItem.fileName || resItem.versionLabel || 'Resume.pdf',
+              target_role: resItem.targetRole || 'Software Developer',
+              resume_text: resItem.resumeText || '',
+              analysis_result: resItem.analysisResult || {},
+              ats_score: Number(resItem.atsScore) || 0,
+              is_current: resItem.isCurrent !== undefined ? resItem.isCurrent : true,
+              version: Number(resItem.version) || 1,
+              version_label: resItem.versionLabel || `Resume_v${resItem.version || 1}.pdf`,
+              storage_path: resItem.storagePath || '',
+              created_at: resItem.createdAt || new Date().toISOString(),
+              updated_at: resItem.updatedAt || new Date().toISOString(),
+            };
+            const { error } = await supabase.from('resumes').upsert(payload, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              this.lastError = error.message;
+            }
+          } else if (item.type === 'save_placement_session') {
+            const sess = item.payload;
+            const payload = {
+              id: sess.id,
+              user_id: effectiveItemUserId,
+              category: sess.category || 'aptitude',
+              subject: sess.subject || 'Quantitative Aptitude',
+              difficulty: sess.difficulty || 'Medium',
+              score: typeof sess.score === 'number' ? sess.score : 0,
+              accuracy: typeof sess.accuracy === 'number' ? sess.accuracy : 0,
+              total_questions: typeof sess.total_questions === 'number' ? sess.total_questions : 10,
+              correct_answers: typeof sess.correct_answers === 'number' ? sess.correct_answers : 0,
+              time_taken_seconds: typeof sess.time_taken_seconds === 'number' ? sess.time_taken_seconds : 300,
+              answers: sess.answers || {},
+              created_at: sess.created_at || new Date().toISOString(),
+              completed_at: sess.completed_at || new Date().toISOString(),
+            };
+            const { error } = await supabase.from('placement_sessions').upsert(payload, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              this.lastError = error.message;
+            }
+          } else if (item.type === 'save_saved_question') {
+            const q = item.payload;
+            const qProblemId = String(q.problem_id || q.question_id || q.id || `prob_${Date.now()}`);
+            const recordId = `sq_${effectiveItemUserId}_${qProblemId}`;
+            const nowIso = new Date().toISOString();
+            const payload = {
+              id: recordId,
+              user_id: effectiveItemUserId,
+              problem_id: qProblemId,
+              problem_title: q.problem_title || q.title || 'Saved Problem',
+              difficulty: q.difficulty || 'Medium',
+              topic: q.topic || 'General',
+              notes: typeof q.question_data === 'object' ? JSON.stringify(q.question_data) : (q.notes || ''),
+              saved_at: q.saved_at || q.created_at || nowIso,
+              created_at: q.created_at || q.saved_at || nowIso,
+              updated_at: nowIso,
+            };
+            const { error } = await supabase.from('saved_coding_questions').upsert(payload, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              this.lastError = error.message;
+            }
+          } else {
+            // Default success for local-only metadata types
+            mutationSucceeded = true;
           }
-        } catch (e) {
-          if (item.attempts < 5) {
-            remaining.push({ ...item, attempts: item.attempts + 1 });
-          }
+        } catch (e: any) {
+          this.lastError = e?.message || 'Mutation failed';
+          mutationSucceeded = false;
+        }
+
+        if (!mutationSucceeded && item.attempts < 10) {
+          remaining.push({ ...item, attempts: item.attempts + 1 });
         }
       }
 

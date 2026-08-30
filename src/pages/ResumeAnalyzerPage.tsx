@@ -52,6 +52,7 @@ import { MyResumesManager } from '../components/resume/MyResumesManager';
 import { UploadResumeModal } from '../components/resume/UploadResumeModal';
 import { ResumeViewerModal } from '../components/resume/ResumeViewerModal';
 import { ResumeBuilderFlow } from '../components/resume/ResumeBuilderFlow';
+import { LiveResumeEditor } from '../components/resume/LiveResumeEditor';
 import { openResumePrintPage } from '../utils/resumePrint';
 
 interface ResumeAnalyzerPageProps {
@@ -81,7 +82,8 @@ type FlowState =
   | 'answering_questions'
   | 'generating_improved'
   | 'improved_view'
-  | 'builder';
+  | 'builder'
+  | 'editor';
 
 export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNavigate }) => {
   const { user, profile, showToast } = useAuth();
@@ -913,6 +915,11 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
           onPrintResume={(resume) => {
             openResumePrintPage(resume);
           }}
+          onEditResume={(resume) => {
+            setActiveResumeId(resume.id);
+            setFlowState('editor');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
           onMakeCurrent={handleMakeCurrent}
           onDeleteResume={handleDeleteResume}
           onTriggerUpload={scrollToUpload}
@@ -933,6 +940,7 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
             flowState !== 'generating_improved' &&
             flowState !== 'answering_questions' &&
             flowState !== 'builder' &&
+            flowState !== 'editor' &&
             !(flowState === 'improved_view' && improvedResumeData && comparisonData))) && (
           <div ref={uploadSectionRef} className="space-y-8 animate-fade-in pt-4">
             {/* Header Banner */}
@@ -942,23 +950,23 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
               <div className="space-y-3 relative z-10">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-semibold text-xs">
                   <FileCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                  <span>Resume Optimization & Version Tracking</span>
+                  <span>Resume Optimization, Live Editing & Version Tracking</span>
                 </div>
 
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-                  Resume Builder & ATS Optimizer
+                  Resume Studio & ATS Optimizer
                 </h1>
 
                 <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
-                  Build an ATS-optimized placement resume from scratch with our guided 10-step AI assistant, or upload your existing resume to diagnose ATS compliance and receive targeted bullet enhancements.
+                  Build an ATS-optimized placement resume from scratch with our guided 10-step AI assistant, edit your existing resume in the live two-panel studio, or upload to diagnose ATS compliance and receive targeted bullet enhancements.
                 </p>
               </div>
             </div>
 
-            {/* TWO RESUME CREATION PATHWAYS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* THREE RESUME PATHWAYS */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Option A: Upload Existing Resume */}
-              <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border-2 border-indigo-500/40 dark:border-indigo-500/30 shadow-sm flex flex-col justify-between space-y-4">
+              <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between space-y-4">
                 <div className="space-y-3">
                   <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
                     <UploadCloud className="w-6 h-6" />
@@ -968,23 +976,23 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
                       Upload Existing Resume
                     </h3>
                     <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
-                      Upload an existing PDF resume to analyze ATS keyword match, identify gaps, and re-score with mentor guidance.
+                      Upload a PDF resume to analyze ATS keyword match, identify skill gaps, and re-score with mentor feedback.
                     </p>
                   </div>
                 </div>
                 <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                   <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
                     <Check className="w-4 h-4 text-emerald-500" />
-                    <span>Upload & Analysis Tool</span>
+                    <span>Upload & Analyze</span>
                   </span>
                   <span className="text-[11px] text-slate-400 font-mono">PDF Support</span>
                 </div>
               </div>
 
-              {/* Option B: Create Resume with CareerPilot */}
+              {/* Option B: Live Two-Panel Editor */}
               <div
                 onClick={() => {
-                  setFlowState('builder');
+                  setFlowState('editor');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
                 className="p-6 rounded-3xl bg-gradient-to-br from-indigo-900/10 via-purple-900/5 to-white dark:from-indigo-950/40 dark:via-purple-950/20 dark:to-slate-900 border-2 border-indigo-500/50 hover:border-indigo-500 shadow-sm hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between space-y-4"
@@ -995,25 +1003,56 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
                       <Sparkles className="w-6 h-6" />
                     </div>
                     <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700">
-                      Recommended
+                      Live Studio
                     </span>
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors flex items-center gap-1.5">
-                      <span>Create Resume with CareerPilot</span>
+                      <span>Live Resume Editor</span>
                       <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                     </h3>
                     <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
-                      Build an ATS-optimized resume in 10 guided steps. Auto-fills your verified profile, structures projects with STAR metrics, and generates a formatted resume.
+                      Two-panel visual studio with instant preview, AI section re-writing, 4 professional templates, and live ATS calculation.
                     </p>
                   </div>
                 </div>
                 <div className="pt-3 border-t border-indigo-100 dark:border-indigo-900/50 flex items-center justify-between">
                   <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-                    <span>Launch 10-Step Builder</span>
+                    <span>Open Live Editor</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </span>
-                  <span className="text-[11px] text-slate-400 font-mono">10 Guided Steps</span>
+                  <span className="text-[11px] text-slate-400 font-mono">Live Preview</span>
+                </div>
+              </div>
+
+              {/* Option C: 10-Step Resume Builder */}
+              <div
+                onClick={() => {
+                  setFlowState('builder');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-sm hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between space-y-4"
+              >
+                <div className="space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center group-hover:text-indigo-600 transition-colors">
+                    <FileEdit className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors flex items-center gap-1.5">
+                      <span>10-Step Guided Builder</span>
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                      Build an ATS-ready resume from scratch. Auto-fills your verified profile, structures projects with STAR metrics, and generates a formatted PDF.
+                    </p>
+                  </div>
+                </div>
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                    <span>Launch 10 Steps</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-mono">Step-by-Step</span>
                 </div>
               </div>
             </div>
@@ -1169,6 +1208,24 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
               Evaluating technical projects, ATS formatting compliance, and role suitability against real industry job standards.
             </p>
           </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* VIEW: LIVE TWO-PANEL RESUME EDITOR                                        */}
+        {/* ========================================================================= */}
+        {flowState === 'editor' && (
+          <LiveResumeEditor
+            initialResume={activeResume || currentResume || undefined}
+            userResumes={resumes}
+            onSelectResume={(resume) => {
+              setActiveResumeId(resume.id);
+            }}
+            onBack={() => {
+              setFlowState(analysisResult ? 'analyzed' : 'idle');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onRefreshResumes={loadUserResumes}
+          />
         )}
 
         {/* ========================================================================= */}
@@ -1752,6 +1809,12 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
           resume={viewingResume}
           onPrint={(resume) => {
             openResumePrintPage(resume);
+          }}
+          onEdit={(resume) => {
+            setViewingResume(null);
+            setActiveResumeId(resume.id);
+            setFlowState('editor');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
           onMakeCurrent={async (resume) => {
             await handleMakeCurrent(resume);

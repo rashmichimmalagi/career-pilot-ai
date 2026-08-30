@@ -20,7 +20,8 @@ import {
   Lock,
   Cloud,
   CloudOff,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 import { CodingProblem, CodingSubmission, CodingLanguage } from '../../types/coding';
 
@@ -478,13 +479,21 @@ export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {sub.cloudSynced ? (
+                        {sub.cloudSynced || sub.persistenceStatus === 'synced' ? (
                           <span
                             title="Synced to Supabase Cloud"
                             className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium"
                           >
                             <Cloud className="w-3.5 h-3.5" />
                             <span className="hidden sm:inline">Synced</span>
+                          </span>
+                        ) : sub.persistenceStatus === 'saving' ? (
+                          <span
+                            title="Saving to Supabase Cloud..."
+                            className="inline-flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400 font-medium"
+                          >
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span className="hidden sm:inline">Saving...</span>
                           </span>
                         ) : (
                           <span

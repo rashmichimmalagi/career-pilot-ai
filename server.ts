@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_CODING_QUESTION_BANK, getQuestionsForTopic, createTopicTailoredFallback } from './src/data/codingQuestionBank';
+import { resolveTopicConcept, validateProblemSemantics } from './src/data/codingTopicContracts';
+import { CodingVerificationEngine } from './src/services/codingVerificationEngine';
 
 dotenv.config();
 
@@ -1347,6 +1349,200 @@ Return the enhanced STAR/XYZ bullet in JSON.`;
   });
 
   /**
+   * 4b. AI Section Improver for Live Resume Editor (Summary, Bullets, Descriptions, Skills)
+   */
+  app.post('/api/resume/improve-section', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const { sectionType, currentContent, targetRole, context, itemTitle } = req.body || {};
+
+    if (!currentContent || typeof currentContent !== 'string' || !currentContent.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Current content is required to improve.',
+      });
+    }
+
+    const { client: ai } = getGemini();
+    const role = targetRole || 'Software Developer';
+
+    if (!ai) {
+      // Offline fallback
+      let fallbackSuggestion = currentContent;
+      if (sectionType === 'summary') {
+        fallbackSuggestion = `Accomplished ${role} with proven expertise in architecting scalable software solutions, optimizing full-stack applications, and delivering high-performance features. Experienced in cross-functional collaboration, technical leadership, and modern development best practices.`;
+      } else {
+        const clean = currentContent.trim().replace(/^[•\-\*]\s*/, '');
+        fallbackSuggestion = `Architected and implemented ${clean}, optimizing performance, maintainability, and user experience.`;
+      }
+
+      return res.json({
+        success: true,
+        suggestion: fallbackSuggestion,
+        keyChanges: ['Enhanced active phrasing', 'Added high-impact technical metrics', 'Aligned with target role'],
+        reasoning: 'Strengthened phrasing using Google XYZ resume framework.',
+      });
+    }
+
+    const systemInstruction = `You are an Elite Tech Recruiter and Resume Specialist.
+Your task is to rewrite and elevate the user's specific resume section for a "${role}".
+Follow these strict guidelines:
+1. Use strong, active verbs (Architected, Engineered, Spearheaded, Accelerated, Formulated, Streamlined).
+2. For bullet points, use Google's XYZ formula: "Accomplished [X] as measured by [Y], by doing [Z]".
+3. For summaries, keep it to 3-4 punchy, high-impact sentences emphasizing technical stack, problem-solving prowess, and delivery excellence.
+4. Keep the core facts honest to the user's input—do NOT hallucinate fake company names or degrees, but enhance technical depth and architectural precision.
+5. Return ONLY a valid JSON object matching the schema.`;
+
+    const prompt = `TARGET ROLE: ${role}
+SECTION TYPE: ${sectionType || 'experience_bullet'}
+ITEM / ROLE TITLE: ${itemTitle || 'General'}
+CONTEXT / TECH: ${context || ''}
+CURRENT CONTENT:
+"""
+${currentContent}
+"""
+
+Elevate this content to ATS tier-1 standard.`;
+
+    try {
+      const result = await generateContentWithResilience(ai, prompt, {
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              suggestion: { type: Type.STRING },
+              keyChanges: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              reasoning: { type: Type.STRING },
+            },
+            required: ['suggestion'],
+          },
+        },
+        label: 'Improve Resume Section',
+      });
+
+      const parsed = extractJsonFromAiResponse(result.response);
+      return res.json({
+        success: true,
+        suggestion: parsed.suggestion || currentContent,
+        keyChanges: parsed.keyChanges || ['Optimized for ATS parser scanability', 'Enhanced technical impact'],
+        reasoning: parsed.reasoning || 'Strengthened action verbs and structural clarity.',
+        model: result.usedModel,
+      });
+    } catch (err: any) {
+      console.warn('[Improve Section] Fallback triggered:', err?.message || err);
+      const clean = currentContent.trim().replace(/^[•\-\*]\s*/, '');
+      return res.json({
+        success: true,
+        suggestion: `Spearheaded the development and optimization of ${clean}, driving measurable improvements in reliability and system efficiency.`,
+        keyChanges: ['Upgraded action verb', 'Focused on quantifiable outcomes'],
+        reasoning: 'Applied industry standard STAR methodology.',
+      });
+    }
+  });
+
+  /**
+   * 4c. AI Target Job Optimization
+   */
+  app.post('/api/resume/optimize-job', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const { resumeData, jobDescription, targetRole } = req.body || {};
+
+    if (!jobDescription || typeof jobDescription !== 'string' || !jobDescription.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Job description is required for optimization analysis.',
+      });
+    }
+
+    const { client: ai } = getGemini();
+    const role = targetRole || 'Software Developer';
+
+    if (!ai) {
+      return res.json({
+        success: true,
+        matchScore: 78,
+        matchingKeywords: ['TypeScript', 'React', 'Node.js', 'REST APIs', 'Git'],
+        missingKeywords: ['CI/CD Pipelines', 'Microservices', 'Docker', 'System Architecture'],
+        tailoredSuggestions: [
+          'Incorporate specific cloud deployment experience into your summary.',
+          'Quantify team velocity or test coverage in your primary work experience bullet points.',
+          'Emphasize end-to-end feature delivery in your featured projects.',
+        ],
+        optimizedSummary: `Results-driven ${role} with strong engineering background in modern web technologies, automated testing, and scalable architecture. Adept at rapid problem-solving and delivering high-quality production code aligned with ${role} requirements.`,
+      });
+    }
+
+    const systemInstruction = `You are a Principal Technical Recruiter and ATS Optimization Engine.
+Analyze the candidate's resume structure against the provided Job Description.
+Return a structured JSON analysis with:
+1. "matchScore" (integer 0-100)
+2. "matchingKeywords" (array of keywords candidate already has)
+3. "missingKeywords" (array of critical high-value keywords from the job description that are missing)
+4. "tailoredSuggestions" (array of 3-5 specific, actionable suggestions to tailor this resume for this job)
+5. "optimizedSummary" (a tailor-made 3-sentence professional summary integrating key JD requirements)`;
+
+    const prompt = `TARGET ROLE: ${role}
+JOB DESCRIPTION:
+"""
+${jobDescription.slice(0, 4000)}
+"""
+
+CANDIDATE RESUME SUMMARY & SKILLS:
+${JSON.stringify(resumeData ? { summary: resumeData.summary, skills: resumeData.skills, title: resumeData.title } : { role }, null, 2)}
+
+Provide ATS gap analysis and optimization recommendations.`;
+
+    try {
+      const result = await generateContentWithResilience(ai, prompt, {
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              matchScore: { type: Type.INTEGER },
+              matchingKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+              missingKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+              tailoredSuggestions: { type: Type.ARRAY, items: { type: Type.STRING } },
+              optimizedSummary: { type: Type.STRING },
+            },
+            required: ['matchScore', 'matchingKeywords', 'missingKeywords', 'tailoredSuggestions', 'optimizedSummary'],
+          },
+        },
+        label: 'Optimize For Job',
+      });
+
+      const parsed = extractJsonFromAiResponse(result.response);
+      return res.json({
+        success: true,
+        matchScore: parsed.matchScore || 80,
+        matchingKeywords: parsed.matchingKeywords || [],
+        missingKeywords: parsed.missingKeywords || [],
+        tailoredSuggestions: parsed.tailoredSuggestions || [],
+        optimizedSummary: parsed.optimizedSummary || '',
+        model: result.usedModel,
+      });
+    } catch (err: any) {
+      console.warn('[Optimize Job] Fallback triggered:', err?.message || err);
+      return res.json({
+        success: true,
+        matchScore: 75,
+        matchingKeywords: ['Software Development', 'Problem Solving', 'Team Collaboration'],
+        missingKeywords: ['Performance Tuning', 'Distributed Systems', 'Monitoring & Metrics'],
+        tailoredSuggestions: [
+          'Highlight experience with scalability and performance optimization.',
+          'Add concrete metrics and latency benchmarks to your key project bullet points.',
+        ],
+        optimizedSummary: `Skilled ${role} specializing in building robust, production-ready software systems with a commitment to code excellence and continuous learning.`,
+      });
+    }
+  });
+
+  /**
    * 5. Guided Resume Builder: Generate ATS-Optimized Resume from Multi-Step Form Data
    */
   app.post('/api/resume/build-from-scratch', async (req, res) => {
@@ -1853,130 +2049,25 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
   }
 
   /**
-   * Helper: Generate Clean Empty Skeleton Boilerplate
+   * Helper: Generate Clean Empty Skeleton Boilerplate using CodingVerificationEngine
    */
   const generateEmptySkeleton = (
     language: string,
     problemTitle: string = 'Solution',
     signature?: string
   ): string => {
-    switch (language) {
-      case 'C':
-        return signature
-          ? `#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <string.h>\n\n${signature} {\n    // Write your solution here\n    return 0;\n}\n`
-          : `#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <string.h>\n\nint solve(int* nums, int numsSize) {\n    // Write your solution here\n    return 0;\n}\n`;
-
-      case 'C++':
-        return signature
-          ? `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n\nusing namespace std;\n\nclass Solution {\npublic:\n    ${signature} {\n        // Write your solution here\n        return 0;\n    }\n};\n`
-          : `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n\nusing namespace std;\n\nclass Solution {\npublic:\n    int solve(vector<int>& nums) {\n        // Write your solution here\n        return 0;\n    }\n};\n`;
-
-      case 'Java':
-        return signature
-          ? `import java.util.*;\n\nclass Solution {\n    ${signature} {\n        // Write your solution here\n        return 0;\n    }\n}\n`
-          : `import java.util.*;\n\nclass Solution {\n    public int solve(int[] nums) {\n        // Write your solution here\n        return 0;\n    }\n}\n`;
-
-      case 'Python':
-        return signature
-          ? `from typing import List, Optional, Dict, Set\n\nclass Solution:\n    ${signature}\n        # Write your solution here\n        pass\n`
-          : `from typing import List, Optional\n\nclass Solution:\n    def solve(self, nums: List[int]) -> int:\n        # Write your solution here\n        pass\n`;
-
-      case 'JavaScript':
-        return signature
-          ? `/**\n * @param {any} input\n * @return {any}\n */\n${signature} {\n  // Write your solution here\n  return 0;\n}\n`
-          : `/**\n * @param {number[]} nums\n * @return {number}\n */\nfunction solve(nums) {\n  // Write your solution here\n  return 0;\n}\n`;
-
-      case 'SQL':
-        return `-- Write your SQL query below\nSELECT \n    *\nFROM \n    records;\n`;
-
-      default:
-        return `// Write your solution here\n`;
-    }
+    return CodingVerificationEngine.generateCleanStarterSkeleton(
+      language as any,
+      signature || (language === 'C' ? 'int solve(int* nums, int numsSize)' : 'solve'),
+      problemTitle
+    );
   };
 
   /**
    * Helper: Check if starter code contains solution/algorithm logic
    */
   const isStarterCodeLeakingSolution = (code: string, language: string): boolean => {
-    if (!code || typeof code !== 'string') return true;
-
-    const normalized = code.toLowerCase();
-
-    // Check for loops or iteration statements
-    if (
-      /\bfor\s*\(/.test(code) ||
-      /\bwhile\s*\(/.test(code) ||
-      /\bfor\s+\w+\s+in\s+/.test(code) ||
-      /\bwhile\s+/.test(code)
-    ) {
-      return true;
-    }
-
-    // Solution algorithm tokens and variables
-    const suspiciousKeywords = [
-      'swaps',
-      'bubble',
-      'sliding',
-      'two_pointer',
-      'two pointer',
-      'monotonic',
-      'prefix_sum',
-      'prefixsum',
-      'dsu',
-      'union_find',
-      'dense_rank',
-      'partition by',
-      'row_number',
-      'push_back',
-      'stack.push',
-      'deque.pop',
-      'hashmap',
-      'unordered_map',
-      'dp[',
-      'memo[',
-      'visited[',
-    ];
-
-    for (const kw of suspiciousKeywords) {
-      if (normalized.includes(kw)) {
-        return true;
-      }
-    }
-
-    // Check non-boilerplate functional statements
-    const lines = code
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(
-        (l) =>
-          l.length > 0 &&
-          !l.startsWith('//') &&
-          !l.startsWith('#') &&
-          !l.startsWith('--') &&
-          !l.startsWith('/*') &&
-          !l.startsWith('*') &&
-          !l.startsWith('import ') &&
-          !l.startsWith('#include') &&
-          !l.startsWith('using namespace') &&
-          !l.startsWith('class ') &&
-          !l.startsWith('public:') &&
-          !l.startsWith('from typing') &&
-          l !== '{' &&
-          l !== '}' &&
-          l !== '};' &&
-          l !== 'pass' &&
-          l !== 'return 0;' &&
-          l !== 'return 0' &&
-          l !== 'return;' &&
-          l !== 'return null;' &&
-          l !== 'return "";'
-      );
-
-    if (lines.length > 3) {
-      return true;
-    }
-
-    return false;
+    return CodingVerificationEngine.isStarterCodeLeakingSolution(code);
   };
 
   /**
@@ -2216,6 +2307,12 @@ ${structuredFallback.certifications.concat(structuredFallback.achievements).map(
           );
         }
       }
+    }
+
+    // 5. Semantic Topic Contract Validation (Strict Algorithmic/Conceptual Match)
+    const semanticValidation = validateProblemSemantics(problem, cleanTopic, cleanSubject, difficulty);
+    if (!semanticValidation.valid && semanticValidation.reason) {
+      violations.push(`Semantic concept contract violation: ${semanticValidation.reason}`);
     }
 
     if (violations.length > 0) {
@@ -2509,6 +2606,17 @@ TARGET COMPANY & ROLE PLACEMENT CONTEXT:
 - INSTRUCTION: Create an authentic algorithmic problem tailored to the interview standards and technical bar of ${cleanCompany}. Ground the question in "${cleanTopic}" and "${cleanSubject}".`;
     }
 
+    // Build Explicit Semantic Topic Contract
+    const topicConcept = resolveTopicConcept(cleanTopic, cleanSubject);
+    const topicContract = `EXPLICIT SEMANTIC TOPIC CONTRACT: [${topicConcept.canonicalConcept.toUpperCase()}]
+1. CORE ALGORITHM & CONCEPT REQUIRED: ${topicConcept.promptInstruction}
+2. CONCEPT SUMMARY: ${topicConcept.conceptSummary}
+3. REQUIRED CONSTRUCTS TO TEST: ${topicConcept.requiredConstructs.join(', ')}
+4. FORBIDDEN PATTERNS: ${topicConcept.forbiddenConstructs.join(', ')}
+5. INPUT DOMAIN: ${topicConcept.inputDescription}
+6. OUTPUT EXPECTATION: ${topicConcept.outputDescription}
+7. CRITICAL: The problem MUST genuinely test ${cleanTopic}. NEVER generate an unrelated array search or generic template.`;
+
     const systemInstruction = `You are a Principal Technical Interviewer and Senior Competitive Programming Problem Author.
 Generate a completely ORIGINAL LeetCode-style interview problem in JSON format.
 
@@ -2520,6 +2628,7 @@ MANDATORY CONSTRAINTS:
 5. SCENARIO: "${randomScenario}"
 ${companyPromptSegment}
 
+${topicContract}
 ${subjectContract}
 ${difficultyContract}
 
@@ -2606,62 +2715,51 @@ Return ONLY valid JSON matching the schema.`;
       if (rawResponse) {
         const problemData = extractJsonFromAiResponse(rawResponse);
 
-        // Run Rule-Based Validator
-        const validation = validateGeneratedProblem(problemData, cleanTopic, difficulty, cleanSubject);
-        const isDuplicateOrSolved = isProblemAlreadySolved(problemData);
+        const id = `prob_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const candidateProblem: any = {
+          id,
+          title: problemData.title || `${cleanTopic} Challenge`,
+          difficulty: difficulty,
+          subject: cleanSubject,
+          topic: cleanTopic,
+          tags: Array.isArray(problemData.tags) && problemData.tags.length > 0 ? problemData.tags : [cleanTopic, cleanSubject],
+          description: problemData.description || problemData.problem_statement || '',
+          problem_statement: problemData.description || problemData.problem_statement || '',
+          examples: Array.isArray(problemData.examples) ? problemData.examples : [],
+          constraints: Array.isArray(problemData.constraints) ? problemData.constraints : [],
+          expectedComplexity: problemData.expectedComplexity || {
+            time: difficulty === 'Easy' ? 'O(N)' : 'O(N log N)',
+            space: 'O(1)',
+          },
+          functionSignature: problemData.functionSignature || {},
+          starterCode: problemData.starterCode || problemData.starter_templates || {},
+          starter_templates: problemData.starterCode || problemData.starter_templates || {},
+          hiddenTestCases: Array.isArray(problemData.hiddenTestCases)
+            ? problemData.hiddenTestCases
+            : (Array.isArray(problemData.test_cases) ? problemData.test_cases : []),
+          hints: Array.isArray(problemData.hints) ? problemData.hints : [],
+          editorial: problemData.editorial || undefined,
+          created_at: new Date().toISOString(),
+        };
 
-        if (validation.valid && !isDuplicateOrSolved) {
-          console.log(`[Coding Arena] Generated problem passed validation: "${problemData.title}" (${difficulty}) via ${usedModel}`);
+        const gateResult = CodingVerificationEngine.verifyAndGate(candidateProblem, {
+          autoRepair: true,
+          markPublished: true,
+        });
 
-          const probTitle = problemData.title || `${cleanTopic} Challenge`;
-          const signatures = problemData.functionSignature || {};
-          const rawStarterCodes = problemData.starterCode || problemData.starter_templates || {};
+        const isDuplicateOrSolved = isProblemAlreadySolved(gateResult.problem);
 
-          // Sanitize starterCode for every language to guarantee NO solution leaks
-          const sanitizedStarterCode: Record<string, string> = {};
-          const supportedLangs = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
-          for (const lang of supportedLangs) {
-            const rawCode = rawStarterCodes[lang];
-            const sig = signatures[lang];
-            sanitizedStarterCode[lang] = sanitizeStarterCode(rawCode, lang, probTitle, sig);
-          }
-
-          const id = `prob_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          const normalizedProblem = {
-            id,
-            title: probTitle,
-            difficulty: difficulty,
-            subject: cleanSubject,
-            topic: cleanTopic,
-            tags: Array.isArray(problemData.tags) && problemData.tags.length > 0 ? problemData.tags : [cleanTopic, cleanSubject],
-            description: problemData.description || problemData.problem_statement || '',
-            problem_statement: problemData.description || problemData.problem_statement || '',
-            examples: Array.isArray(problemData.examples) ? problemData.examples : [],
-            constraints: Array.isArray(problemData.constraints) ? problemData.constraints : [],
-            expectedComplexity: problemData.expectedComplexity || {
-              time: difficulty === 'Easy' ? 'O(N)' : 'O(N log N)',
-              space: 'O(1)',
-            },
-            functionSignature: signatures,
-            starterCode: sanitizedStarterCode,
-            starter_templates: sanitizedStarterCode,
-            hiddenTestCases: Array.isArray(problemData.hiddenTestCases)
-              ? problemData.hiddenTestCases
-              : (Array.isArray(problemData.test_cases) ? problemData.test_cases : []),
-            hints: Array.isArray(problemData.hints) ? problemData.hints : [],
-            editorial: problemData.editorial || undefined,
-            created_at: new Date().toISOString(),
-          };
-
-          savedProblemsStore.set(id, normalizedProblem);
+        if (gateResult.valid && !isDuplicateOrSolved) {
+          console.log(`[Coding Arena] Generated problem passed verification & gate: "${gateResult.problem.title}" (${difficulty}) via ${usedModel}`);
+          savedProblemsStore.set(gateResult.problem.id, gateResult.problem);
 
           return res.json({
             success: true,
-            data: normalizedProblem,
+            data: gateResult.problem,
             model: usedModel,
           });
         } else {
-          console.warn(`[Coding Arena] AI generated problem did not pass validation or was already solved: valid=${validation.valid}, isSolved=${isDuplicateOrSolved}. Serving curated fallback.`);
+          console.warn(`[Coding Arena] AI generated problem failed gate check (valid=${gateResult.valid}, errors=${gateResult.errors.join('; ')}, isSolved=${isDuplicateOrSolved}). Serving verified curated fallback.`);
         }
       }
     } catch (err: any) {
@@ -2671,25 +2769,16 @@ Return ONLY valid JSON matching the schema.`;
     // Instant Fallback to Curated Unsolved Question
     console.info(`[Coding Arena] Serving curated unsolved question for Subject="${cleanSubject}", Topic="${cleanTopic}", Difficulty="${difficulty}"`);
     const fallbackProb = getCuratedUnsolvedFallback();
-    const sanitizedStarterCode: Record<string, string> = {};
-    const supportedLangs = ['C', 'C++', 'Java', 'Python', 'JavaScript', 'SQL'];
-    const rawStarterCodes = fallbackProb.starterCode || fallbackProb.starter_templates || {};
-    for (const lang of supportedLangs) {
-      const rawCode = rawStarterCodes[lang];
-      const sig = fallbackProb.functionSignature?.[lang];
-      sanitizedStarterCode[lang] = sanitizeStarterCode(rawCode, lang, fallbackProb.title, sig);
-    }
+    const verifiedFallback = CodingVerificationEngine.verifyAndGate(fallbackProb, {
+      autoRepair: true,
+      markPublished: true,
+    }).problem;
 
-    const finalFallback = {
-      ...fallbackProb,
-      starterCode: sanitizedStarterCode,
-      starter_templates: sanitizedStarterCode,
-    };
-    savedProblemsStore.set(finalFallback.id, finalFallback);
+    savedProblemsStore.set(verifiedFallback.id, verifiedFallback);
 
     return res.json({
       success: true,
-      data: finalFallback,
+      data: verifiedFallback,
       isFallback: true,
     });
   };
@@ -2942,6 +3031,7 @@ Return ONLY valid JSON matching the schema.`;
     if (mode === 'run') {
       const examples = problem.examples || [];
       const totalExamples = examples.length > 0 ? examples.length : 1;
+      const isPythonPass = language === 'Python' && /^\s*pass\s*$/m.test(code) && !code.includes('return');
       const hasLogic =
         code.includes('return') ||
         code.includes('print') ||
@@ -2958,18 +3048,30 @@ Return ONLY valid JSON matching the schema.`;
               id: ex.id || `tc_ex_${i + 1}`,
               input: customInput || ex.input || '',
               expectedOutput: ex.output || ex.expectedOutput || '',
-              actualOutput: isAccepted ? (ex.output || ex.expectedOutput || 'Output match') : 'Output mismatch',
+              actualOutput: isAccepted
+                ? (ex.output || ex.expectedOutput || 'Output match')
+                : (isPythonPass ? 'None' : 'Output mismatch'),
               passed: isAccepted,
               isHidden: false,
+              errorMessage: isAccepted
+                ? ''
+                : (isPythonPass
+                    ? `Function executed successfully (pass statement) and returned None, expected: ${ex.output || ex.expectedOutput}`
+                    : 'Output does not match expected output.'),
             }))
           : [
               {
                 id: 'tc_custom',
                 input: customInput || 'Standard Input',
                 expectedOutput: 'Sample Output',
-                actualOutput: isAccepted ? 'Sample Output' : 'Mismatched output',
+                actualOutput: isAccepted ? 'Sample Output' : (isPythonPass ? 'None' : 'Mismatched output'),
                 passed: isAccepted,
                 isHidden: false,
+                errorMessage: isAccepted
+                  ? ''
+                  : (isPythonPass
+                      ? 'Function executed successfully (pass statement) and returned None'
+                      : 'Output does not match expected output.'),
               },
             ];
 
@@ -2983,7 +3085,9 @@ Return ONLY valid JSON matching the schema.`;
         memoryKb: Math.floor(Math.random() * 1200) + 14100,
         stdout: isAccepted
           ? `Running on test cases...\nResult: Passed test case(s) successfully.`
-          : `Execution completed.\nResult: Output does not match expected output.`,
+          : (isPythonPass
+              ? `Running on test cases...\nExecution completed without syntax errors. Python 'pass' placeholder executed, returning None across test cases.`
+              : `Execution completed.\nResult: Output does not match expected output.`),
         testCaseResults: tcResults,
         aiFeedback: null,
       };
@@ -2998,17 +3102,31 @@ Return ONLY valid JSON matching the schema.`;
     const { client: ai, error: configError } = getGemini();
 
     const systemInstruction = `You are a strict, automated Judge & Principal Algorithm Evaluator for technical coding interviews.
-Your task is to analyze the candidate's solution code in ${language} for the given problem: "${problem.title}".
+Your task is to analyze and simulate execution of the candidate's exact solution code in ${language} for the given problem: "${problem.title}".
 
-EVALUATION RULES:
-1. Examine code syntax, logic correctness, algorithm correctness, edge case handling, and potential runtime errors.
-2. Evaluate against the provided visible and hidden test cases:
-   - If the code has correct logic that passes all edge cases, return status: "accepted" and statusText: "Accepted".
-   - If the code has logical flaws, off-by-one errors, misses edge cases (like negatives or duplicates), return status: "wrong_answer" and statusText: "Wrong Answer".
-   - If the code has syntax/import errors, return status: "compilation_error".
-   - If the algorithm has an infinite loop or excessive recursion, return "time_limit_exceeded" or "runtime_error".
-3. Evaluate Time Complexity and Space Complexity accurately based on candidate's code.
-4. Provide structured AI feedback explaining correctness, time complexity, space complexity, optimal approach, and actionable suggestions.
+MANDATORY LANGUAGE-SPECIFIC & EVALUATION RULES:
+1. PYTHON "pass" STATEMENT HANDLING (CRITICAL):
+   - In Python, "pass" is a valid no-op statement. It is standard starter/placeholder syntax.
+   - "pass" MUST NEVER be classified as a syntax error, compilation error, runtime error, or invalid Python.
+   - If candidate code contains "pass" as the body (e.g. untouched starter template or empty method body), execute it normally. In Python, calling a function with "pass" returns None.
+   - Compare the returned value (None) against the expected test case output.
+   - Because None does NOT match expected output (e.g. expected 2 or [0, 1] or "hello"), the test cases fail (passed: false, actualOutput: "None").
+   - The overall submission status MUST be "wrong_answer" (or "Wrong Answer") with passedTestCases: 0. NEVER return "compilation_error" for "pass".
+   - Only true Python syntax errors (e.g. missing colons on def/class, unclosed brackets/quotes, invalid indentation) may be flagged as "compilation_error".
+
+2. STUDENT REPLACES PASS WITH IMPLEMENTATION:
+   - When the candidate replaces "pass" with actual algorithmic logic, execute that logic against all visible and hidden test cases.
+   - If the implementation correctly produces the expected output for all test cases, return status: "accepted" and statusText: "Accepted" (passedTestCases == totalTestCases).
+   - If logic fails some test cases (e.g. off-by-one, edge case missing), return status: "wrong_answer".
+
+3. PRESERVE SOURCE CODE & DO NOT MODIFY:
+   - Do NOT modify, delete "pass", inject boilerplate, or rewrite the candidate's code. Evaluate the EXACT submitted code.
+
+4. CALL THE EXACT FUNCTION & CLASS:
+   - Always invoke the exact class and method name specified by the problem's function signature (e.g. Solution().methodName(...)).
+
+5. OTHER LANGUAGES (C, C++, Java, JavaScript, SQL):
+   - Follow their respective language rules. Do not apply Python-specific behavior to other languages.
 
 OUTPUT JSON SCHEMA:
 {
@@ -3047,6 +3165,7 @@ OUTPUT JSON SCHEMA:
 Title: ${problem.title}
 Difficulty: ${problem.difficulty}
 Subject: ${problem.subject} / ${problem.topic}
+Function Signature: ${JSON.stringify(problem.functionSignature || {})}
 Constraints: ${JSON.stringify(problem.constraints || [])}
 Expected Complexity: ${JSON.stringify(problem.expectedComplexity || {})}
 Examples: ${JSON.stringify(problem.examples || [])}
@@ -3062,7 +3181,7 @@ CUSTOM INPUT (if any):
 
 EVALUATION MODE: ${mode}
 
-Perform a rigorous execution simulation and evaluation of the candidate's code. Return ONLY valid JSON adhering to the schema.`;
+Perform a rigorous execution simulation and evaluation of the candidate's code. Remember that in Python, 'pass' is valid syntax that returns None and fails test cases as 'wrong_answer', NOT 'compilation_error'. Return ONLY valid JSON adhering to the schema.`;
 
     try {
       let rawResponse: any = null;
@@ -3103,7 +3222,8 @@ Perform a rigorous execution simulation and evaluation of the candidate's code. 
         const totalTC = Math.max(problem.hiddenTestCases?.length || 5, 5);
         const hasLogic = code.includes('return') || code.includes('print') || code.includes('SELECT') || code.length > 50;
         const isAccepted = hasLogic && !code.includes('TODO') && !code.includes('pass');
-        const passedTC = isAccepted ? totalTC : Math.max(1, Math.floor(totalTC / 2));
+        const passedTC = isAccepted ? totalTC : 0;
+        const isPythonPass = language === 'Python' && code.includes('pass');
 
         evalData = {
           status: isAccepted ? 'accepted' : 'wrong_answer',
@@ -3112,34 +3232,72 @@ Perform a rigorous execution simulation and evaluation of the candidate's code. 
           totalTestCases: totalTC,
           runtimeMs: Math.floor(Math.random() * 40) + 15,
           memoryKb: Math.floor(Math.random() * 2000) + 14000,
-          stdout: isAccepted ? 'Execution completed without errors.' : 'Logic test case mismatch detected.',
+          stdout: isAccepted
+            ? 'Execution completed without errors.'
+            : (isPythonPass
+                ? 'Execution completed without syntax errors. Python pass statement returned None on test cases.'
+                : 'Logic test case mismatch detected.'),
           testCaseResults: (problem.hiddenTestCases || []).map((tc: any, i: number) => ({
-            id: tc.id || `tc_${i}`,
+            id: tc.id || `tc_${i + 1}`,
             input: tc.input || '',
             expectedOutput: tc.expectedOutput || '',
-            actualOutput: i < passedTC ? tc.expectedOutput : 'Mismatched result',
-            passed: i < passedTC,
+            actualOutput: isAccepted ? tc.expectedOutput : (isPythonPass ? 'None' : 'Mismatched result'),
+            passed: isAccepted,
             isHidden: tc.isHidden || false,
+            errorMessage: isAccepted
+              ? ''
+              : (isPythonPass ? `Returned None, expected ${tc.expectedOutput}` : 'Output does not match expected output'),
           })),
           aiFeedback: {
             correctness: isAccepted
               ? 'Your solution passes standard and boundary test cases.'
-              : 'The solution needs refinement on boundary cases and input validation.',
+              : (isPythonPass
+                  ? 'The code contains the placeholder pass statement and returns None. Replace pass with your solution implementation.'
+                  : 'The solution needs refinement on boundary cases and input validation.'),
             timeComplexity: problem.expectedComplexity?.time || 'O(N)',
             spaceComplexity: problem.expectedComplexity?.space || 'O(1)',
             optimalApproach: problem.editorial?.approach || 'Leverage optimal data structures to minimize passes.',
             suggestions: [
-              'Verify boundary checks when input size reaches constraints limits.',
+              isPythonPass ? 'Replace the pass keyword with your algorithm logic.' : 'Verify boundary checks when input size reaches constraints limits.',
               'Ensure memory allocation is bounded within constant auxiliary space.',
             ],
             summary: isAccepted
               ? 'Great job! Your solution meets optimal time and space complexity targets.'
-              : 'Review edge cases such as empty inputs, duplicates, or negative numbers.',
+              : (isPythonPass
+                  ? 'Failed test cases (0/' + totalTC + ' passed). Write your solution logic to solve the problem.'
+                  : 'Review edge cases such as empty inputs, duplicates, or negative numbers.'),
           },
         };
       }
 
       if (evalData) {
+        // Defensive check: Python "pass" must never be classified as compilation_error
+        const rawStatus = (evalData.status || '').toLowerCase().trim();
+        if (
+          language === 'Python' &&
+          (rawStatus === 'compilation_error' || rawStatus === 'compile_error')
+        ) {
+          const combinedFeedback = `${evalData.stdout || ''} ${evalData.compilerError || ''} ${evalData.aiFeedback?.correctness || ''} ${evalData.aiFeedback?.summary || ''}`.toLowerCase();
+          if (
+            combinedFeedback.includes('pass') ||
+            combinedFeedback.includes('placeholder') ||
+            combinedFeedback.includes('starter') ||
+            combinedFeedback.includes('not implemented') ||
+            combinedFeedback.includes('no logic')
+          ) {
+            evalData.status = 'wrong_answer';
+            evalData.statusText = 'Wrong Answer';
+            evalData.passedTestCases = 0;
+            if (Array.isArray(evalData.testCaseResults)) {
+              evalData.testCaseResults = evalData.testCaseResults.map((tc: any) => ({
+                ...tc,
+                passed: false,
+                actualOutput: tc.actualOutput || 'None',
+              }));
+            }
+          }
+        }
+
         // Enforce strict test case numbers & results normalization
         const testResults = Array.isArray(evalData.testCaseResults) ? evalData.testCaseResults : [];
         const totalTC = typeof evalData.totalTestCases === 'number' && evalData.totalTestCases > 0
@@ -3159,19 +3317,19 @@ Perform a rigorous execution simulation and evaluation of the candidate's code. 
         evalData.passedTestCases = passedTC;
 
         // Derivation: ONLY accepted if all required test cases passed
-        const rawStatus = (evalData.status || '').toLowerCase().trim();
+        const finalStatus = (evalData.status || '').toLowerCase().trim();
         if (passedTC === totalTC && totalTC > 0) {
           evalData.status = 'accepted';
           evalData.statusText = 'Accepted';
         } else {
           // Can NEVER be accepted if passedTC < totalTC
-          if (rawStatus === 'compilation_error' || rawStatus === 'compile_error') {
+          if (finalStatus === 'compilation_error' || finalStatus === 'compile_error') {
             evalData.status = 'compilation_error';
             evalData.statusText = 'Compilation Error';
-          } else if (rawStatus === 'runtime_error') {
+          } else if (finalStatus === 'runtime_error') {
             evalData.status = 'runtime_error';
             evalData.statusText = 'Runtime Error';
-          } else if (rawStatus === 'time_limit_exceeded') {
+          } else if (finalStatus === 'time_limit_exceeded') {
             evalData.status = 'time_limit_exceeded';
             evalData.statusText = 'Time Limit Exceeded';
           } else {
@@ -5586,6 +5744,8 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
                 targetTopic: { type: Type.STRING, description: 'Specific DSA or Aptitude topic if applicable' },
                 targetCompany: { type: Type.STRING, description: 'Specific company if applicable' },
                 targetLanguage: { type: Type.STRING, description: 'Coding language e.g. Python, Java, C++' },
+                requiredCount: { type: Type.INTEGER, description: 'Exact number of required successful activities e.g. 2 for 2 coding problems' },
+                completionCriteria: { type: Type.STRING, description: 'Objective evidence criteria e.g. Solve 2 Intermediate Array problems with accepted submissions' },
               },
               required: ['id', 'title', 'reason', 'estimatedMinutes', 'difficulty', 'category', 'route', 'actionLabel'],
             },
@@ -5675,6 +5835,19 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
             reason = `Recommended based on your ${targetRole} preparation targets.`;
           }
 
+          const requiredCount = Math.max(1, Number(t.requiredCount) || (category === 'coding' ? 2 : 1));
+          const targetTopic = t.targetTopic || (category === 'coding' ? 'Arrays' : undefined);
+          const completionCriteria = String(t.completionCriteria || '').trim() ||
+            (category === 'coding'
+              ? `Solve ${requiredCount} ${targetTopic || 'DSA'} problems with accepted submissions in Coding Arena.`
+              : category === 'aptitude'
+              ? `Complete and submit a placement aptitude assessment.`
+              : category === 'interview' || category === 'hr-interview'
+              ? `Complete a simulated mock interview and generate evaluation report.`
+              : category === 'resume'
+              ? `Upload or analyze your resume to generate ATS compatibility score.`
+              : `Complete required ${category} activity.`);
+
           return {
             id: t.id || `task-${todayStr}-${index + 1}`,
             title,
@@ -5684,12 +5857,16 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
             difficulty: ['Beginner', 'Intermediate', 'Advanced'].includes(t.difficulty) ? t.difficulty : 'Intermediate',
             category,
             route,
-            actionLabel: String(t.actionLabel || 'Start Practice').trim(),
+            actionLabel: String(t.actionLabel || (category === 'coding' ? 'Start Coding Practice' : 'Start Practice')).trim(),
             status: 'pending',
             isPriority: Boolean(t.isPriority) || index === 0,
-            targetTopic: t.targetTopic || undefined,
+            targetTopic,
             targetCompany: t.targetCompany || (targetCompanies.length > 0 ? targetCompanies[0] : undefined),
             targetLanguage: codingLanguage,
+            requiredCount,
+            completedCount: 0,
+            completionCriteria,
+            isVerifiable: true,
           };
         });
 
@@ -5787,6 +5964,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
         isPriority: true,
         targetTopic: 'Arrays',
         targetLanguage: codingLang,
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Solve 1 foundational Array coding problem with accepted test cases in the Coding Arena.`,
+        isVerifiable: true,
       });
 
       tasks.push({
@@ -5801,6 +5982,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
         actionLabel: 'Practice Aptitude',
         isPriority: false,
         targetTopic: 'Quantitative Aptitude',
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Complete and submit a 10-question placement aptitude assessment.`,
+        isVerifiable: true,
       });
 
       tasks.push({
@@ -5814,6 +5999,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
         route: 'interview',
         actionLabel: 'Take Technical Interview',
         isPriority: false,
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Complete a simulated technical interview session.`,
+        isVerifiable: true,
       });
 
       if (!summary.roadmapProgress?.isInitialized) {
@@ -5828,6 +6017,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
           route: 'roadmap',
           actionLabel: 'Initialize Roadmap',
           isPriority: false,
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Initialize your personalized Career Roadmap.`,
+          isVerifiable: true,
         });
       }
     } else {
@@ -5851,6 +6044,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
             isPriority: true,
             targetTopic: topicName,
             targetLanguage: codingLang,
+            requiredCount: 2,
+            completedCount: 0,
+            completionCriteria: `Solve 2 ${topicName} problems with accepted submissions in Coding Arena.`,
+            isVerifiable: true,
           });
         } else {
           tasks.push({
@@ -5865,6 +6062,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
             actionLabel: 'Start Practice',
             isPriority: true,
             targetTopic: topicName,
+            requiredCount: 1,
+            completedCount: 0,
+            completionCriteria: `Complete a timed assessment on ${topicName}.`,
+            isVerifiable: true,
           });
         }
       } else {
@@ -5881,6 +6082,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
           isPriority: true,
           targetTopic: 'Arrays',
           targetLanguage: codingLang,
+          requiredCount: 2,
+          completedCount: 0,
+          completionCriteria: `Solve 2 Intermediate Array problems with accepted submissions in Coding Arena.`,
+          isVerifiable: true,
         });
       }
 
@@ -5899,6 +6104,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
             actionLabel: 'Start Practice',
             isPriority: false,
             targetTopic: 'Operating Systems',
+            requiredCount: 1,
+            completedCount: 0,
+            completionCriteria: `Complete an Operating Systems assessment.`,
+            isVerifiable: true,
           });
         } else {
           tasks.push({
@@ -5913,6 +6122,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
             actionLabel: 'Start Practice',
             isPriority: false,
             targetTopic: 'Operating Systems',
+            requiredCount: 1,
+            completedCount: 0,
+            completionCriteria: `Complete an Operating Systems practice test.`,
+            isVerifiable: true,
           });
         }
       }
@@ -5932,6 +6145,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
           actionLabel: 'Start Practice',
           isPriority: false,
           targetCompany: topCompany,
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Review company hiring targets and practice high-frequency questions.`,
+          isVerifiable: true,
         });
       } else {
         tasks.push({
@@ -5945,6 +6162,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
           route: 'interview',
           actionLabel: 'Start Practice',
           isPriority: false,
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Complete a simulated technical interview round.`,
+          isVerifiable: true,
         });
       }
 
@@ -5961,6 +6182,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
           route: 'roadmap',
           actionLabel: 'Continue Roadmap',
           isPriority: false,
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Complete the next milestone on your career roadmap.`,
+          isVerifiable: true,
         });
       } else if (summary.actualPerformanceMetrics?.resumeAtsScore && summary.actualPerformanceMetrics.resumeAtsScore !== 'No resume analyzed yet') {
         tasks.push({
@@ -5974,6 +6199,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
           route: 'resume-analyzer',
           actionLabel: 'Start Practice',
           isPriority: false,
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Upload and analyze your resume for ATS optimization.`,
+          isVerifiable: true,
         });
       } else {
         tasks.push({
@@ -5987,6 +6216,10 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
           route: 'roadmap',
           actionLabel: 'Initialize Roadmap',
           isPriority: false,
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Initialize your personalized Career Roadmap.`,
+          isVerifiable: true,
         });
       }
     }
@@ -6261,6 +6494,264 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
 
   app.all('/api/send-career-email', sendCareerEmailHandler);
   app.all('/api/send-career-email/', sendCareerEmailHandler);
+
+  // Job Description ↔ Resume Match Analyzer API
+  const KNOWN_MATCH_SKILLS = [
+    'JavaScript', 'TypeScript', 'React', 'Node.js', 'Express', 'Python', 'Java', 'C++',
+    'C#', 'Go', 'Rust', 'PHP', 'Ruby', 'SQL', 'PostgreSQL', 'MySQL', 'MongoDB', 'Redis',
+    'Cassandra', 'Docker', 'Kubernetes', 'AWS', 'GCP', 'Azure', 'Terraform', 'Git',
+    'CI/CD', 'REST API', 'GraphQL', 'gRPC', 'WebSockets', 'HTML5', 'CSS3', 'Tailwind',
+    'Next.js', 'Vue.js', 'Angular', 'Redux', 'Zustand', 'Data Structures', 'Algorithms',
+    'System Design', 'OOP', 'Microservices', 'Kafka', 'RabbitMQ', 'Linux', 'Bash',
+    'Agile', 'Scrum', 'Unit Testing', 'Jest', 'Cypress', 'Playwright', 'Selenium',
+    'PyTorch', 'TensorFlow', 'Scikit-Learn', 'Pandas', 'NumPy', 'FastAPI', 'Django',
+    'Spring Boot', 'Kotlin', 'Swift', 'SwiftUI', 'Jetpack Compose', 'React Native',
+    'Flutter', 'Cybersecurity', 'OWASP', 'Cryptography', 'Snowflake', 'Airflow', 'Spark'
+  ];
+
+  function generateServerJobMatchAnalysis(
+    jobDescriptionText: string,
+    resumeText: string,
+    jobTitle?: string,
+    companyName?: string,
+    resumeId?: string
+  ) {
+    const jdLower = jobDescriptionText.toLowerCase();
+    const resumeLower = (resumeText || '').toLowerCase();
+
+    const extractedSkills: Array<{ skill: string; importance: 'critical' | 'preferred'; matchedInResume: boolean }> = [];
+    const matchingSkills: string[] = [];
+    const missingSkills: string[] = [];
+
+    for (const skill of KNOWN_MATCH_SKILLS) {
+      const sLower = skill.toLowerCase();
+      if (jdLower.includes(sLower)) {
+        const inResume = resumeLower.includes(sLower);
+        const isCritical = [
+          'javascript', 'typescript', 'react', 'python', 'java', 'sql', 'node.js',
+          'c++', 'aws', 'docker', 'kubernetes', 'algorithms', 'data structures'
+        ].includes(sLower);
+
+        extractedSkills.push({
+          skill,
+          importance: isCritical ? 'critical' : 'preferred',
+          matchedInResume: inResume,
+        });
+
+        if (inResume) {
+          matchingSkills.push(skill);
+        } else {
+          missingSkills.push(skill);
+        }
+      }
+    }
+
+    const totalSkills = extractedSkills.length;
+    let matchScore = 70;
+    if (totalSkills > 0) {
+      const critical = extractedSkills.filter((s) => s.importance === 'critical');
+      const matchedCritical = critical.filter((s) => s.matchedInResume).length;
+      const preferred = extractedSkills.filter((s) => s.importance !== 'critical');
+      const matchedPreferred = preferred.filter((s) => s.matchedInResume).length;
+
+      const critScore = critical.length > 0 ? (matchedCritical / critical.length) * 60 : 60;
+      const prefScore = preferred.length > 0 ? (matchedPreferred / preferred.length) * 40 : 40;
+      matchScore = Math.max(20, Math.min(98, Math.round(critScore + prefScore)));
+    } else {
+      const commonMatches = ['experience', 'developer', 'software', 'engineer', 'code', 'project', 'api', 'database']
+        .filter((w) => resumeLower.includes(w) && jdLower.includes(w));
+      matchScore = Math.min(88, Math.max(45, 52 + commonMatches.length * 5));
+    }
+
+    const missingKeywords = missingSkills.slice(0, 8);
+    const potentialAtsIssues: string[] = [];
+    if (resumeText.length < 300) {
+      potentialAtsIssues.push('Resume content is brief; enrich project bullet points with quantifiable STAR metrics.');
+    }
+    if (!resumeLower.includes('experience') && !resumeLower.includes('project')) {
+      potentialAtsIssues.push('Standard "Projects" or "Experience" section header was not detected.');
+    }
+    if (!resumeLower.includes('skills')) {
+      potentialAtsIssues.push('Explicit "Technical Skills" keyword section was not detected.');
+    }
+
+    const recommendedImprovements: string[] = [];
+    if (missingSkills.length > 0) {
+      recommendedImprovements.push(
+        `Highlight practical experience or projects involving: ${missingSkills.slice(0, 4).join(', ')}.`
+      );
+    }
+    recommendedImprovements.push('Frame accomplishment bullets using the STAR / Google XYZ format (Accomplished [X] as measured by [Y], by doing [Z]).');
+    recommendedImprovements.push(`Tailor your executive summary to explicitly match requirements for "${jobTitle || 'the target role'}".`);
+
+    return {
+      id: `job_match_${Date.now()}`,
+      jobTitle: jobTitle || 'Software Engineer',
+      companyName,
+      resumeName: resumeId ? 'Selected Resume' : 'Current Resume',
+      resumeId,
+      matchScore,
+      matchingSkills,
+      missingSkills,
+      allExtractedSkills: extractedSkills,
+      relevantExperience: {
+        alignmentScore: Math.min(100, Math.max(30, matchScore + 5)),
+        matchingPoints: matchingSkills.length > 0
+          ? matchingSkills.map((s) => `Demonstrates relevant background and hands-on usage of ${s}`)
+          : ['Demonstrates core software engineering fundamentals.'],
+        gapPoints: missingSkills.length > 0
+          ? missingSkills.map((s) => `Lacks explicit project or coursework mention of ${s}`)
+          : ['No major skill gaps identified for this posting.'],
+      },
+      missingKeywords,
+      projectAlignment: {
+        score: Math.max(40, matchScore - 5),
+        analysisText: `Candidate profile displays ${matchingSkills.length} overlapping technical competencies with the target role description.`,
+        suggestedProjectIdeas: missingSkills.length > 0
+          ? missingSkills.slice(0, 2).map((s) => `Build and deploy a project demonstrating hands-on mastery of ${s}`)
+          : ['Expand existing applications with automated CI/CD and comprehensive test coverage.'],
+      },
+      potentialAtsIssues,
+      recommendedImprovements,
+      analyzedAt: new Date().toISOString(),
+    };
+  }
+
+  const jobMatchHandler: express.RequestHandler = async (req, res) => {
+    try {
+      const { jobDescriptionText, resumeText, jobTitle, companyName, resumeId } = req.body || {};
+
+      if (!jobDescriptionText || !jobDescriptionText.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Job description text is required.',
+        });
+      }
+
+      const { client: ai, error: aiError } = getGemini();
+      let parsed: any = null;
+
+      if (ai && !aiError) {
+        try {
+          const prompt = `You are an expert technical recruiter and ATS specialist. Compare the following Job Description against the Candidate Resume.
+Job Title: ${jobTitle || 'Software Engineer'}
+Company: ${companyName || 'Target Company'}
+
+=== JOB DESCRIPTION ===
+${jobDescriptionText.slice(0, 4000)}
+
+=== CANDIDATE RESUME ===
+${(resumeText || 'Full Stack Engineer with JavaScript, React, Node.js, SQL').slice(0, 4000)}
+
+Analyze carefully and return a valid JSON object matching this schema:
+{
+  "matchScore": number (0-100),
+  "matchingSkills": string[],
+  "missingSkills": string[],
+  "missingKeywords": string[],
+  "relevantExperience": {
+    "alignmentScore": number (0-100),
+    "matchingPoints": string[],
+    "gapPoints": string[]
+  },
+  "projectAlignment": {
+    "score": number (0-100),
+    "analysisText": string,
+    "suggestedProjectIdeas": string[]
+  },
+  "potentialAtsIssues": string[],
+  "recommendedImprovements": string[]
+}
+Return STRICT JSON only without Markdown backticks.`;
+
+          const aiResponse = await generateContentWithResilience(ai, prompt, {
+            label: 'Job Match Analyzer',
+            timeoutMs: 8000,
+          });
+
+          if (aiResponse?.response?.text) {
+            const text = aiResponse.response.text.trim();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              parsed = JSON.parse(jsonMatch[0]);
+            }
+          }
+        } catch (aiErr: any) {
+          console.warn('[job-match] Upstream AI service unavailable/demand spike, using resilient server fallback:', aiErr?.message || aiErr);
+        }
+      }
+
+      let analysis: any;
+      if (parsed && typeof parsed === 'object') {
+        analysis = {
+          id: `job_match_${Date.now()}`,
+          jobTitle: jobTitle || 'Software Engineer',
+          companyName,
+          resumeName: resumeId ? 'Selected Resume' : 'Current Resume',
+          resumeId,
+          matchScore: typeof parsed.matchScore === 'number' ? parsed.matchScore : 70,
+          matchingSkills: Array.isArray(parsed.matchingSkills) ? parsed.matchingSkills : [],
+          missingSkills: Array.isArray(parsed.missingSkills) ? parsed.missingSkills : [],
+          allExtractedSkills: (Array.isArray(parsed.matchingSkills) ? parsed.matchingSkills : []).map((s: string) => ({
+            skill: s,
+            importance: 'critical' as const,
+            matchedInResume: true,
+          })).concat(
+            (Array.isArray(parsed.missingSkills) ? parsed.missingSkills : []).map((s: string) => ({
+              skill: s,
+              importance: 'preferred' as const,
+              matchedInResume: false,
+            }))
+          ),
+          relevantExperience: parsed.relevantExperience || {
+            alignmentScore: 70,
+            matchingPoints: [],
+            gapPoints: [],
+          },
+          missingKeywords: Array.isArray(parsed.missingKeywords) ? parsed.missingKeywords : (parsed.missingSkills || []),
+          projectAlignment: parsed.projectAlignment || {
+            score: 70,
+            analysisText: 'General alignment observed.',
+            suggestedProjectIdeas: [],
+          },
+          potentialAtsIssues: Array.isArray(parsed.potentialAtsIssues) ? parsed.potentialAtsIssues : [],
+          recommendedImprovements: Array.isArray(parsed.recommendedImprovements) ? parsed.recommendedImprovements : [],
+          analyzedAt: new Date().toISOString(),
+        };
+      } else {
+        analysis = generateServerJobMatchAnalysis(
+          jobDescriptionText,
+          resumeText || '',
+          jobTitle,
+          companyName,
+          resumeId
+        );
+      }
+
+      return res.status(200).json({
+        success: true,
+        analysis,
+      });
+    } catch (err: any) {
+      console.error('[job-match/analyze] Error:', err);
+      // Even in unforeseen exceptions, generate fallback match analysis rather than 500 error
+      const { jobDescriptionText, resumeText, jobTitle, companyName, resumeId } = req.body || {};
+      const fallbackAnalysis = generateServerJobMatchAnalysis(
+        jobDescriptionText || 'Software Developer',
+        resumeText || '',
+        jobTitle,
+        companyName,
+        resumeId
+      );
+      return res.status(200).json({
+        success: true,
+        analysis: fallbackAnalysis,
+      });
+    }
+  };
+
+  app.post('/api/job-match/analyze', jobMatchHandler);
+  app.post('/api/job-match/analyze/', jobMatchHandler);
 
 
 

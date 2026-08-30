@@ -1,15 +1,27 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { getStoredDailyTasks } from './roadmapStorage';
+import { getStoredDailyTasks, getCompletedItemIds } from './roadmapStorage';
 import { getStudentTargets } from './companyPrepStorage';
 import { cloudSyncService } from './cloudSyncService';
+import { persistenceManager } from './persistenceManager';
 import { SUPABASE_SETUP_SQL } from '../data/supabaseSqlScript';
 
-export interface ModuleDiagnosticDetail {
+export type PersistenceSyncStatus =
+  | 'Cloud Synced'
+  | 'Pending Sync'
+  | 'Cloud Error'
+  | 'Local Only'
+  | 'Not Applicable';
+
+export interface ModulePersistenceAuditRow {
   name: string;
+  module: string;
   tableOrSource: string;
-  count: number;
-  status: 'ok' | 'empty' | 'error' | 'not_found' | 'missing_table';
-  errorDetails?: string;
+  localCache: number;
+  cloudRecords: number;
+  syncStatus: PersistenceSyncStatus;
+  lastCloudSync: string;
+  pendingItems: number;
+  errors?: string;
   notes?: string;
 }
 
@@ -65,13 +77,29 @@ export interface CareerPilotDiagnosticReport {
   companyPrepRecordCount: number;
   studyPlannerRecordCount: number;
 
-  // Detailed breakdown
-  modules: ModuleDiagnosticDetail[];
-  
+  // Detailed persistence audit rows
+  modules: ModulePersistenceAuditRow[];
+
   // Errors & Warnings
   rlsErrors: string[];
   warnings: string[];
   overallStatus: 'healthy' | 'degraded' | 'error' | 'unauthenticated' | 'unconfigured';
+}
+
+function formatSyncTime(timestamp?: string | null): string {
+  if (!timestamp) return 'Never';
+  try {
+    const d = new Date(timestamp);
+    if (isNaN(d.getTime())) return 'Never';
+    const now = Date.now();
+    const diffSec = Math.floor((now - d.getTime()) / 1000);
+    if (diffSec < 10) return 'Just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return 'Never';
+  }
 }
 
 /**
@@ -93,7 +121,7 @@ export async function runPersistenceDiagnostics(): Promise<CareerPilotDiagnostic
 
   const warnings: string[] = [];
   const rlsErrors: string[] = [];
-  const modules: ModuleDiagnosticDetail[] = [];
+  const modules: ModulePersistenceAuditRow[] = [];
   const missingTables: string[] = [];
   const missingColumns: string[] = [];
 
@@ -170,6 +198,9 @@ export async function runPersistenceDiagnostics(): Promise<CareerPilotDiagnostic
   }
 
   const effectiveUserId = authUserId || 'guest';
+  const isAuthed = Boolean(authUserId && authUserId !== 'guest');
+  const offlineQueue = isAuthed ? persistenceManager.getOfflineQueue(authUserId!) : [];
+  const localHarvest = cloudSyncService.harvestAllLocalData(effectiveUserId);
 
   // Helper to query table count and errors safely
   const queryTable = async (
@@ -177,11 +208,13 @@ export async function runPersistenceDiagnostics(): Promise<CareerPilotDiagnostic
     tableName: string,
     filterColumn: string = 'user_id',
     additionalFilter?: (query: any) => any
-  ): Promise<{ count: number; error: any; sample?: any }> => {
+  ): Promise<{ count: number; error: any; sample?: any; latestUpdatedAt?: string }> => {
     try {
-      let q = supabase.from(tableName).select('id', { count: 'exact' });
-      if (effectiveUserId && effectiveUserId !== 'guest') {
+      let q = supabase.from(tableName).select('id, created_at, updated_at', { count: 'exact' });
+      if (isAuthed && effectiveUserId) {
         q = q.eq(filterColumn, effectiveUserId);
+      } else {
+        return { count: 0, error: null };
       }
       if (additionalFilter) {
         q = additionalFilter(q);
@@ -193,115 +226,88 @@ export async function runPersistenceDiagnostics(): Promise<CareerPilotDiagnostic
       }
       const dataArray = Array.isArray(data) ? (data as any[]) : [];
       const resolvedCount = typeof count === 'number' ? count : dataArray.length;
-      return { count: resolvedCount, error: null, sample: dataArray.length > 0 ? dataArray[0] : null };
+      let latestUpdated: string | undefined = undefined;
+      if (dataArray.length > 0) {
+        const sorted = [...dataArray].sort((a, b) => {
+          const tA = new Date(a.updated_at || a.created_at || 0).getTime();
+          const tB = new Date(b.updated_at || b.created_at || 0).getTime();
+          return tB - tA;
+        });
+        latestUpdated = sorted[0]?.updated_at || sorted[0]?.created_at;
+      }
+      return { count: resolvedCount, error: null, sample: dataArray[0], latestUpdatedAt: latestUpdated };
     } catch (err: any) {
       return { count: 0, error: err };
     }
   };
 
-  // 2. Query Profile
+  // 2. Query Student Profile
   let profileFound = false;
   let profileId: string | null = null;
   let profileRole: string | null = null;
   let hasProfileDataJson = false;
   let profileError: string | null = null;
+  let profileUpdatedAt: string | null = null;
+
   let remoteRoadmapCount = 0;
   let remoteCompanyTargetCount = 0;
+  let remoteStudyPlanCount = 0;
+  let remoteMentorChatCount = 0;
+  let remoteBadgesCount = 0;
+  let remoteLongestStreak = 0;
 
-  try {
-    const initialProf = await supabase
-      .from('profiles')
-      .select('id, full_name, role, target_role, profile_data, career_goal')
-      .eq('id', effectiveUserId)
-      .maybeSingle();
-
-    let profData: any = initialProf.data;
-    let profErr = initialProf.error;
-
-    // Check for missing profile_data column (Postgres error 42703)
-    if (profErr && (profErr.code === '42703' || profErr.message?.includes('profile_data'))) {
-      missingColumns.push('profiles.profile_data');
-      const fallbackProf = await supabase
+  if (isAuthed) {
+    try {
+      const { data: profData, error: profErr } = await supabase
         .from('profiles')
-        .select('id, full_name, role, target_role, career_goal')
+        .select('*')
         .eq('id', effectiveUserId)
         .maybeSingle();
 
-      if (!fallbackProf.error) {
-        profData = fallbackProf.data;
-        profErr = null;
+      if (profErr) {
+        profileError = profErr.message || 'Error fetching profile';
+        rlsErrors.push(`profiles (Student Profile): ${profErr.code || ''} ${profErr.message}`.trim());
+      } else if (profData) {
+        profileFound = true;
+        profileId = profData.id;
+        profileRole = profData.role || 'student';
+        hasProfileDataJson = !!profData.profile_data;
+        profileUpdatedAt = profData.updated_at || profData.created_at || null;
+
+        // Check embedded data
+        let metaObj = (profData.profile_data as Record<string, any>) || {};
+        if (typeof profData.career_goal === 'string' && profData.career_goal.startsWith('__CP_DATA__')) {
+          try {
+            const parsed = JSON.parse(profData.career_goal.replace(/^__CP_DATA__/, ''));
+            metaObj = { ...metaObj, ...parsed };
+          } catch (_) {}
+        }
+
+        if (metaObj.roadmap_tasks && Array.isArray(metaObj.roadmap_tasks)) {
+          remoteRoadmapCount = metaObj.roadmap_tasks.length;
+        }
+        if (metaObj.company_targets && Array.isArray(metaObj.company_targets)) {
+          remoteCompanyTargetCount = metaObj.company_targets.length;
+        }
+        if (metaObj.study_plans && typeof metaObj.study_plans === 'object') {
+          remoteStudyPlanCount = Object.keys(metaObj.study_plans).length;
+        }
+        if (metaObj.mentor_chat_history && Array.isArray(metaObj.mentor_chat_history)) {
+          remoteMentorChatCount = metaObj.mentor_chat_history.length;
+        }
+        if (metaObj.unlocked_badges && typeof metaObj.unlocked_badges === 'object') {
+          remoteBadgesCount = Object.keys(metaObj.unlocked_badges).length;
+        }
+        if (typeof metaObj.longest_streak === 'number') {
+          remoteLongestStreak = metaObj.longest_streak;
+        }
       }
+    } catch (err: any) {
+      profileError = err?.message || 'Profile query error';
     }
-
-    if (profErr) {
-      profileError = `${profErr.code || ''} ${profErr.message}`.trim();
-      rlsErrors.push(`profiles: ${profileError}`);
-      modules.push({
-        name: 'Student Profile',
-        tableOrSource: 'profiles',
-        count: 0,
-        status: 'error',
-        errorDetails: profileError,
-      });
-    } else if (profData) {
-      profileFound = true;
-      profileId = profData.id;
-      profileRole = profData.role || 'student';
-      hasProfileDataJson = !!profData.profile_data;
-
-      // Check roadmap and targets in profile_data
-      if (profData.profile_data?.roadmap_tasks && Array.isArray(profData.profile_data.roadmap_tasks)) {
-        remoteRoadmapCount = profData.profile_data.roadmap_tasks.length;
-      }
-      if (profData.profile_data?.company_targets && Array.isArray(profData.profile_data.company_targets)) {
-        remoteCompanyTargetCount = profData.profile_data.company_targets.length;
-      }
-
-      // If stored in career_goal envelope
-      if (typeof profData.career_goal === 'string' && profData.career_goal.startsWith('__CP_DATA__')) {
-        try {
-          const parsed = JSON.parse(profData.career_goal.replace(/^__CP_DATA__/, ''));
-          if (parsed.roadmap_tasks && Array.isArray(parsed.roadmap_tasks) && remoteRoadmapCount === 0) {
-            remoteRoadmapCount = parsed.roadmap_tasks.length;
-          }
-          if (parsed.company_targets && Array.isArray(parsed.company_targets) && remoteCompanyTargetCount === 0) {
-            remoteCompanyTargetCount = parsed.company_targets.length;
-          }
-        } catch (_) {}
-      }
-
-      const notes = hasProfileDataJson
-        ? `Profile ID: ${profData.id} | Target Role: ${profData.target_role || 'Not set'}`
-        : `Profile ID: ${profData.id} (Legacy schema - run SQL script to add profile_data column)`;
-
-      modules.push({
-        name: 'Student Profile',
-        tableOrSource: 'profiles',
-        count: 1,
-        status: 'ok',
-        notes,
-      });
-    } else {
-      modules.push({
-        name: 'Student Profile',
-        tableOrSource: 'profiles',
-        count: 0,
-        status: 'not_found',
-        notes: 'No profile record found matching authenticated user ID',
-      });
-    }
-  } catch (err: any) {
-    profileError = err?.message || 'Profile query error';
-    modules.push({
-      name: 'Student Profile',
-      tableOrSource: 'profiles',
-      count: 0,
-      status: 'error',
-      errorDetails: profileError || undefined,
-    });
   }
 
-  // 3. Query all other core Supabase tables concurrently
+  // 3. Query tables concurrently
   const [
     resumeRes,
     codingRes,
@@ -320,118 +326,203 @@ export async function runPersistenceDiagnostics(): Promise<CareerPilotDiagnostic
     queryTable('HR Interviews', 'mock_interviews', 'user_id', (q) => q.or('interview_type.ilike.%hr%,interview_type.ilike.%behavioral%')),
   ]);
 
-  // Helper to add module result
-  const recordModule = (name: string, table: string, res: { count: number; error: any }) => {
-    if (res.error) {
-      const errCode = res.error.code || '';
-      const errMsg = res.error.message || res.error.toString();
-      const errStr = `${errCode} ${errMsg}`.trim();
-      const isMissingTable = errCode === 'PGRST205' || errCode === '42P01' || errMsg.includes('schema cache') || errMsg.includes('does not exist');
+  // Helper to add audit row
+  const addAuditRow = (
+    moduleName: string,
+    tableOrSource: string,
+    localCache: number,
+    cloudRes: { count: number; error: any; latestUpdatedAt?: string },
+    options: {
+      pendingOverride?: number;
+      notes?: string;
+      customSyncStatus?: PersistenceSyncStatus;
+    } = {}
+  ) => {
+    let syncStatus: PersistenceSyncStatus = 'Cloud Synced';
+    let errorMessage: string | undefined = undefined;
+    const pendingCount = options.pendingOverride !== undefined
+      ? options.pendingOverride
+      : (isAuthed ? Math.max(0, localCache - cloudRes.count) : 0);
 
+    if (!isAuthed) {
+      syncStatus = 'Local Only';
+    } else if (cloudRes.error) {
+      const errCode = cloudRes.error.code || '';
+      const errMsg = cloudRes.error.message || cloudRes.error.toString();
+      errorMessage = `${errCode} ${errMsg}`.trim();
+      const isMissingTable = errCode === 'PGRST205' || errCode === '42P01' || errMsg.includes('schema cache') || errMsg.includes('does not exist');
       if (isMissingTable) {
-        const cleanTableName = table.split(' ')[0];
-        if (!missingTables.includes(cleanTableName)) {
-          missingTables.push(cleanTableName);
-        }
-        modules.push({
-          name,
-          tableOrSource: table,
-          count: 0,
-          status: 'missing_table',
-          errorDetails: `Table '${cleanTableName}' not found in Supabase schema. Run supabase-schema.sql to create it.`,
-          notes: 'Local Storage fallback active & protecting practice records.',
-        });
-      } else {
-        rlsErrors.push(`${table} (${name}): ${errStr}`);
-        modules.push({
-          name,
-          tableOrSource: table,
-          count: 0,
-          status: 'error',
-          errorDetails: errStr,
-        });
+        const cleanName = tableOrSource.split('.')[0].split(' ')[0];
+        if (!missingTables.includes(cleanName)) missingTables.push(cleanName);
       }
+      rlsErrors.push(`${tableOrSource} (${moduleName}): ${errorMessage}`);
+      syncStatus = 'Cloud Error';
+    } else if (options.customSyncStatus) {
+      syncStatus = options.customSyncStatus;
+    } else if (pendingCount > 0) {
+      syncStatus = 'Pending Sync';
+    } else if (cloudRes.count > 0 || (localCache === 0 && cloudRes.count === 0)) {
+      syncStatus = 'Cloud Synced';
     } else {
-      modules.push({
-        name,
-        tableOrSource: table,
-        count: res.count,
-        status: res.count > 0 ? 'ok' : 'empty',
-      });
+      syncStatus = 'Cloud Synced';
     }
+
+    const lastCloudSync = formatSyncTime(cloudRes.latestUpdatedAt || (cloudRes.count > 0 ? timestamp : null));
+
+    modules.push({
+      name: moduleName,
+      module: moduleName,
+      tableOrSource,
+      localCache,
+      cloudRecords: cloudRes.count,
+      syncStatus,
+      lastCloudSync,
+      pendingItems: pendingCount,
+      errors: errorMessage,
+      notes: options.notes,
+    });
   };
 
-  recordModule('Resume Versions', 'resumes', resumeRes);
-  recordModule('Coding Submissions', 'coding_submissions', codingRes);
-  recordModule('Saved Coding Questions', 'saved_coding_questions', savedQuestionsRes);
-  recordModule('Placement Test Attempts', 'placement_sessions', placementRes);
-  recordModule('Total Mock Interviews', 'mock_interviews', mockInterviewTotalRes);
-  recordModule('Technical Mock Interviews', 'mock_interviews [technical]', technicalInterviewRes);
-  recordModule('HR Mock Interviews', 'mock_interviews [hr/behavioral]', hrInterviewRes);
-
-  // 4. Check Roadmap & Company Prep record counts
-  const localRoadmap = getStoredDailyTasks(effectiveUserId);
-  const localRoadmapCount = Array.isArray(localRoadmap) ? localRoadmap.length : 0;
-  const finalRoadmapCount = Math.max(remoteRoadmapCount, localRoadmapCount);
+  // 1. Student Profile
+  const profilePending = (isAuthed && !profileFound) ? 1 : 0;
+  const profileSyncStatus: PersistenceSyncStatus = !isAuthed
+    ? 'Local Only'
+    : profileError
+    ? 'Cloud Error'
+    : profileFound
+    ? 'Cloud Synced'
+    : 'Pending Sync';
 
   modules.push({
-    name: 'Roadmap Tasks',
-    tableOrSource: 'profiles.profile_data.roadmap_tasks',
-    count: finalRoadmapCount,
-    status: finalRoadmapCount > 0 ? 'ok' : 'empty',
-    notes: `Remote: ${remoteRoadmapCount} | Local Cache: ${localRoadmapCount}`,
+    name: 'Student Profile',
+    module: 'Student Profile',
+    tableOrSource: 'profiles',
+    localCache: 1,
+    cloudRecords: profileFound ? 1 : 0,
+    syncStatus: profileSyncStatus,
+    lastCloudSync: formatSyncTime(profileUpdatedAt),
+    pendingItems: profilePending,
+    errors: profileError || undefined,
+    notes: profileFound ? `User: ${effectiveUserId}` : 'No Supabase profile record',
   });
 
-  const localTargets = getStudentTargets(effectiveUserId);
-  const localTargetCount = Array.isArray(localTargets) ? localTargets.length : 0;
-  const finalCompanyPrepCount = Math.max(remoteCompanyTargetCount, localTargetCount);
+  // 2. Resume Versions
+  addAuditRow('Resume Versions', 'resumes', localHarvest.resumes.length, resumeRes);
 
-  modules.push({
-    name: 'Company Targets',
-    tableOrSource: 'profiles.profile_data.company_targets',
-    count: finalCompanyPrepCount,
-    status: finalCompanyPrepCount > 0 ? 'ok' : 'empty',
-    notes: `Remote: ${remoteCompanyTargetCount} | Local Cache: ${localTargetCount}`,
+  // 3. Resume Analysis / ATS Results
+  const localAnalysisCount = (localHarvest.resumes.some(r => r.analysisResult)) ? 1 : 0;
+  addAuditRow('Resume Analysis / ATS', 'resumes [analysis_result]', localAnalysisCount, {
+    count: resumeRes.count > 0 ? resumeRes.count : 0,
+    error: resumeRes.error,
+    latestUpdatedAt: resumeRes.latestUpdatedAt,
   });
 
-  // 5. Check Study Planner records
-  let studyPlannerCount = 0;
+  // 4. Coding Submissions & Source Code
+  const unsyncedSubs = localHarvest.codingSubmissions.filter((s: any) => !s.cloudSynced).length;
+  addAuditRow('Coding Submissions & Code', 'coding_submissions', localHarvest.codingSubmissions.length, codingRes, {
+    pendingOverride: unsyncedSubs,
+  });
+
+  // 5. Saved Coding Questions
+  addAuditRow('Saved Coding Questions', 'saved_coding_questions', localHarvest.savedQuestions.length, savedQuestionsRes);
+
+  // 6. Placement Practice Sessions
+  addAuditRow('Placement Test Sessions', 'placement_sessions', localHarvest.placementSessions.length, placementRes);
+
+  // 7. Mock Technical Interviews
+  const localTechInterviews = localHarvest.mockInterviews.filter((i: any) => {
+    const s = String(i.subject || i.interview_type || '').toLowerCase();
+    return !s.includes('hr') && !s.includes('behavioral');
+  }).length;
+  addAuditRow('Technical Mock Interviews', 'mock_interviews [technical]', localTechInterviews, technicalInterviewRes);
+
+  // 8. Mock HR / Behavioral Interviews
+  const localHrInterviews = localHarvest.mockInterviews.filter((i: any) => {
+    const s = String(i.subject || i.interview_type || '').toLowerCase();
+    return s.includes('hr') || s.includes('behavioral');
+  }).length;
+  addAuditRow('HR & Behavioral Interviews', 'mock_interviews [hr/behavioral]', localHrInterviews, hrInterviewRes);
+
+  // 9. Company Targets
+  const localTargetCount = localHarvest.companyTargets.length;
+  const companyPending = (isAuthed && localTargetCount > remoteCompanyTargetCount) ? (localTargetCount - remoteCompanyTargetCount) : 0;
+  addAuditRow('Company Prep Targets', 'profiles.profile_data.company_targets', localTargetCount, {
+    count: remoteCompanyTargetCount,
+    error: profileError ? { message: profileError } : null,
+    latestUpdatedAt: profileUpdatedAt || undefined,
+  }, {
+    pendingOverride: companyPending,
+  });
+
+  // 10. Roadmap & Tasks
+  const localRoadmapCount = localHarvest.roadmapTasks.length;
+  const roadmapPending = (isAuthed && localRoadmapCount > remoteRoadmapCount) ? (localRoadmapCount - remoteRoadmapCount) : 0;
+  addAuditRow('Career Roadmap & Tasks', 'profiles.profile_data.roadmap_tasks', localRoadmapCount, {
+    count: remoteRoadmapCount,
+    error: profileError ? { message: profileError } : null,
+    latestUpdatedAt: profileUpdatedAt || undefined,
+  }, {
+    pendingOverride: roadmapPending,
+  });
+
+  // 11. Study Planner & Schedule
+  let localStudyPlanCount = 0;
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith(`careerpilot_study_plan_${effectiveUserId}`)) {
-          studyPlannerCount++;
+          localStudyPlanCount++;
         }
       }
     }
   } catch (_) {}
-
-  modules.push({
-    name: 'Study Planner Records',
-    tableOrSource: 'localStorage / StudyPlanState',
-    count: studyPlannerCount,
-    status: studyPlannerCount > 0 ? 'ok' : 'empty',
+  const studyPending = (isAuthed && localStudyPlanCount > remoteStudyPlanCount) ? (localStudyPlanCount - remoteStudyPlanCount) : 0;
+  addAuditRow('Study Planner & Schedule', 'profiles.profile_data.study_plans', localStudyPlanCount, {
+    count: remoteStudyPlanCount,
+    error: profileError ? { message: profileError } : null,
+    latestUpdatedAt: profileUpdatedAt || undefined,
+  }, {
+    pendingOverride: studyPending,
   });
 
-  // 6. Compute Authentic Student Activity Logs
-  const authenticActivityTotal =
-    (profileFound ? 1 : 0) +
-    resumeRes.count +
-    codingRes.count +
-    placementRes.count +
-    mockInterviewTotalRes.count +
-    finalCompanyPrepCount;
-
-  modules.push({
-    name: 'Authentic Student Activities',
-    tableOrSource: 'Aggregated Cross-Module Logs',
-    count: authenticActivityTotal,
-    status: authenticActivityTotal > 0 ? 'ok' : 'empty',
+  // 12. AI Mentor Chat History
+  const localMentorCount = localHarvest.mentorChatCount;
+  const mentorPending = (isAuthed && localMentorCount > remoteMentorChatCount) ? (localMentorCount - remoteMentorChatCount) : 0;
+  addAuditRow('AI Mentor Chat History', 'profiles.profile_data.mentor_chat_history', localMentorCount, {
+    count: remoteMentorChatCount,
+    error: profileError ? { message: profileError } : null,
+    latestUpdatedAt: profileUpdatedAt || undefined,
+  }, {
+    pendingOverride: mentorPending,
   });
 
-  // 5b. Local Storage Harvest Statistics (to detect AI Studio vs Vercel divergence)
-  const localHarvest = cloudSyncService.harvestAllLocalData(effectiveUserId);
+  // 13. Achievements & Badges
+  const localBadgesCount = localHarvest.badges.length;
+  const badgesPending = (isAuthed && localBadgesCount > remoteBadgesCount) ? (localBadgesCount - remoteBadgesCount) : 0;
+  addAuditRow('Achievements & Badges', 'profiles.profile_data.unlocked_badges', localBadgesCount, {
+    count: remoteBadgesCount,
+    error: profileError ? { message: profileError } : null,
+    latestUpdatedAt: profileUpdatedAt || undefined,
+  }, {
+    pendingOverride: badgesPending,
+  });
+
+  // 14. Coding Streaks
+  let localStreak = 0;
+  try {
+    const rawS = localStorage.getItem(`careerpilot_longest_streak_${effectiveUserId}`);
+    if (rawS) localStreak = parseInt(rawS, 10) || 0;
+  } catch (_) {}
+  addAuditRow('Coding Practice Streaks', 'profiles.profile_data.longest_streak', localStreak, {
+    count: remoteLongestStreak,
+    error: profileError ? { message: profileError } : null,
+    latestUpdatedAt: profileUpdatedAt || undefined,
+  }, {
+    pendingOverride: 0,
+    notes: `Longest streak: ${Math.max(localStreak, remoteLongestStreak)} day(s)`,
+  });
+
   const localCounts: LocalHarvestCounts = {
     localResumes: localHarvest.resumes.length,
     localCodingSubmissions: localHarvest.codingSubmissions.length,
@@ -444,25 +535,32 @@ export async function runPersistenceDiagnostics(): Promise<CareerPilotDiagnostic
   };
 
   const hasSchemaFixRequired = missingTables.length > 0 || missingColumns.length > 0;
+  const hasPendingOffline = offlineQueue.length > 0;
+  const anyCloudErrors = modules.some((m) => m.syncStatus === 'Cloud Error');
+  const anyPendingSync = modules.some((m) => m.syncStatus === 'Pending Sync');
 
-  // Determine overall status
+  // Overall status determination:
+  // "Healthy" strictly requires authentication, active connection, no missing tables, profile found, and no sync errors.
   let overallStatus: CareerPilotDiagnosticReport['overallStatus'] = 'healthy';
   let connectionStatus: CareerPilotDiagnosticReport['supabaseConnectionStatus'] = 'Connected';
 
   if (!authUserId) {
     overallStatus = 'unauthenticated';
-    warnings.push('No active Supabase user session detected. User is operating in guest / unauthenticated mode.');
+    warnings.push('No active Supabase user session detected. User is operating in local/guest mode.');
   } else if (hasSchemaFixRequired) {
     overallStatus = 'degraded';
     connectionStatus = 'Degraded';
-    warnings.push(`Supabase schema setup required: ${missingTables.length} table(s) and ${missingColumns.length} column(s) are missing.`);
-  } else if (rlsErrors.length > 0) {
+    warnings.push(`Supabase schema setup required: missing table(s) ${missingTables.join(', ')}.`);
+  } else if (rlsErrors.length > 0 || anyCloudErrors) {
     overallStatus = 'degraded';
     connectionStatus = 'Degraded';
-    warnings.push(`${rlsErrors.length} database or RLS permission error(s) encountered during module inspection.`);
+    warnings.push(`${rlsErrors.length} database or RLS permission error(s) encountered.`);
   } else if (!profileFound) {
     overallStatus = 'degraded';
     warnings.push(`No student profile record found in Supabase 'profiles' table for user ID: ${authUserId}`);
+  } else if (hasPendingOffline || anyPendingSync) {
+    overallStatus = 'degraded';
+    warnings.push(`There are pending items awaiting cloud synchronization.`);
   }
 
   const report: CareerPilotDiagnosticReport = {
@@ -493,10 +591,10 @@ export async function runPersistenceDiagnostics(): Promise<CareerPilotDiagnostic
     mockInterviewTotalCount: mockInterviewTotalRes.count,
     technicalInterviewCount: technicalInterviewRes.count,
     hrInterviewCount: hrInterviewRes.count,
-    studentActivityLogCount: authenticActivityTotal,
-    roadmapRecordCount: finalRoadmapCount,
-    companyPrepRecordCount: finalCompanyPrepCount,
-    studyPlannerRecordCount: studyPlannerCount,
+    studentActivityLogCount: (profileFound ? 1 : 0) + resumeRes.count + codingRes.count + placementRes.count + mockInterviewTotalRes.count,
+    roadmapRecordCount: Math.max(remoteRoadmapCount, localRoadmapCount),
+    companyPrepRecordCount: Math.max(remoteCompanyTargetCount, localTargetCount),
+    studyPlannerRecordCount: Math.max(remoteStudyPlanCount, localStudyPlanCount),
     modules,
     rlsErrors,
     warnings,
@@ -504,28 +602,24 @@ export async function runPersistenceDiagnostics(): Promise<CareerPilotDiagnostic
   };
 
   // Structured console log
-  console.groupCollapsed(`[CareerPilot Read-Only Diagnostics] ${environment} (${overallStatus.toUpperCase()})`);
+  console.groupCollapsed(`[CareerPilot Persistence Audit] ${environment} (${overallStatus.toUpperCase()})`);
   console.log('Timestamp:', timestamp);
-  console.log('Supabase Sanitized URL:', sanitizedUrl);
-  console.log('Auth User ID:', authUserId || 'NONE (Unauthenticated)');
-  console.log('Auth Email:', authEmail || 'N/A');
-  console.log('Profile Found:', profileFound ? `YES (ID: ${profileId})` : 'NO');
-  console.log('Schema Fix Required:', hasSchemaFixRequired ? `YES (Missing: ${[...missingTables, ...missingColumns].join(', ')})` : 'NO');
+  console.log('Supabase URL:', sanitizedUrl);
+  console.log('Auth User ID:', authUserId || 'NONE (Guest)');
+  console.log('Profile In Cloud:', profileFound ? `YES (ID: ${profileId})` : 'NO');
   console.table(
     modules.map((m) => ({
-      Module: m.name,
-      'Table / Source': m.tableOrSource,
-      'Count / Records': m.count,
-      Status: m.status.toUpperCase(),
-      'Error / Notes': m.errorDetails || m.notes || '-',
+      Module: m.module,
+      'Local Cache': m.localCache,
+      'Cloud Records': m.cloudRecords,
+      'Sync Status': m.syncStatus,
+      'Last Cloud Sync': m.lastCloudSync,
+      'Pending Items': m.pendingItems,
+      Errors: m.errors || '-',
     }))
   );
-  if (rlsErrors.length > 0) {
-    console.error('RLS / Table Errors:', rlsErrors);
-  }
-  if (warnings.length > 0) {
-    console.warn('Diagnostic Warnings:', warnings);
-  }
+  if (rlsErrors.length > 0) console.error('RLS Errors:', rlsErrors);
+  if (warnings.length > 0) console.warn('Audit Warnings:', warnings);
   console.groupEnd();
 
   return report;

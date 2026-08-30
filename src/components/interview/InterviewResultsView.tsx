@@ -329,9 +329,8 @@ export const InterviewResultsView: React.FC<InterviewResultsViewProps> = ({
           </div>
 
           <ul className="space-y-2.5 text-xs sm:text-sm text-slate-700 dark:text-slate-300">
-            {(report.areasForImprovement || report.areas_to_improve) &&
-            (report.areasForImprovement || report.areas_to_improve)!.length > 0 ? (
-              (report.areasForImprovement || report.areas_to_improve)!.map((imp, i) => (
+            {((report.areasForImprovement || report.areas_to_improve) || []).length > 0 ? (
+              ((report.areasForImprovement || report.areas_to_improve) || []).map((imp, i) => (
                 <li
                   key={i}
                   className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/30"

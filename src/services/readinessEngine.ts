@@ -18,11 +18,11 @@ import { calculateStreaks, getLocalDayString } from './achievementService';
 import { getPerformanceAnalyticsSummary, SCORE_WEIGHTS } from './analyticsEngine';
 
 export const READINESS_WEIGHTS = {
-  resume: 0.20,
   coding: 0.25,
+  resume: 0.20,
   technicalInterview: 0.20,
-  hrInterview: 0.10,
-  aptitude: 0.15,
+  aptitude: 0.20,
+  roadmap: 0.15,
   consistency: 0.10,
 };
 
@@ -575,7 +575,7 @@ export async function calculatePlacementReadiness(
   );
 
   const formulaExplanation =
-    'Overall Score = Weighted synthesis across Resume (20%), Coding (25%), Technical Interview (20%), HR Interview (10%), Aptitude (15%), and Consistency (10%)';
+    'Overall Score = Weighted synthesis across Coding (25%), Resume ATS (20%), Technical Interview (20%), Placement Aptitude (20%), and Roadmap (15%)';
 
   return {
     studentId,

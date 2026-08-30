@@ -824,11 +824,16 @@ You should perform the rearrangement while maintaining the relative order of ele
     }
   }
 
-  // Easy DSA Generic Fallback
+  // If topic is not Arrays or custom subject/topic, generate a dedicated topic-tailored fallback
+  if (topicLower !== 'arrays' && topicLower !== 'array') {
+    return createTopicTailoredFallback(subject, cleanTopic, difficulty, 'Python');
+  }
+
+  // Easy DSA Generic Fallback (ONLY for Arrays)
   if (difficulty === 'Easy') {
     return {
       id,
-      title: `Find Extreme Elements in ${cleanTopic}`,
+      title: `Find Extreme Elements in Arrays`,
       difficulty: 'Easy',
       subject,
       topic: cleanTopic,
@@ -884,11 +889,6 @@ Return an array \`[minVal, maxVal]\` containing the minimum value followed by th
       ],
       created_at: new Date().toISOString(),
     };
-  }
-
-  // If topic is not Arrays or custom subject/topic, generate a dedicated topic-tailored fallback
-  if (topicLower !== 'arrays' && topicLower !== 'array') {
-    return createTopicTailoredFallback(subject, cleanTopic, difficulty, 'Python');
   }
 
   // DSA / Programming Medium/Hard Original Problem Fallback (for Arrays)
@@ -1176,17 +1176,40 @@ export const codingService = {
           resData.passedTestCases = passedTC;
 
           const rawStatus = (resData.status || '').toLowerCase().trim();
+
+          // Defensive check: Python "pass" must never be classified as compilation_error
+          let effectiveStatus = rawStatus;
+          if (
+            language === 'Python' &&
+            (rawStatus === 'compilation_error' || rawStatus === 'compile_error')
+          ) {
+            const feedbackText = `${resData.stdout || ''} ${resData.compilerError || ''} ${resData.aiFeedback?.correctness || ''} ${resData.aiFeedback?.summary || ''}`.toLowerCase();
+            if (
+              feedbackText.includes('pass') ||
+              feedbackText.includes('placeholder') ||
+              feedbackText.includes('starter') ||
+              feedbackText.includes('not implemented') ||
+              feedbackText.includes('no logic')
+            ) {
+              effectiveStatus = 'wrong_answer';
+              resData.status = 'wrong_answer';
+              resData.statusText = 'Wrong Answer';
+              passedTC = 0;
+              resData.passedTestCases = 0;
+            }
+          }
+
           if (passedTC === totalTC && totalTC > 0) {
             resData.status = 'accepted';
             resData.statusText = 'Accepted';
           } else {
-            if (rawStatus === 'compilation_error' || rawStatus === 'compile_error') {
+            if (effectiveStatus === 'compilation_error' || effectiveStatus === 'compile_error') {
               resData.status = 'compilation_error';
               resData.statusText = 'Compilation Error';
-            } else if (rawStatus === 'runtime_error') {
+            } else if (effectiveStatus === 'runtime_error') {
               resData.status = 'runtime_error';
               resData.statusText = 'Runtime Error';
-            } else if (rawStatus === 'time_limit_exceeded') {
+            } else if (effectiveStatus === 'time_limit_exceeded') {
               resData.status = 'time_limit_exceeded';
               resData.statusText = 'Time Limit Exceeded';
             } else {
@@ -1205,13 +1228,14 @@ export const codingService = {
 
     // Fallback client simulation
     const totalTC = Math.max(problem.hiddenTestCases?.length || 5, 5);
+    const isPythonPass = language === 'Python' && code.includes('pass');
     const hasMeaningfulCode =
       code.includes('return') ||
       code.includes('print') ||
       code.includes('SELECT') ||
       code.trim().length > 60;
     const isAccepted = hasMeaningfulCode && !code.includes('TODO') && !code.includes('pass');
-    const passedTC = isAccepted ? totalTC : Math.max(0, Math.floor(totalTC / 2));
+    const passedTC = isAccepted ? totalTC : 0;
 
     return {
       executionId,
@@ -1221,29 +1245,40 @@ export const codingService = {
       totalTestCases: totalTC,
       runtimeMs: Math.floor(Math.random() * 35) + 20,
       memoryKb: Math.floor(Math.random() * 2000) + 14500,
-      stdout: isAccepted ? 'All test cases passed successfully.' : 'Output mismatch on edge cases.',
+      stdout: isAccepted
+        ? 'All test cases passed successfully.'
+        : (isPythonPass
+            ? 'Execution completed without syntax errors. Python pass statement returned None across test cases.'
+            : 'Output mismatch on test cases.'),
       testCaseResults: (problem.hiddenTestCases || []).map((tc, idx) => ({
         id: tc.id || `tc_${idx + 1}`,
         input: tc.input,
         expectedOutput: tc.expectedOutput,
-        actualOutput: idx < passedTC ? tc.expectedOutput : 'Mismatched output',
-        passed: idx < passedTC,
+        actualOutput: isAccepted ? tc.expectedOutput : (isPythonPass ? 'None' : 'Mismatched output'),
+        passed: isAccepted,
         isHidden: tc.isHidden,
+        errorMessage: isAccepted
+          ? ''
+          : (isPythonPass ? `Returned None, expected ${tc.expectedOutput}` : 'Output does not match expected output'),
       })),
       aiFeedback: {
         correctness: isAccepted
           ? 'Solution logic is robust and handles all boundary constraints.'
-          : 'Solution passed basic examples but failed on edge cases (such as duplicates or boundary arrays).',
+          : (isPythonPass
+              ? 'The function contains the starter `pass` placeholder without an implementation, returning None across test cases.'
+              : 'Solution did not pass test cases. Review logic and boundary conditions.'),
         timeComplexity: problem.expectedComplexity?.time || 'O(N)',
         spaceComplexity: problem.expectedComplexity?.space || 'O(1)',
-        optimalApproach: problem.editorial?.approach || 'Use hash structures or optimal two-pointer passes to track running computations.',
+        optimalApproach: problem.editorial?.approach || 'Implement the required algorithmic logic to return the expected result.',
         suggestions: [
-          'Verify edge cases when input size is minimal (e.g. 1 element).',
+          isPythonPass ? 'Replace the `pass` placeholder with your algorithm implementation.' : 'Verify edge cases when input size is minimal (e.g. 1 element).',
           'Optimize variable initialization to stay within optimal space complexity.',
         ],
         summary: isAccepted
           ? 'Accepted! Clean and optimal solution.'
-          : 'Wrong Answer on hidden edge test cases. Review constraints.',
+          : (isPythonPass
+              ? `Failed test cases (0/${totalTC} passed). Write your solution logic to solve the problem.`
+              : `Wrong Answer on test cases (0/${totalTC} passed). Review constraints.`),
       },
     };
   },
@@ -1493,6 +1528,7 @@ export const codingService = {
       pass_rate: Math.round((passedTC / totalTC) * 100),
       created_at: submission.created_at || new Date().toISOString(),
       cloudSynced: false,
+      persistenceStatus: 'saving',
     };
 
     // Required Debug Logging
@@ -1548,6 +1584,7 @@ export const codingService = {
         if (upsertError) {
           console.error('[SUPABASE SAVE] error:', upsertError);
           formattedSubmission.cloudSynced = false;
+          formattedSubmission.persistenceStatus = 'pending';
           formattedSubmission.cloudSyncError = upsertError.message || 'Supabase write error';
           persistenceManager.enqueueOfflineMutation({
             id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1563,11 +1600,13 @@ export const codingService = {
             returnedRow: upsertData?.[0]?.id || formattedSubmission.id,
           });
           formattedSubmission.cloudSynced = true;
+          formattedSubmission.persistenceStatus = 'synced';
           formattedSubmission.cloudSyncError = undefined;
         }
       } catch (err: any) {
         console.error('[SUPABASE SAVE] error:', err);
         formattedSubmission.cloudSynced = false;
+        formattedSubmission.persistenceStatus = 'pending';
         formattedSubmission.cloudSyncError = err?.message || 'Network error saving to Supabase';
         persistenceManager.enqueueOfflineMutation({
           id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1580,6 +1619,7 @@ export const codingService = {
       }
     } else {
       formattedSubmission.cloudSynced = false;
+      formattedSubmission.persistenceStatus = effectiveUserId === 'guest' ? 'not_saved' : 'pending';
       formattedSubmission.cloudSyncError = effectiveUserId === 'guest'
         ? 'Sign in to persist submissions across devices'
         : 'Supabase is not configured';
@@ -1829,6 +1869,11 @@ export const codingService = {
           ai_feedback: raw.ai_feedback || raw.aiFeedback || undefined,
           cloudSynced: isFromCloud ? true : Boolean(raw.cloudSynced),
           cloudSyncError: isFromCloud ? undefined : raw.cloudSyncError,
+          persistenceStatus: (isFromCloud || raw.cloudSynced)
+            ? 'synced'
+            : raw.persistenceStatus === 'saving'
+            ? 'saving'
+            : (effectiveUserId === 'guest' ? 'not_saved' : 'pending'),
           created_at: raw.created_at || raw.submitted_at || new Date().toISOString(),
         };
       };
@@ -1984,88 +2029,143 @@ export const codingService = {
 
   /**
    * Fetch all Saved / Bookmarked questions for the current authenticated student
+   * Supabase is the primary authoritative source of truth.
    */
   async getSavedQuestions(userId: string = 'guest'): Promise<SavedQuestion[]> {
-    const effectiveUserId = userId || 'guest';
+    let effectiveUserId = userId || 'guest';
+    
+    // 1. Resolve authentic user ID if available
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          effectiveUserId = authData.user.id;
+        }
+      } catch (_) {}
+    }
+
     const localKey = `careerpilot_saved_questions_${effectiveUserId}`;
     const resultsMap = new Map<string, SavedQuestion>();
 
-    // 1. Instant local storage retrieval
+    // 2. Authoritative Supabase query
+    let supabaseSuccess = false;
+    if (isSupabaseConfigured() && effectiveUserId !== 'guest') {
+      try {
+        const { data, error } = await supabase
+          .from('saved_coding_questions')
+          .select('*')
+          .eq('user_id', effectiveUserId)
+          .order('saved_at', { ascending: false });
+
+        if (!error && Array.isArray(data)) {
+          supabaseSuccess = true;
+          for (const row of data) {
+            const pId = row.problem_id || row.id;
+            let problemData: CodingProblem | null = null;
+            let detectedSubject: CodingSubject = 'DSA';
+
+            if (row.notes) {
+              try {
+                const parsed = JSON.parse(row.notes);
+                if (parsed && (parsed.id || parsed.title)) {
+                  problemData = parsed;
+                  if (parsed.subject) detectedSubject = parsed.subject;
+                }
+              } catch (_) {}
+            }
+
+            if (!problemData) {
+              problemData = {
+                id: pId,
+                title: row.problem_title || 'Coding Problem',
+                description: `Practice question covering ${row.topic || 'General'} (${row.difficulty || 'Medium'}).`,
+                difficulty: (row.difficulty as CodingDifficulty) || 'Medium',
+                subject: detectedSubject,
+                topic: row.topic || 'General',
+                tags: [row.topic || 'General'],
+                constraints: ['1 <= n <= 10^5'],
+                examples: [
+                  { input: 'Sample Input', output: 'Sample Output', explanation: 'Sample description' },
+                ],
+                expectedComplexity: { time: 'O(n)', space: 'O(1)' },
+                functionSignature: {},
+                starterCode: {
+                  JavaScript: '// Write your solution here\nfunction solve() {\n  \n}',
+                  Python: '# Write your solution here\ndef solve():\n    pass',
+                  Java: 'class Solution {\n    public void solve() {\n        \n    }\n}',
+                  'C++': '#include <iostream>\nusing namespace std;\n\nvoid solve() {\n    \n}',
+                },
+                hiddenTestCases: [
+                  { id: 'tc_1', input: 'Sample Input', expectedOutput: 'Sample Output', isHidden: false },
+                ],
+              };
+            }
+
+            resultsMap.set(pId, {
+              id: row.id || `sq_${effectiveUserId}_${pId}`,
+              user_id: row.user_id,
+              question_id: pId,
+              title: row.problem_title || problemData.title || 'Coding Problem',
+              subject: (problemData.subject as CodingSubject) || detectedSubject,
+              topic: row.topic || problemData.topic || 'General',
+              difficulty: (row.difficulty as CodingDifficulty) || problemData.difficulty || 'Medium',
+              question_data: problemData,
+              notes: row.notes || '',
+              saved_at: row.saved_at || row.created_at || new Date().toISOString(),
+              created_at: row.saved_at || row.created_at || new Date().toISOString(),
+              cloudSynced: true,
+              persistenceStatus: 'synced',
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching saved questions from Supabase:', err);
+      }
+    }
+
+    // 3. Fallback / Merge with local cache (for offline / pending items)
     try {
-      const stored = JSON.parse(localStorage.getItem(localKey) || '[]');
+      const stored: SavedQuestion[] = JSON.parse(localStorage.getItem(localKey) || '[]');
       if (Array.isArray(stored)) {
         for (const item of stored) {
-          if (item && (item.question_id || item.id)) {
-            resultsMap.set(item.question_id || item.id, item);
+          const qId = item.question_id || item.id;
+          if (qId && (!resultsMap.has(qId) || !supabaseSuccess)) {
+            // Only add from local storage if not already authoritatively fetched or if Supabase query failed
+            resultsMap.set(qId, {
+              ...item,
+              cloudSynced: item.cloudSynced ?? false,
+              persistenceStatus: item.persistenceStatus || 'pending',
+            });
           }
         }
       }
     } catch (_) {}
 
-    // 2. Parallel remote queries (Supabase & Backend API)
-    const remoteQueries: Promise<any>[] = [];
-
-    if (isSupabaseConfigured()) {
-      remoteQueries.push(
-        (async () => {
-          try {
-            const { data, error } = await supabase
-              .from('saved_coding_questions')
-              .select('*')
-              .eq('user_id', effectiveUserId)
-              .order('created_at', { ascending: false });
-
-            if (!error && Array.isArray(data)) {
-              for (const row of data) {
-                const qId = row.question_id || row.id;
-                resultsMap.set(qId, {
-                  id: row.id,
-                  user_id: row.user_id,
-                  question_id: qId,
-                  title: row.title || row.question_data?.title || 'Coding Problem',
-                  subject: row.subject || row.question_data?.subject || 'DSA',
-                  topic: row.topic || row.question_data?.topic || 'Arrays',
-                  difficulty: row.difficulty || row.question_data?.difficulty || 'Medium',
-                  question_data: row.question_data,
-                  created_at: row.created_at || new Date().toISOString(),
-                });
+    // 4. Secondary backend sync
+    if (!supabaseSuccess) {
+      try {
+        const res = await fetchWithTimeout(`/api/coding/saved-questions?userId=${encodeURIComponent(effectiveUserId)}`, { timeoutMs: 4000 });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            for (const row of json.data) {
+              const qId = row.question_id || row.id;
+              if (qId && !resultsMap.has(qId)) {
+                resultsMap.set(qId, row);
               }
             }
-          } catch (err) {
-            console.warn('Error fetching saved questions from Supabase:', err);
           }
-        })()
-      );
+        }
+      } catch (_) {}
     }
 
-    remoteQueries.push(
-      (async () => {
-        try {
-          const res = await fetchWithTimeout(`/api/coding/saved-questions?userId=${encodeURIComponent(effectiveUserId)}`, { timeoutMs: 6000 });
-          if (res.ok) {
-            const json = await res.json();
-            if (json.success && Array.isArray(json.data)) {
-              for (const row of json.data) {
-                const qId = row.question_id || row.id;
-                if (!resultsMap.has(qId)) {
-                  resultsMap.set(qId, row);
-                }
-              }
-            }
-          }
-        } catch (_) {}
-      })()
-    );
-
-    await Promise.allSettled(remoteQueries);
-
     const savedList = Array.from(resultsMap.values()).sort((a, b) => {
-      const tA = new Date(a.created_at || 0).getTime();
-      const tB = new Date(b.created_at || 0).getTime();
+      const tA = new Date(a.saved_at || a.created_at || 0).getTime();
+      const tB = new Date(b.saved_at || b.created_at || 0).getTime();
       return tB - tA;
     });
 
-    // Update local cache
+    // 5. Update local cache with authoritative data
     try {
       localStorage.setItem(localKey, JSON.stringify(savedList));
     } catch (_) {}
@@ -2075,130 +2175,163 @@ export const codingService = {
 
   /**
    * Save / Bookmark a question for the current student
+   * Authoritatively persists to Supabase saved_coding_questions first.
    */
   async saveQuestionBookmark(problem: CodingProblem, userId: string = 'guest'): Promise<SavedQuestion> {
-    const effectiveUserId = userId || 'guest';
+    let effectiveUserId = userId || 'guest';
+
+    // 1. Resolve authenticated user ID
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          effectiveUserId = authData.user.id;
+        }
+      } catch (_) {}
+    }
+
     const localKey = `careerpilot_saved_questions_${effectiveUserId}`;
+    const stableProblemId = String(problem.id || `custom_${Date.now()}`);
+    const recordId = `sq_${effectiveUserId}_${stableProblemId}`;
+    const nowIso = new Date().toISOString();
 
     const newSaved: SavedQuestion = {
-      id: `sq_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: recordId,
       user_id: effectiveUserId,
-      question_id: problem.id,
+      question_id: stableProblemId,
       title: problem.title,
       subject: problem.subject || 'DSA',
-      topic: problem.topic || 'Arrays',
+      topic: problem.topic || 'General',
       difficulty: problem.difficulty || 'Medium',
       question_data: problem,
-      created_at: new Date().toISOString(),
+      notes: JSON.stringify(problem),
+      saved_at: nowIso,
+      created_at: nowIso,
+      cloudSynced: false,
+      persistenceStatus: 'saving',
     };
 
-    // 1. Instant local persistence
+    // 2. Authoritative Supabase UPSERT (AWAITED)
+    if (isSupabaseConfigured() && effectiveUserId !== 'guest') {
+      try {
+        const payload = {
+          id: recordId,
+          user_id: effectiveUserId,
+          problem_id: stableProblemId,
+          problem_title: problem.title || 'Coding Problem',
+          difficulty: problem.difficulty || 'Medium',
+          topic: problem.topic || 'General',
+          notes: JSON.stringify(problem),
+          saved_at: nowIso,
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+
+        const { data, error } = await supabase
+          .from('saved_coding_questions')
+          .upsert(payload, { onConflict: 'id' })
+          .select()
+          .maybeSingle();
+
+        if (!error) {
+          newSaved.cloudSynced = true;
+          newSaved.persistenceStatus = 'synced';
+          if (data?.id) newSaved.id = data.id;
+        } else {
+          console.warn('Supabase save question error:', error);
+          newSaved.cloudSynced = false;
+          newSaved.persistenceStatus = 'pending';
+          newSaved.cloudSyncError = error.message;
+        }
+      } catch (err: any) {
+        console.warn('Supabase save question exception:', err);
+        newSaved.cloudSynced = false;
+        newSaved.persistenceStatus = 'pending';
+        newSaved.cloudSyncError = err?.message || 'Network error while syncing to cloud.';
+      }
+    } else {
+      // Guest or unconfigured
+      newSaved.cloudSynced = false;
+      newSaved.persistenceStatus = effectiveUserId === 'guest' ? 'not_saved' : 'pending';
+    }
+
+    // 3. Update localStorage cache
     try {
       const stored: SavedQuestion[] = JSON.parse(localStorage.getItem(localKey) || '[]');
-      const filtered = stored.filter((q) => q.question_id !== problem.id && q.id !== problem.id);
+      const filtered = stored.filter((q) => q.question_id !== stableProblemId && q.id !== stableProblemId && q.id !== recordId);
       localStorage.setItem(localKey, JSON.stringify([newSaved, ...filtered]));
     } catch (_) {}
 
-    // 2. Parallel remote persistence (Supabase + Backend)
-    const remoteTasks: Promise<any>[] = [];
-
-    if (isSupabaseConfigured()) {
-      remoteTasks.push(
-        (async () => {
-          try {
-            const { data, error } = await supabase
-              .from('saved_coding_questions')
-              .upsert(
-                [
-                  {
-                    user_id: effectiveUserId,
-                    question_id: problem.id,
-                    title: problem.title,
-                    subject: problem.subject || 'DSA',
-                    topic: problem.topic || 'Arrays',
-                    difficulty: problem.difficulty || 'Medium',
-                    question_data: problem,
-                    created_at: newSaved.created_at,
-                  },
-                ],
-                { onConflict: 'user_id,question_id' }
-              )
-              .select()
-              .single();
-
-            if (!error && data) {
-              newSaved.id = data.id || newSaved.id;
-            }
-          } catch (err) {
-            console.warn('Error saving question bookmark to Supabase:', err);
-          }
-        })()
-      );
-    }
-
-    remoteTasks.push(
-      fetchWithTimeout('/api/coding/save-question', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        timeoutMs: 6000,
-        body: JSON.stringify({
-          user_id: effectiveUserId,
-          question: problem,
-        }),
-      }).catch(() => {})
-    );
-
-    Promise.allSettled(remoteTasks).catch(() => {});
+    // 4. Secondary backend sync
+    fetchWithTimeout('/api/coding/save-question', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeoutMs: 4000,
+      body: JSON.stringify({
+        user_id: effectiveUserId,
+        question: problem,
+      }),
+    }).catch(() => {});
 
     return newSaved;
   },
 
   /**
    * Unsave / Remove bookmark for a question
+   * Authoritatively deletes from Supabase saved_coding_questions first.
    */
   async unsaveQuestionBookmark(questionId: string, userId: string = 'guest'): Promise<boolean> {
-    const effectiveUserId = userId || 'guest';
-    const localKey = `careerpilot_saved_questions_${effectiveUserId}`;
+    let effectiveUserId = userId || 'guest';
 
-    // 1. Instant local update
+    // 1. Resolve authentic user ID
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          effectiveUserId = authData.user.id;
+        }
+      } catch (_) {}
+    }
+
+    const localKey = `careerpilot_saved_questions_${effectiveUserId}`;
+    const recordId = `sq_${effectiveUserId}_${questionId}`;
+
+    // 2. Authoritative Supabase Deletion (AWAITED)
+    if (isSupabaseConfigured() && effectiveUserId !== 'guest') {
+      try {
+        const { error } = await supabase
+          .from('saved_coding_questions')
+          .delete()
+          .eq('user_id', effectiveUserId)
+          .or(`problem_id.eq.${questionId},id.eq.${questionId},id.eq.${recordId}`);
+
+        if (error) {
+          console.error('Supabase unsave question error:', error);
+          throw new Error(error.message);
+        }
+      } catch (err: any) {
+        console.warn('Supabase unsave question exception:', err);
+        throw err;
+      }
+    }
+
+    // 3. Update localStorage cache after successful deletion
     try {
       const stored: SavedQuestion[] = JSON.parse(localStorage.getItem(localKey) || '[]');
-      const filtered = stored.filter((q) => q.question_id !== questionId && q.id !== questionId);
+      const filtered = stored.filter((q) => q.question_id !== questionId && q.id !== questionId && q.id !== recordId);
       localStorage.setItem(localKey, JSON.stringify(filtered));
     } catch (_) {}
 
-    // 2. Parallel remote deletion
-    const remoteTasks: Promise<any>[] = [];
-
-    if (isSupabaseConfigured()) {
-      remoteTasks.push(
-        (async () => {
-          try {
-            await supabase
-              .from('saved_coding_questions')
-              .delete()
-              .eq('user_id', effectiveUserId)
-              .or(`question_id.eq.${questionId},id.eq.${questionId}`);
-          } catch (err) {
-            console.warn('Error removing bookmark from Supabase:', err);
-          }
-        })()
-      );
-    }
-
-    remoteTasks.push(
-      fetchWithTimeout('/api/coding/unsave-question', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        timeoutMs: 6000,
-        body: JSON.stringify({
-          user_id: effectiveUserId,
-          question_id: questionId,
-        }),
-      }).catch(() => {})
-    );
-
-    Promise.allSettled(remoteTasks).catch(() => {});
+    // 4. Secondary backend sync
+    fetchWithTimeout('/api/coding/unsave-question', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeoutMs: 4000,
+      body: JSON.stringify({
+        user_id: effectiveUserId,
+        question_id: questionId,
+      }),
+    }).catch(() => {});
 
     return true;
   },

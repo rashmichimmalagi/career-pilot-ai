@@ -22,9 +22,13 @@ import {
   HelpCircle,
   Calendar,
   Activity,
+  Github,
+  ExternalLink,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { PROJECT_GITHUB_URL } from '../../config/links';
+import { NotificationDropdown } from '../notifications/NotificationDropdown';
 
 interface NavbarProps {
   onNavigate: (page: string) => void;
@@ -466,6 +470,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
                           <Cpu className="w-4 h-4 text-purple-500 shrink-0" />
                           <span>Technical Interview</span>
                         </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onNavigate('analytics');
+                            setMoreMenuOpen(false);
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-300 font-medium transition-colors cursor-pointer"
+                        >
+                          <Activity className="w-4 h-4 text-indigo-500 shrink-0" />
+                          <span>Progress Analytics</span>
+                        </button>
                       </div>
 
                       {/* Divider */}
@@ -497,12 +513,30 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
 
                         <button
                           type="button"
-                          onClick={() => scrollToSection('about')}
+                          onClick={() => {
+                            setMoreMenuOpen(false);
+                            onNavigate('about');
+                          }}
                           className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-300 font-medium transition-colors cursor-pointer"
                         >
-                          <Info className="w-4 h-4 text-slate-400 shrink-0" />
-                          <span>About Platform</span>
+                          <Info className="w-4 h-4 text-indigo-500 shrink-0" />
+                          <span>About & Developer</span>
                         </button>
+
+                        <a
+                          href={PROJECT_GITHUB_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="View CareerPilot AI repository on GitHub"
+                          onClick={() => setMoreMenuOpen(false)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-300 font-medium transition-colors cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Github className="w-4 h-4 text-slate-500 shrink-0" />
+                            <span>GitHub Repository</span>
+                          </div>
+                          <ExternalLink className="w-3 h-3 text-slate-400" />
+                        </a>
                       </div>
                     </div>
                   )}
@@ -543,11 +577,26 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
               </button>
               <button
                 type="button"
-                onClick={() => scrollToSection('about')}
-                className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                onClick={() => {
+                  onNavigate('about');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className={`hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  currentPage === 'about' ? 'text-indigo-600 dark:text-indigo-400 font-bold' : ''
+                }`}
               >
                 About
               </button>
+              <a
+                href={PROJECT_GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="View CareerPilot AI repository on GitHub"
+                className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5"
+              >
+                <Github className="w-3.5 h-3.5 text-slate-500 hover:text-indigo-500" />
+                <span>GitHub</span>
+              </a>
             </div>
           )}
 
@@ -556,6 +605,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
             id="accountControls"
             className="ml-auto shrink-0 flex items-center gap-2 xl:gap-2.5 self-center"
           >
+            {/* Smart Notifications Bell & Dropdown (Authenticated Only) */}
+            {!loading && user && (
+              <NotificationDropdown onNavigate={onNavigate} />
+            )}
+
             {/* Theme Toggle Button */}
             <button
               id="theme-toggle-btn"
@@ -671,7 +725,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
           </div>
 
           {/* Mobile Right Controls */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Notification Bell (Mobile, Authenticated Only) */}
+            {!loading && user && (
+              <NotificationDropdown onNavigate={onNavigate} />
+            )}
+
             {/* Theme Toggle (Mobile) */}
             <button
               type="button"
@@ -737,11 +796,30 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage }) => {
             </button>
             <button
               type="button"
-              onClick={() => scrollToSection('about')}
-              className="text-left py-2 px-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900 cursor-pointer"
+              onClick={() => {
+                onNavigate('about');
+                setMobileMenuOpen(false);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="text-left py-2 px-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center gap-2 cursor-pointer"
             >
-              About
+              <Info className="w-4 h-4 text-indigo-500 shrink-0" />
+              <span>About CareerPilot</span>
             </button>
+            <a
+              href={PROJECT_GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="View CareerPilot AI repository on GitHub"
+              onClick={() => setMobileMenuOpen(false)}
+              className="text-left py-2 px-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between cursor-pointer text-slate-700 dark:text-slate-300"
+            >
+              <div className="flex items-center gap-2">
+                <Github className="w-4 h-4 text-slate-500 shrink-0" />
+                <span>GitHub Repository</span>
+              </div>
+              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+            </a>
           </div>
 
           {/* Authenticated Links in Drawer */}

@@ -22,7 +22,9 @@ import {
   ShieldCheck,
   AlertCircle,
   Bot,
-  Laptop
+  Laptop,
+  Cloud,
+  CloudOff,
 } from 'lucide-react';
 import {
   CodingLanguage,
@@ -30,7 +32,9 @@ import {
   SubmissionEvaluationResult,
   CodingExample,
   AICodingMentorFeedback,
-  CodingSubmission
+  CodingSubmission,
+  SubmissionEvaluationStatus,
+  SubmissionPersistenceStatus,
 } from '../../types/coding';
 import { LANGUAGES, sanitizeStarterCode, codingService } from '../../services/codingService';
 import { codingHistoryService, RestoredCodeResult } from '../../services/codingHistoryService';
@@ -47,6 +51,8 @@ interface CodeEditorWorkspaceProps {
   onRunCode: (customInput: string) => Promise<any>;
   onSubmitSolution: () => Promise<SubmissionEvaluationResult | null>;
   evaluationResult?: SubmissionEvaluationResult | null;
+  evaluationStatus?: SubmissionEvaluationStatus;
+  persistenceStatus?: SubmissionPersistenceStatus;
   executionId?: string;
   isRunning?: boolean;
   isSubmitting?: boolean;
@@ -83,6 +89,8 @@ export const CodeEditorWorkspace: React.FC<CodeEditorWorkspaceProps> = React.mem
   onRunCode,
   onSubmitSolution,
   evaluationResult = null,
+  evaluationStatus = 'idle',
+  persistenceStatus = 'not_saved',
   executionId,
   isRunning = false,
   isSubmitting = false,
@@ -1568,9 +1576,27 @@ export const CodeEditorWorkspace: React.FC<CodeEditorWorkspaceProps> = React.mem
                       </div>
                     </div>
 
-                    <div className="text-right font-mono text-[11px]">
+                    <div className="text-right font-mono text-[11px] space-y-0.5">
                       <div>{evaluationResult.runtimeMs} ms</div>
                       <div>{(evaluationResult.memoryKb / 1024).toFixed(1)} MB</div>
+                      {persistenceStatus === 'saving' && (
+                        <div className="inline-flex items-center gap-1 text-[10px] text-indigo-600 dark:text-indigo-400 font-sans font-medium">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>Saving to cloud...</span>
+                        </div>
+                      )}
+                      {persistenceStatus === 'synced' && (
+                        <div className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-sans font-medium">
+                          <Cloud className="w-3 h-3" />
+                          <span>Synced</span>
+                        </div>
+                      )}
+                      {persistenceStatus === 'pending' && (
+                        <div className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 font-sans font-medium">
+                          <CloudOff className="w-3 h-3" />
+                          <span>Pending sync</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 

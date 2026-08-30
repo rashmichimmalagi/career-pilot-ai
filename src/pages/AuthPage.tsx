@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Compass, ShieldAlert, Key, Loader2, ArrowLeft, Eye, EyeOff, Mail, ArrowRight } from 'lucide-react';
+import { Compass, ShieldAlert, Key, Loader2, ArrowLeft, Eye, EyeOff, Mail, ArrowRight, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isUserEmailVerified } from '../lib/supabase';
 import { profileService } from '../services/profileService';
@@ -36,6 +36,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
 
   const [authView, setAuthView] = useState<AuthViewMode>('main');
   const [emailMode, setEmailMode] = useState<EmailFormMode>(getInitialMode);
+  const [isInactivityNotice, setIsInactivityNotice] = useState<boolean>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('reason') === 'inactivity';
+  });
 
   const [isGitHubAuthenticating, setIsGitHubAuthenticating] = useState(false);
   const [isEmailLoading, setIsEmailLoading] = useState(false);
@@ -432,6 +436,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
             {emailMode === 'forgot' && 'Enter your email address to receive a reset link'}
           </p>
         </div>
+
+        {/* Inactivity Notice Banner */}
+        {isInactivityNotice && (
+          <div className="p-3.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 text-xs flex items-center gap-3 animate-in fade-in">
+            <div className="p-1.5 rounded-xl bg-indigo-100 dark:bg-indigo-900/80 text-indigo-600 dark:text-indigo-400 shrink-0">
+              <Clock className="w-4 h-4" />
+            </div>
+            <p className="leading-relaxed">
+              Your session expired due to inactivity. Please sign in again.
+            </p>
+          </div>
+        )}
 
         {/* Supabase Key Status Indicator */}
         {!isConfigured && (

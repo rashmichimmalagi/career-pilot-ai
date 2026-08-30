@@ -4,6 +4,7 @@ import {
   MentorApiResponse,
   MentorQuickAction,
   MentorActionLink,
+  MentorConversation,
 } from '../types/mentor';
 import { getPreparationDashboardData } from './preparationDashboardService';
 import { resumeService } from './resumeService';
@@ -14,10 +15,8 @@ import { getStudentTargets, getActiveTargetId } from './companyPrepStorage';
 import { getStoredDailyTasks, getCompletedItemIds } from './roadmapStorage';
 import { calculateStreaks } from './achievementService';
 import { resolveStudentCodingLanguage, getDailyStudyTime } from './studyPlannerService';
-import { persistenceManager } from './persistenceManager';
+import { mentorStorageService } from './mentorStorageService';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
-
-const CHAT_STORAGE_PREFIX = 'careerpilot_mentor_chat_';
 
 export const MENTOR_QUICK_ACTIONS: MentorQuickAction[] = [
   {
@@ -414,41 +413,38 @@ export async function getAggregatedStudentContext(
 
 
 /**
- * Storage helpers for multi-student isolated chat histories
+ * Supabase-backed persistent chat and conversation methods
+ * SUPABASE IS THE PRIMARY SOURCE OF TRUTH.
  */
-export function getMentorChatHistory(studentId: string = 'guest'): MentorMessage[] {
-  try {
-    const raw = localStorage.getItem(`${CHAT_STORAGE_PREFIX}${studentId}`);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.error('[MentorService] Error reading chat history:', err);
-    return [];
-  }
+export async function fetchMentorConversations(studentId?: string): Promise<MentorConversation[]> {
+  return mentorStorageService.fetchConversations(studentId);
 }
 
-export function saveMentorChatHistory(studentId: string = 'guest', messages: MentorMessage[]): void {
-  try {
-    const trimmed = messages.slice(-50); // Keep 50 recent messages
-    localStorage.setItem(`${CHAT_STORAGE_PREFIX}${studentId}`, JSON.stringify(trimmed));
-    if (studentId && studentId !== 'guest') {
-      persistenceManager.saveMentorChatHistory(studentId, trimmed).catch(() => {});
-    }
-  } catch (err) {
-    console.error('[MentorService] Error saving chat history:', err);
-  }
+export async function createMentorConversation(studentId?: string, initialTitle?: string): Promise<MentorConversation> {
+  return mentorStorageService.createConversation(studentId, initialTitle);
 }
 
-export function clearMentorChatHistory(studentId: string = 'guest'): void {
-  try {
-    localStorage.removeItem(`${CHAT_STORAGE_PREFIX}${studentId}`);
-    if (studentId && studentId !== 'guest') {
-      persistenceManager.saveMentorChatHistory(studentId, []).catch(() => {});
-    }
-  } catch (err) {
-    console.error('[MentorService] Error clearing chat history:', err);
-  }
+export async function fetchMentorMessages(conversationId: string, studentId?: string): Promise<MentorMessage[]> {
+  return mentorStorageService.fetchMessages(conversationId, studentId);
+}
+
+export async function saveMentorMessage(
+  conversationId: string,
+  message: MentorMessage,
+  studentId?: string
+): Promise<{ success: boolean; error?: string }> {
+  return mentorStorageService.saveMessage(conversationId, message, studentId);
+}
+
+export async function deleteMentorConversation(
+  conversationId: string,
+  studentId?: string
+): Promise<{ success: boolean; error?: string }> {
+  return mentorStorageService.deleteConversation(conversationId, studentId);
+}
+
+export async function clearAllMentorConversations(studentId?: string): Promise<{ success: boolean }> {
+  return mentorStorageService.clearAllConversations(studentId);
 }
 
 /**

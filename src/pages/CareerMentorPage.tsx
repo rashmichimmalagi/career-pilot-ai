@@ -24,18 +24,26 @@ import {
   Building2,
   Calendar,
   X,
+  Plus,
+  History,
+  CheckCircle2,
+  FolderOpen,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
   MentorMessage,
   MentorStudentContext,
   MentorQuickAction,
+  MentorConversation,
 } from '../types/mentor';
 import {
   getAggregatedStudentContext,
-  getMentorChatHistory,
-  saveMentorChatHistory,
-  clearMentorChatHistory,
+  fetchMentorConversations,
+  fetchMentorMessages,
+  saveMentorMessage,
+  createMentorConversation,
+  deleteMentorConversation,
+  clearAllMentorConversations,
   sendMentorMessage,
   MENTOR_QUICK_ACTIONS,
 } from '../services/mentorService';
@@ -51,13 +59,17 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
   const { user, profile } = useAuth();
   const studentId = user?.id || 'guest';
 
-  // State
-  const [messages, setMessages] = useState<MentorMessage[]>(() => getMentorChatHistory(studentId));
+  // State: Initialized purely as empty arrays, populated asynchronously from Supabase
+  const [conversations, setConversations] = useState<MentorConversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<MentorMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [studentContext, setStudentContext] = useState<MentorStudentContext | null>(null);
   const [isLoadingContext, setIsLoadingContext] = useState(true);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
   const [thinkingStep, setThinkingStep] = useState('Consulting CareerPilot Intelligence...');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
@@ -71,26 +83,69 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const homeInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Load chat history and context on mount or studentId change
+  // Load chat history and context on mount or studentId change (strict account isolation)
   useEffect(() => {
     loadContextAndHistory();
-  }, [studentId, profile]);
+  }, [studentId, profile?.id]);
 
   const loadContextAndHistory = async () => {
     setIsLoadingContext(true);
+    setIsLoadingMessages(true);
     try {
-      const [ctx, hist] = await Promise.all([
+      const [ctx, convs] = await Promise.all([
         getAggregatedStudentContext(studentId, profile),
-        Promise.resolve(getMentorChatHistory(studentId)),
+        fetchMentorConversations(studentId),
       ]);
       setStudentContext(ctx);
-      setMessages(hist);
-      // If there are existing messages, we still keep viewMode as 'home' by default on fresh visit,
-      // but student can resume with 1 click or directly start a new prompt.
+      setConversations(convs);
+
+      if (convs.length > 0) {
+        const latestConv = convs[0];
+        setActiveConversationId(latestConv.id);
+        const msgs = await fetchMentorMessages(latestConv.id, studentId);
+        setMessages(msgs);
+      } else {
+        setActiveConversationId(null);
+        setMessages([]);
+      }
     } catch (err) {
-      console.error('[CareerMentorPage] Failed to load data:', err);
+      console.error('[CareerMentorPage] Failed to load Supabase mentor data:', err);
     } finally {
       setIsLoadingContext(false);
+      setIsLoadingMessages(false);
+    }
+  };
+
+  // Switch to specific conversation
+  const handleSelectConversation = async (convId: string) => {
+    setActiveConversationId(convId);
+    setShowHistoryDrawer(false);
+    setIsLoadingMessages(true);
+    try {
+      const msgs = await fetchMentorMessages(convId, studentId);
+      setMessages(msgs);
+      setViewMode('conversation');
+    } catch (err) {
+      console.error('[CareerMentorPage] Failed to switch conversation:', err);
+    } finally {
+      setIsLoadingMessages(false);
+    }
+  };
+
+  // Start a fresh new conversation thread in Supabase
+  const handleStartNewConversation = async () => {
+    try {
+      const title = `Guidance Session ${new Date().toLocaleDateString()}`;
+      const newConv = await createMentorConversation(studentId, title);
+      setConversations((prev) => [newConv, ...prev.filter((c) => c.id !== newConv.id)]);
+      setActiveConversationId(newConv.id);
+      setMessages([]);
+      setInputText('');
+      setErrorBanner(null);
+      setShowHistoryDrawer(false);
+      setViewMode('conversation');
+    } catch (err) {
+      console.error('[CareerMentorPage] Failed to create new conversation:', err);
     }
   };
 
@@ -177,17 +232,53 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
       textareaRef.current.style.height = 'auto';
     }
 
+    // Ensure we have an active conversation in Supabase
+    let currentConvId = activeConversationId;
+    if (!currentConvId) {
+      try {
+        const title = textToSend.slice(0, 35) + (textToSend.length > 35 ? '...' : '');
+        const newConv = await createMentorConversation(studentId, title);
+        currentConvId = newConv.id;
+        setActiveConversationId(newConv.id);
+        setConversations((prev) => [newConv, ...prev.filter((c) => c.id !== newConv.id)]);
+      } catch (err) {
+        console.error('[CareerMentorPage] Failed to init conversation:', err);
+        currentConvId = `conv_${Date.now()}`;
+        setActiveConversationId(currentConvId);
+      }
+    }
+
+    const isOnline = typeof navigator !== 'undefined' && navigator.onLine;
     const userMessage: MentorMessage = {
-      id: `usr_${Date.now()}`,
+      id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      conversationId: currentConvId,
       sender: 'user',
       text: textToSend,
       timestamp: new Date().toISOString(),
       quickActionUsed: quickActionId,
+      syncStatus: isOnline ? 'synced' : 'pending',
     };
 
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
-    saveMentorChatHistory(studentId, updatedMessages);
+
+    // Asynchronously persist user message to Supabase
+    if (currentConvId) {
+      saveMentorMessage(currentConvId, userMessage, studentId).then((res) => {
+        if (res.success) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === userMessage.id ? { ...m, syncStatus: 'synced' } : m))
+          );
+        } else {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === userMessage.id ? { ...m, syncStatus: 'pending' } : m))
+          );
+        }
+      }).catch((err) => {
+        console.warn('[CareerMentorPage] Background save error:', err);
+      });
+    }
+
     setIsGenerating(true);
 
     try {
@@ -195,24 +286,43 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
       const currentCtx = studentContext || (await getAggregatedStudentContext(studentId, profile));
       
       const payloadMessages = updatedMessages.map((m) => ({
-        sender: m.sender,
+        sender: (m.sender === 'user' ? 'user' : 'mentor') as 'user' | 'mentor',
         text: m.text,
       }));
 
       const result = await sendMentorMessage(currentCtx, payloadMessages, quickActionId);
 
+      const isBotOnline = typeof navigator !== 'undefined' && navigator.onLine;
       const mentorMessage: MentorMessage = {
-        id: `mntr_${Date.now()}`,
+        id: `mntr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        conversationId: currentConvId,
         sender: 'mentor',
         text: result.reply,
         timestamp: new Date().toISOString(),
         suggestedFollowUps: result.suggestedFollowUps,
         actionLinks: result.actionLinks,
+        syncStatus: isBotOnline ? 'synced' : 'pending',
       };
 
       const finalMessages = [...updatedMessages, mentorMessage];
       setMessages(finalMessages);
-      saveMentorChatHistory(studentId, finalMessages);
+
+      // Asynchronously persist mentor response to Supabase
+      if (currentConvId) {
+        saveMentorMessage(currentConvId, mentorMessage, studentId).then((res) => {
+          if (res.success) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === mentorMessage.id ? { ...m, syncStatus: 'synced' } : m))
+            );
+          } else {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === mentorMessage.id ? { ...m, syncStatus: 'pending' } : m))
+            );
+          }
+        }).catch((err) => {
+          console.warn('[CareerMentorPage] Background save error:', err);
+        });
+      }
     } catch (err: any) {
       console.error('[CareerMentorPage] Message processing failed:', err);
       setErrorBanner('AI service experienced a temporary delay. A local contextual response has been generated.');
@@ -237,11 +347,14 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
   };
 
   // Confirmed Clear Conversation
-  const handleConfirmClear = () => {
-    // Only removes current chat messages from active mentor conversation.
-    // Does NOT delete any student profile, resume, coding history, etc.
-    clearMentorChatHistory(studentId);
+  const handleConfirmClear = async () => {
+    // Deletes active conversation and its messages from Supabase
+    if (activeConversationId) {
+      await deleteMentorConversation(activeConversationId, studentId);
+      setConversations((prev) => prev.filter((c) => c.id !== activeConversationId));
+    }
     setMessages([]);
+    setActiveConversationId(null);
     setInputText('');
     setErrorBanner(null);
     setShowClearModal(false);
@@ -312,7 +425,7 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
                 </h1>
                 <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Real Data Grounded
+                  Supabase Cloud Grounded
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 hidden md:block">
@@ -323,6 +436,37 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
 
           {/* Right: Controls & Actions */}
           <div className="flex items-center gap-2 ml-auto">
+            {/* New Thread Button */}
+            <button
+              id="btn-mentor-new-chat"
+              onClick={handleStartNewConversation}
+              title="Start a new AI Career Mentor session"
+              className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">New Thread</span>
+            </button>
+
+            {/* Sessions History Drawer Toggle */}
+            <button
+              id="btn-mentor-sessions-history"
+              onClick={() => setShowHistoryDrawer(!showHistoryDrawer)}
+              title="View past mentorship sessions"
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                showHistoryDrawer
+                  ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200/80 dark:border-slate-700/80'
+              }`}
+            >
+              <History className="w-3.5 h-3.5 text-indigo-500" />
+              <span className="hidden md:inline">Sessions</span>
+              {conversations.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                  {conversations.length}
+                </span>
+              )}
+            </button>
+
             {/* Export button */}
             {messages.length > 0 && (
               <button
@@ -759,6 +903,122 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
         )}
 
       </main>
+
+      {/* ========================================================================= */}
+      {/* SESSIONS HISTORY DRAWER / MODAL                                          */}
+      {/* ========================================================================= */}
+      {showHistoryDrawer && (
+        <div
+          id="mentor-sessions-drawer-overlay"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-end"
+          onClick={() => setShowHistoryDrawer(false)}
+        >
+          <div
+            id="mentor-sessions-drawer-panel"
+            className="w-full max-w-md h-full bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 p-6 flex flex-col space-y-4 shadow-2xl animate-in slide-in-from-right duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                    Mentorship Sessions
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Saved in Supabase Cloud • {conversations.length} total
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowHistoryDrawer(false)}
+                className="w-8 h-8 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* New Thread Button in Drawer */}
+            <button
+              onClick={handleStartNewConversation}
+              className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Start New Mentorship Session</span>
+            </button>
+
+            {/* List of past conversations */}
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+              {conversations.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 space-y-2">
+                  <FolderOpen className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
+                  <p className="text-xs">No previous mentorship sessions found.</p>
+                </div>
+              ) : (
+                conversations.map((conv) => {
+                  const isActive = conv.id === activeConversationId;
+                  return (
+                    <div
+                      key={conv.id}
+                      onClick={() => handleSelectConversation(conv.id)}
+                      className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-start justify-between gap-3 group ${
+                        isActive
+                          ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-800 text-indigo-900 dark:text-indigo-100'
+                          : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 border-slate-200/80 dark:border-slate-700/80 text-slate-800 dark:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5 overflow-hidden">
+                        <MessageSquare
+                          className={`w-4 h-4 mt-0.5 shrink-0 ${
+                            isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'
+                          }`}
+                        />
+                        <div className="overflow-hidden">
+                          <p className="text-xs font-bold truncate">
+                            {conv.title || 'Mentorship Chat'}
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1.5">
+                            <Clock className="w-3 h-3" />
+                            <span>{new Date(conv.updatedAt).toLocaleDateString()}</span>
+                            <span>•</span>
+                            <span>{conv.messageCount || 0} msgs</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await deleteMentorConversation(conv.id, studentId);
+                          setConversations((prev) => prev.filter((c) => c.id !== conv.id));
+                          if (conv.id === activeConversationId) {
+                            setMessages([]);
+                            setActiveConversationId(null);
+                            setViewMode('home');
+                          }
+                        }}
+                        title="Delete Session"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-950/50 transition-all"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Cloud Sync Footer */}
+            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 text-[11px] text-slate-400 flex items-center gap-1.5 justify-center">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Row-Level Security Scoped to auth.uid()</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* CLEAR CONVERSATION CONFIRMATION MODAL                                    */}

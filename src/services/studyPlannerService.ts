@@ -10,7 +10,10 @@ import { PreparationDashboardData } from '../types/preparationDashboard';
 import { getStoredDailyTasks, getCompletedItemIds } from './roadmapStorage';
 import { generatePersonalizedRoadmap } from './roadmapEngine';
 import { codingService } from './codingService';
-import { getPlacementHistory } from './placementStorage';
+import { getPlacementHistory, fetchPlacementHistory } from './placementStorage';
+import { interviewStorage } from './interviewStorage';
+import { resumeService } from './resumeService';
+import { getStudentTargets } from './companyPrepStorage';
 import { persistenceManager } from './persistenceManager';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
@@ -57,6 +60,31 @@ export function setDailyStudyTime(studentId: string = 'guest', minutes: number):
       persistenceManager.saveStudyPlanState(studentId, { dailyStudyTime: minutes }).catch(() => {});
     }
   } catch (_) {}
+}
+
+/**
+ * Retrieve all cached/stored daily study plans for the student
+ */
+export function getStoredStudyPlans(studentId: string = 'guest'): StudyPlanData[] {
+  const plans: StudyPlanData[] = [];
+  try {
+    const prefix = `careerpilot_study_plan_${studentId || 'guest'}_`;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(prefix)) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.date && Array.isArray(parsed.tasks)) {
+              plans.push(parsed);
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return plans.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /**
@@ -418,68 +446,375 @@ export async function buildStudentStructuredContext(
 }
 
 /**
- * Auto-sync completed tasks with real underlying activities completed today or manual completions
+ * Rigorous Evidence-Based Verification of Study Plan Tasks
+ * Re-evaluates each task against actual activity records from Supabase / data services.
+ * Ensures tasks can only be COMPLETED if authentic completion evidence exists.
  */
-function syncTasksWithRealActivities(
-  tasks: StudyTask[],
-  dashboardData: PreparationDashboardData,
-  studentId: string = 'guest'
-): StudyTask[] {
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayActivities = (dashboardData.recentActivities || []).filter((a) => {
-    if (!a.timestamp) return false;
-    return a.timestamp.startsWith(todayStr);
-  });
+export async function verifyAndSyncStudyPlanWithEvidence(
+  plan: StudyPlanData,
+  studentId: string = 'guest',
+  dashboardData?: PreparationDashboardData
+): Promise<StudyPlanData> {
+  const effectiveId = studentId || 'guest';
+  const todayStr = plan.date || new Date().toISOString().split('T')[0];
 
-  let manualCompletions: Record<string, string> = {};
-  try {
-    const raw = localStorage.getItem(getManualCompletionsStorageKey(studentId, todayStr));
-    if (raw) {
-      manualCompletions = JSON.parse(raw) || {};
+  // 1. Fetch real-time data across all modules
+  const [
+    submissionsRes,
+    placementHistoryRes,
+    interviewReportsRes,
+    resumesListRes,
+    latestResumeAnalysisRes,
+    storedRoadmapDailyRes,
+    completedRoadmapIdsRes,
+    studentTargetsRes,
+  ] = await Promise.allSettled([
+    codingService.getSubmissions(effectiveId, undefined, true),
+    fetchPlacementHistory(effectiveId),
+    interviewStorage.fetchReports(effectiveId),
+    Promise.resolve(resumeService.getUserResumes(effectiveId)),
+    Promise.resolve(resumeService.getLatestAnalysis(effectiveId)),
+    Promise.resolve(getStoredDailyTasks(effectiveId)),
+    Promise.resolve(getCompletedItemIds(effectiveId)),
+    Promise.resolve(getStudentTargets(effectiveId)),
+  ]);
+
+  const submissions = submissionsRes.status === 'fulfilled' && Array.isArray(submissionsRes.value) ? submissionsRes.value : [];
+  const placementHistory = placementHistoryRes.status === 'fulfilled' && Array.isArray(placementHistoryRes.value) ? placementHistoryRes.value : getPlacementHistory(effectiveId);
+  const interviewReports = interviewReportsRes.status === 'fulfilled' && Array.isArray(interviewReportsRes.value) ? interviewReportsRes.value : [];
+  const resumesList = resumesListRes.status === 'fulfilled' && Array.isArray(resumesListRes.value) ? resumesListRes.value : [];
+  const latestResumeAnalysis = latestResumeAnalysisRes.status === 'fulfilled' ? latestResumeAnalysisRes.value : null;
+  const storedRoadmapDaily = storedRoadmapDailyRes.status === 'fulfilled' && Array.isArray(storedRoadmapDailyRes.value) ? storedRoadmapDailyRes.value : [];
+  const completedRoadmapIds = completedRoadmapIdsRes.status === 'fulfilled' && Array.isArray(completedRoadmapIdsRes.value) ? completedRoadmapIdsRes.value : [];
+  const studentTargets = studentTargetsRes.status === 'fulfilled' && Array.isArray(studentTargetsRes.value) ? studentTargetsRes.value : [];
+
+  // 2. Evaluate each task strictly against authentic records
+  const updatedTasks = plan.tasks.map((task) => {
+    // Verifiable by default
+    const isVerifiable = task.isVerifiable !== false;
+
+    if (!isVerifiable) {
+      return task;
     }
-  } catch (_) {}
 
-  return tasks.map((task) => {
-    // If manually marked completed today, preserve it
-    if (manualCompletions[task.id]) {
+    if (task.category === 'coding') {
+      const targetTopic = (task.targetTopic || task.topic || '').trim().toLowerCase();
+      const requiredCount = task.requiredCount && task.requiredCount > 0 ? task.requiredCount : 2;
+
+      // Filter successful accepted submissions completed today (or on/after plan date)
+      const qualifyingAcceptedSubmissions = submissions.filter((s) => {
+        if (!s) return false;
+        // Check submission success: accepted or score >= 80 or all test cases passed
+        const isAccepted =
+          s.status === 'accepted' ||
+          s.result === 'Accepted' ||
+          (typeof s.score === 'number' && s.score >= 80) ||
+          (typeof s.test_cases_passed === 'number' &&
+            typeof s.total_test_cases === 'number' &&
+            s.total_test_cases > 0 &&
+            s.test_cases_passed === s.total_test_cases);
+
+        if (!isAccepted) return false;
+
+        // Check if submission was created today (or on/after plan date)
+        const subDate = s.created_at ? s.created_at.split('T')[0] : todayStr;
+        const isToday = subDate >= todayStr;
+        if (!isToday) return false;
+
+        // Check topic match if targetTopic specified
+        if (targetTopic && targetTopic !== 'dsa' && targetTopic !== 'dsa fundamentals' && targetTopic !== 'general' && !targetTopic.includes('solve')) {
+          const sTopic = (s.topic || '').toLowerCase();
+          const sSubject = (s.subject || '').toLowerCase();
+          const sTitle = (s.problem_title || '').toLowerCase();
+          const sId = (s.problem_id || '').toLowerCase();
+
+          const topicMatches =
+            sTopic.includes(targetTopic) ||
+            targetTopic.includes(sTopic) ||
+            sSubject.includes(targetTopic) ||
+            targetTopic.includes(sSubject) ||
+            sTitle.includes(targetTopic) ||
+            sId.includes(targetTopic);
+
+          // Array topic specific aliases (e.g. two-pointers, sliding-window, arrays)
+          if (targetTopic.includes('array')) {
+            const isArrayLike =
+              topicMatches ||
+              sTopic.includes('array') ||
+              sTopic.includes('two pointer') ||
+              sTopic.includes('sliding window') ||
+              sTitle.includes('array') ||
+              sSubject.includes('array');
+            if (!isArrayLike) return false;
+          } else if (!topicMatches) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+
+      // Deduplicate by problem_id to ensure requiredCount represents distinct problems solved
+      const distinctProblemIds = new Set<string>();
+      qualifyingAcceptedSubmissions.forEach((s) => {
+        if (s.problem_id) distinctProblemIds.add(s.problem_id);
+      });
+      const completedCount = distinctProblemIds.size;
+
+      // Check if user has attempted relevant problems today
+      const hasAttemptedToday = submissions.some((s) => {
+        if (!s) return false;
+        const subDate = s.created_at ? s.created_at.split('T')[0] : todayStr;
+        return subDate >= todayStr;
+      });
+
+      let status: TaskStatus = 'pending';
+      let completedAt: string | undefined = undefined;
+
+      if (completedCount >= requiredCount) {
+        status = 'completed';
+        completedAt = qualifyingAcceptedSubmissions[0]?.created_at || new Date().toISOString();
+      } else if (completedCount > 0 || hasAttemptedToday || task.status === 'in_progress') {
+        status = 'in_progress';
+      }
+
       return {
         ...task,
-        status: 'completed',
-        completedAt: task.completedAt || manualCompletions[task.id],
+        requiredCount,
+        completedCount,
+        status,
+        completedAt: status === 'completed' ? (task.completedAt || completedAt) : undefined,
+        isVerifiable: true,
+        completionCriteria:
+          task.completionCriteria ||
+          `Solve ${requiredCount} ${task.targetTopic || task.topic || 'DSA'} problems with accepted submissions in Coding Arena.`,
       };
     }
 
-    if (task.status === 'completed') return task;
+    if (task.category === 'aptitude') {
+      const requiredCount = task.requiredCount && task.requiredCount > 0 ? task.requiredCount : 1;
+      const targetTopic = (task.targetTopic || task.topic || '').trim().toLowerCase();
 
-    // Check if relevant activity was performed today
-    let matchingActivity = false;
+      // Find completed placement sessions today
+      const qualifyingSessions = placementHistory.filter((session) => {
+        if (!session) return false;
+        const sDate = (session.completedAt || session.createdAt || '').split('T')[0];
+        if (sDate < todayStr) return false;
 
-    if (task.category === 'coding') {
-      matchingActivity = todayActivities.some((a) => a.type === 'coding');
-    } else if (task.category === 'aptitude') {
-      matchingActivity = todayActivities.some((a) => a.type === 'aptitude');
-    } else if (task.category === 'interview') {
-      matchingActivity = todayActivities.some((a) => a.type === 'interview');
-    } else if (task.category === 'hr-interview') {
-      matchingActivity = todayActivities.some((a) => a.type === 'hr-interview');
-    } else if (task.category === 'resume') {
-      matchingActivity = todayActivities.some((a) => a.type === 'resume');
-    } else if (task.category === 'company-prep') {
-      matchingActivity = todayActivities.some((a) => a.type === 'company-prep');
-    } else if (task.category === 'roadmap') {
-      matchingActivity = todayActivities.some((a) => a.type === 'roadmap');
-    }
+        const isFinished =
+          Boolean(session.completedAt) ||
+          (Array.isArray(session.questions) && session.questions.length > 0) ||
+          (typeof session.totalQuestions === 'number' && session.totalQuestions > 0);
 
-    if (matchingActivity) {
+        if (!isFinished) return false;
+
+        if (targetTopic && !['aptitude', 'general', 'quantitative & logical reasoning', 'quantitative aptitude'].includes(targetTopic)) {
+          const sessionSubject = (session.subject || session.category || '').toLowerCase();
+          if (!sessionSubject.includes(targetTopic) && !targetTopic.includes(sessionSubject)) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      const completedCount = qualifyingSessions.length;
+      let status: TaskStatus = 'pending';
+      if (completedCount >= requiredCount) {
+        status = 'completed';
+      } else if (completedCount > 0 || task.status === 'in_progress') {
+        status = 'in_progress';
+      }
+
       return {
         ...task,
-        status: 'completed',
-        completedAt: task.completedAt || new Date().toISOString(),
+        requiredCount,
+        completedCount,
+        status,
+        completedAt: status === 'completed' ? (task.completedAt || qualifyingSessions[0]?.completedAt || qualifyingSessions[0]?.createdAt || new Date().toISOString()) : undefined,
+        isVerifiable: true,
+        completionCriteria:
+          task.completionCriteria ||
+          `Complete and submit a placement aptitude assessment.`,
+      };
+    }
+
+    if (task.category === 'interview' || task.category === 'hr-interview') {
+      const requiredCount = task.requiredCount && task.requiredCount > 0 ? task.requiredCount : 1;
+      const isHr = task.category === 'hr-interview' || task.route === 'hr-interview';
+
+      // Find completed mock interviews today
+      const qualifyingInterviews = interviewReports.filter((r) => {
+        if (!r) return false;
+        const rDate = (r.completedAt || r.completed_at || '').split('T')[0];
+        if (rDate < todayStr) return false;
+
+        const isCompleted = r.overallScore !== undefined || (Array.isArray(r.questions) && r.questions.length > 0);
+        if (!isCompleted) return false;
+
+        const isHrReport = r.subject?.toLowerCase().includes('hr') || (r as any).type === 'hr' || (r as any).mode === 'hr';
+        if (isHr) {
+          return isHrReport;
+        } else {
+          return !isHrReport;
+        }
+      });
+
+      const completedCount = qualifyingInterviews.length;
+      let status: TaskStatus = 'pending';
+      if (completedCount >= requiredCount) {
+        status = 'completed';
+      } else if (completedCount > 0 || task.status === 'in_progress') {
+        status = 'in_progress';
+      }
+
+      return {
+        ...task,
+        requiredCount,
+        completedCount,
+        status,
+        completedAt: status === 'completed' ? (task.completedAt || qualifyingInterviews[0]?.completedAt || (qualifyingInterviews[0] as any)?.completed_at || new Date().toISOString()) : undefined,
+        isVerifiable: true,
+        completionCriteria:
+          task.completionCriteria ||
+          `Complete a simulated ${isHr ? 'HR' : 'technical'} mock interview.`,
+      };
+    }
+
+    if (task.category === 'resume') {
+      const requiredCount = 1;
+      const hasAnalyzedToday =
+        (latestResumeAnalysis &&
+          latestResumeAnalysis.analyzedAt &&
+          latestResumeAnalysis.analyzedAt.split('T')[0] >= todayStr) ||
+        (resumesList &&
+          resumesList.some((r) => (r.createdAt || r.updatedAt || '').split('T')[0] >= todayStr));
+
+      let status: TaskStatus = 'pending';
+      if (hasAnalyzedToday) {
+        status = 'completed';
+      } else if (task.status === 'in_progress') {
+        status = 'in_progress';
+      }
+
+      return {
+        ...task,
+        requiredCount,
+        completedCount: hasAnalyzedToday ? 1 : 0,
+        status,
+        completedAt: status === 'completed' ? (task.completedAt || latestResumeAnalysis?.analyzedAt || new Date().toISOString()) : undefined,
+        isVerifiable: true,
+        completionCriteria:
+          task.completionCriteria ||
+          `Upload and analyze your resume for ATS score feedback.`,
+      };
+    }
+
+    if (task.category === 'roadmap') {
+      const isInitTask = task.title.toLowerCase().includes('initialize') || task.id.includes('roadmap-init');
+      let isRoadmapDone = false;
+
+      if (isInitTask) {
+        const isInit =
+          localStorage.getItem(`careerpilot_roadmap_initialized_${effectiveId}`) === 'true' ||
+          (completedRoadmapIds && completedRoadmapIds.length > 0) ||
+          (storedRoadmapDaily && storedRoadmapDaily.length > 0);
+        isRoadmapDone = Boolean(isInit);
+      } else {
+        const hasMilestoneToday = storedRoadmapDaily.some((t) => t.completed);
+        isRoadmapDone = hasMilestoneToday;
+      }
+
+      let status: TaskStatus = 'pending';
+      if (isRoadmapDone) {
+        status = 'completed';
+      } else if (task.status === 'in_progress') {
+        status = 'in_progress';
+      }
+
+      return {
+        ...task,
+        requiredCount: 1,
+        completedCount: isRoadmapDone ? 1 : 0,
+        status,
+        completedAt: status === 'completed' ? (task.completedAt || new Date().toISOString()) : undefined,
+        isVerifiable: true,
+        completionCriteria:
+          task.completionCriteria ||
+          (isInitTask ? `Initialize your Career Roadmap.` : `Complete the next milestone on your Career Roadmap.`),
+      };
+    }
+
+    if (task.category === 'company-prep') {
+      const hasTarget = Boolean(studentTargets && studentTargets.length > 0);
+      let status: TaskStatus = 'pending';
+      if (hasTarget && task.status === 'completed') {
+        status = 'completed';
+      } else if (task.status === 'in_progress') {
+        status = 'in_progress';
+      }
+
+      return {
+        ...task,
+        requiredCount: 1,
+        completedCount: status === 'completed' ? 1 : 0,
+        status,
+        isVerifiable: true,
+        completionCriteria:
+          task.completionCriteria ||
+          `Review target company hiring patterns and questions.`,
       };
     }
 
     return task;
   });
+
+  const updatedPlan: StudyPlanData = {
+    ...plan,
+    tasks: updatedTasks,
+  };
+
+  // Sync to local storage and Supabase
+  try {
+    const storageKey = getPlanStorageKey(effectiveId, todayStr);
+    localStorage.setItem(storageKey, JSON.stringify(updatedPlan));
+    if (effectiveId && effectiveId !== 'guest') {
+      persistenceManager
+        .saveStudyPlanState(effectiveId, {
+          studyPlans: { [todayStr]: updatedPlan },
+        })
+        .catch(() => {});
+    }
+  } catch (_) {}
+
+  return updatedPlan;
+}
+
+/**
+ * Global hook to re-evaluate active today's study plan whenever any activity completes.
+ * Dispatches global updates so all open pages/views sync in real-time.
+ */
+export async function checkAndSyncActiveStudyPlan(studentId: string = 'guest'): Promise<StudyPlanData | null> {
+  try {
+    const effectiveId = studentId || 'guest';
+    const todayStr = new Date().toISOString().split('T')[0];
+    const storageKey = getPlanStorageKey(effectiveId, todayStr);
+    const stored = localStorage.getItem(storageKey);
+    if (!stored) return null;
+
+    const plan: StudyPlanData = JSON.parse(stored);
+    if (!plan || !Array.isArray(plan.tasks)) return null;
+
+    const verifiedPlan = await verifyAndSyncStudyPlanWithEvidence(plan, effectiveId);
+    window.dispatchEvent(
+      new CustomEvent('careerpilot_study_plan_updated', {
+        detail: { plan: verifiedPlan, studentId: effectiveId },
+      })
+    );
+    return verifiedPlan;
+  } catch (err) {
+    console.error('[studyPlannerService] checkAndSyncActiveStudyPlan error:', err);
+    return null;
+  }
 }
 
 /**
@@ -668,16 +1003,17 @@ export async function getTodayStudyPlan(
           if (stored) {
             const parsed: StudyPlanData = JSON.parse(stored);
             if (parsed && Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
-              // Sync with today's real activities
-              const syncedTasks = syncTasksWithRealActivities(parsed.tasks, dashboardData, effectiveId);
-              const updatedPlan: StudyPlanData = {
-                ...parsed,
-                tasks: syncedTasks,
-                streakDays: streakInfo.streakDays,
-                totalActivitiesCount: streakInfo.totalActivitiesCount,
-              };
-              localStorage.setItem(storageKey, JSON.stringify(updatedPlan));
-              return { plan: updatedPlan, dashboardData };
+              // Sync with authentic real-world activity evidence
+              const verifiedPlan = await verifyAndSyncStudyPlanWithEvidence(
+                {
+                  ...parsed,
+                  streakDays: streakInfo.streakDays,
+                  totalActivitiesCount: streakInfo.totalActivitiesCount,
+                },
+                effectiveId,
+                dashboardData
+              );
+              return { plan: verifiedPlan, dashboardData };
             }
           }
         } catch (_) {}
@@ -720,20 +1056,14 @@ export async function getTodayStudyPlan(
       generatedPlan.totalActivitiesCount = streakInfo.totalActivitiesCount;
       generatedPlan.dailyStudyTimeMinutes = context.dailyStudyTimeMinutes;
 
-      // Sync with today's real activities
-      generatedPlan.tasks = syncTasksWithRealActivities(generatedPlan.tasks, dashboardData, effectiveId);
+      // Evidence-based verification against actual completions
+      const finalVerifiedPlan = await verifyAndSyncStudyPlanWithEvidence(
+        generatedPlan,
+        effectiveId,
+        dashboardData
+      );
 
-      // Save to persistent local storage for today
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(generatedPlan));
-        if (effectiveId && effectiveId !== 'guest') {
-          persistenceManager.saveStudyPlanState(effectiveId, {
-            studyPlans: { [todayStr]: generatedPlan },
-          }).catch(() => {});
-        }
-      } catch (_) {}
-
-      return { plan: generatedPlan, dashboardData };
+      return { plan: finalVerifiedPlan, dashboardData };
     } finally {
       inFlightRequests.delete(requestKey);
     }
@@ -744,7 +1074,8 @@ export async function getTodayStudyPlan(
 }
 
 /**
- * Update task completion or progress status
+ * Update task status (e.g. marking in_progress or manually tracking non-verifiable tasks)
+ * For objectively verifiable tasks (coding, aptitude, interview), completion is evidence-based.
  */
 export function updateTaskStatus(
   studentId: string = 'guest',
@@ -754,7 +1085,6 @@ export function updateTaskStatus(
   const effectiveId = studentId || 'guest';
   const todayStr = new Date().toISOString().split('T')[0];
   const storageKey = getPlanStorageKey(effectiveId, todayStr);
-  const manualKey = getManualCompletionsStorageKey(effectiveId, todayStr);
 
   try {
     const stored = localStorage.getItem(storageKey);
@@ -764,37 +1094,44 @@ export function updateTaskStatus(
     const taskIndex = plan.tasks.findIndex((t) => t.id === taskId);
     if (taskIndex === -1) return null;
 
+    const task = plan.tasks[taskIndex];
+
+    // If task is verifiable and user attempts to manually mark completed without meeting requirements, reject manual completion
+    if (newStatus === 'completed' && task.isVerifiable !== false) {
+      const isCompleteByEvidence =
+        typeof task.completedCount === 'number' &&
+        typeof task.requiredCount === 'number' &&
+        task.completedCount >= task.requiredCount;
+
+      if (!isCompleteByEvidence) {
+        console.warn(`[studyPlannerService] Task ${taskId} requires authentic completion evidence (${task.completedCount || 0}/${task.requiredCount || 1}). Manual completion blocked.`);
+        return plan;
+      }
+    }
+
     plan.tasks[taskIndex].status = newStatus;
     const nowIso = new Date().toISOString();
 
-    // Update manual completions cache
-    let manualMap: Record<string, string> = {};
-    try {
-      const raw = localStorage.getItem(manualKey);
-      if (raw) manualMap = JSON.parse(raw) || {};
-    } catch (_) {}
-
     if (newStatus === 'completed') {
-      plan.tasks[taskIndex].completedAt = nowIso;
-      manualMap[taskId] = nowIso;
-    } else {
+      plan.tasks[taskIndex].completedAt = task.completedAt || nowIso;
+    } else if (newStatus === 'pending') {
       delete plan.tasks[taskIndex].completedAt;
-      delete manualMap[taskId];
     }
-
-    try {
-      localStorage.setItem(manualKey, JSON.stringify(manualMap));
-    } catch (_) {}
 
     localStorage.setItem(storageKey, JSON.stringify(plan));
 
     // Write-through to persistence manager for cloud persistence
     if (effectiveId && effectiveId !== 'guest') {
       persistenceManager.saveStudyPlanState(effectiveId, {
-        manualCompletions: { [todayStr]: Object.keys(manualMap) },
         studyPlans: { [todayStr]: plan },
       }).catch(() => {});
     }
+
+    window.dispatchEvent(
+      new CustomEvent('careerpilot_study_plan_updated', {
+        detail: { plan, studentId: effectiveId },
+      })
+    );
 
     return plan;
   } catch (err) {
@@ -854,6 +1191,10 @@ function buildLocalDeterministicPlan(
       isPriority: true,
       targetTopic: 'Arrays',
       targetLanguage: codingLang,
+      requiredCount: 1,
+      completedCount: 0,
+      completionCriteria: `Solve 1 foundational Array coding problem with accepted test cases in the Coding Arena.`,
+      isVerifiable: true,
     });
 
     tasks.push({
@@ -872,6 +1213,10 @@ function buildLocalDeterministicPlan(
       priorityLevel: 'medium',
       isPriority: false,
       targetTopic: 'Quantitative Aptitude',
+      requiredCount: 1,
+      completedCount: 0,
+      completionCriteria: `Complete and submit a 10-question placement aptitude assessment.`,
+      isVerifiable: true,
     });
 
     tasks.push({
@@ -889,6 +1234,10 @@ function buildLocalDeterministicPlan(
       status: 'pending',
       priorityLevel: 'medium',
       isPriority: false,
+      requiredCount: 1,
+      completedCount: 0,
+      completionCriteria: `Complete a simulated technical interview session.`,
+      isVerifiable: true,
     });
 
     // Roadmap task
@@ -908,6 +1257,10 @@ function buildLocalDeterministicPlan(
         status: 'pending',
         priorityLevel: 'low',
         isPriority: false,
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Initialize your personalized Career Roadmap.`,
+        isVerifiable: true,
       });
     }
   } else {
@@ -941,6 +1294,10 @@ function buildLocalDeterministicPlan(
         isPriority: true,
         targetTopic: topWeak.topic,
         targetLanguage: codingLang,
+        requiredCount: 2,
+        completedCount: 0,
+        completionCriteria: `Solve 2 ${topWeak.topic} problems with accepted submissions in Coding Arena.`,
+        isVerifiable: true,
       });
     } else if (context.hasMeasuredData?.hasArrayRecord && context.hasMeasuredData?.arrayScore !== undefined) {
       const isArrayWeak = context.hasMeasuredData.arrayScore < 70;
@@ -963,6 +1320,10 @@ function buildLocalDeterministicPlan(
         isPriority: isArrayWeak,
         targetTopic: 'Arrays',
         targetLanguage: codingLang,
+        requiredCount: 2,
+        completedCount: 0,
+        completionCriteria: `Solve 2 Intermediate Array problems with accepted submissions in Coding Arena.`,
+        isVerifiable: true,
       });
     } else {
       // Neutral wording when no measured Array claim exists
@@ -983,6 +1344,10 @@ function buildLocalDeterministicPlan(
         isPriority: true,
         targetTopic: 'Arrays',
         targetLanguage: codingLang,
+        requiredCount: 2,
+        completedCount: 0,
+        completionCriteria: `Solve 2 Intermediate Array problems with accepted submissions in Coding Arena.`,
+        isVerifiable: true,
       });
     }
 
@@ -1007,6 +1372,10 @@ function buildLocalDeterministicPlan(
           priorityLevel: context.hasMeasuredData.osScore < 70 ? 'high' : 'medium',
           isPriority: context.hasMeasuredData.osScore < 70,
           targetTopic: 'Operating Systems',
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Complete an Operating Systems assessment.`,
+          isVerifiable: true,
         });
       } else if (weakAptitude) {
         tasks.push({
@@ -1025,6 +1394,10 @@ function buildLocalDeterministicPlan(
           priorityLevel: 'medium',
           isPriority: false,
           targetTopic: weakAptitude.topic,
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Complete an assessment on ${weakAptitude.topic}.`,
+          isVerifiable: true,
         });
       } else {
         // Neutral wording without fake score claims
@@ -1044,6 +1417,10 @@ function buildLocalDeterministicPlan(
           priorityLevel: 'medium',
           isPriority: false,
           targetTopic: 'Operating Systems',
+          requiredCount: 1,
+          completedCount: 0,
+          completionCriteria: `Complete an Operating Systems practice test.`,
+          isVerifiable: true,
         });
       }
     }
@@ -1066,6 +1443,10 @@ function buildLocalDeterministicPlan(
         priorityLevel: 'medium',
         isPriority: false,
         targetCompany: targetCompany,
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Review company hiring targets and practice high-frequency questions.`,
+        isVerifiable: true,
       });
     } else {
       tasks.push({
@@ -1083,6 +1464,10 @@ function buildLocalDeterministicPlan(
         status: 'pending',
         priorityLevel: 'medium',
         isPriority: false,
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Complete a simulated technical interview round.`,
+        isVerifiable: true,
       });
     }
 
@@ -1105,6 +1490,10 @@ function buildLocalDeterministicPlan(
         status: 'pending',
         priorityLevel: 'low',
         isPriority: false,
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Complete the next milestone on your career roadmap.`,
+        isVerifiable: true,
       });
     } else if (context.scores.resumeAtsScore && context.scores.resumeAtsScore < 75) {
       tasks.push({
@@ -1122,6 +1511,10 @@ function buildLocalDeterministicPlan(
         status: 'pending',
         priorityLevel: 'low',
         isPriority: false,
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Upload and analyze your resume for ATS score feedback.`,
+        isVerifiable: true,
       });
     } else {
       tasks.push({
@@ -1139,6 +1532,10 @@ function buildLocalDeterministicPlan(
         status: 'pending',
         priorityLevel: 'low',
         isPriority: false,
+        requiredCount: 1,
+        completedCount: 0,
+        completionCriteria: `Initialize your personalized Career Roadmap.`,
+        isVerifiable: true,
       });
     }
   }

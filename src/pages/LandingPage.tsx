@@ -1457,6 +1457,16 @@ function processTargetLogic(dataInput) {
               <span>End-to-End Placement Pipeline</span>
             </div>
           </div>
+
+          <div className="pt-2">
+            <button
+              onClick={() => onNavigate('about')}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-bold text-xs sm:text-sm transition-all shadow-xs cursor-pointer"
+            >
+              <span>Read Full About & Developer Story</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </section>
 

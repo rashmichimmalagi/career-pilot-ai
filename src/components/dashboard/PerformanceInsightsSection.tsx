@@ -25,6 +25,9 @@ export const PerformanceInsightsSection: React.FC<PerformanceInsightsSectionProp
   strongAreas,
   onNavigate,
 }) => {
+  const safeWeakAreas = weakAreas || [];
+  const safeStrongAreas = strongAreas || [];
+
   const getCategoryIcon = (cat: string) => {
     switch (cat) {
       case 'DSA':
@@ -61,14 +64,14 @@ export const PerformanceInsightsSection: React.FC<PerformanceInsightsSectionProp
               </div>
             </div>
 
-            {weakAreas.length > 0 && (
+            {safeWeakAreas.length > 0 && (
               <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/20">
-                {weakAreas.length} Topics
+                {safeWeakAreas.length} Topics
               </span>
             )}
           </div>
 
-          {weakAreas.length === 0 ? (
+          {safeWeakAreas.length === 0 ? (
             <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 text-center space-y-2">
               <TrendingDown className="w-8 h-8 mx-auto text-slate-400 dark:text-slate-500" />
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium">
@@ -88,7 +91,7 @@ export const PerformanceInsightsSection: React.FC<PerformanceInsightsSectionProp
             </div>
           ) : (
             <div className="space-y-2.5">
-              {weakAreas.slice(0, 5).map((item, idx) => (
+              {safeWeakAreas.slice(0, 5).map((item, idx) => (
                 <div
                   key={`weak-${idx}-${item.topic}`}
                   className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 hover:border-rose-500/30 transition-all"
@@ -147,14 +150,14 @@ export const PerformanceInsightsSection: React.FC<PerformanceInsightsSectionProp
               </div>
             </div>
 
-            {strongAreas.length > 0 && (
+            {safeStrongAreas.length > 0 && (
               <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
-                {strongAreas.length} Strengths
+                {safeStrongAreas.length} Strengths
               </span>
             )}
           </div>
 
-          {strongAreas.length === 0 ? (
+          {safeStrongAreas.length === 0 ? (
             <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 text-center space-y-2">
               <TrendingUp className="w-8 h-8 mx-auto text-slate-400 dark:text-slate-500" />
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium">
@@ -174,7 +177,7 @@ export const PerformanceInsightsSection: React.FC<PerformanceInsightsSectionProp
             </div>
           ) : (
             <div className="space-y-2.5">
-              {strongAreas.slice(0, 5).map((item, idx) => (
+              {safeStrongAreas.slice(0, 5).map((item, idx) => (
                 <div
                   key={`strong-${idx}-${item.topic}`}
                   className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-500/30 transition-all"

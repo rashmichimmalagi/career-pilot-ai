@@ -25,6 +25,8 @@ export const RecentActivitySection: React.FC<RecentActivitySectionProps> = ({
   activities,
   onNavigate,
 }) => {
+  const safeActivities = activities || [];
+
   const formatTimeAgo = (isoString: string) => {
     try {
       const date = new Date(isoString);
@@ -106,14 +108,14 @@ export const RecentActivitySection: React.FC<RecentActivitySectionProps> = ({
           </div>
         </div>
 
-        {activities.length > 0 && (
+        {safeActivities.length > 0 && (
           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-            Showing {activities.length} recent events
+            Showing {safeActivities.length} recent events
           </span>
         )}
       </div>
 
-      {activities.length === 0 ? (
+      {safeActivities.length === 0 ? (
         <div className="p-8 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 text-center space-y-3">
           <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 dark:text-slate-500">
             <Clock className="w-6 h-6" />
@@ -143,7 +145,7 @@ export const RecentActivitySection: React.FC<RecentActivitySectionProps> = ({
         </div>
       ) : (
         <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {activities.map((act) => (
+          {safeActivities.map((act) => (
             <div
               key={act.id}
               onClick={() => onNavigate(act.route)}

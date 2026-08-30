@@ -29,7 +29,8 @@ import {
   Trophy,
   Lock,
   Cloud,
-  CloudOff
+  CloudOff,
+  Loader2
 } from 'lucide-react';
 import {
   CodingSubmission,
@@ -736,13 +737,21 @@ export const MyPracticeView: React.FC<MyPracticeViewProps> = ({
                         <span>{formatDate(sub.created_at)}</span>
 
                         <span className="text-slate-400">•</span>
-                        {sub.cloudSynced ? (
+                        {sub.cloudSynced || sub.persistenceStatus === 'synced' ? (
                           <span
                             title="Synced to Supabase Cloud"
                             className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium"
                           >
                             <Cloud className="w-3.5 h-3.5" />
                             <span>Synced</span>
+                          </span>
+                        ) : sub.persistenceStatus === 'saving' ? (
+                          <span
+                            title="Saving to Supabase Cloud..."
+                            className="inline-flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400 font-medium"
+                          >
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Saving...</span>
                           </span>
                         ) : (
                           <span

@@ -32,6 +32,12 @@ export interface StudyTask {
   targetTopic?: string;
   targetCompany?: string;
   targetLanguage?: string;
+  // Explicit Evidence-Based Completion Criteria
+  requiredCount?: number; // e.g. 2 for 2 problems, 1 for mock interview
+  completedCount?: number; // Actual verified count completed from underlying module
+  targetDifficulty?: string; // 'Beginner' | 'Intermediate' | 'Advanced'
+  completionCriteria?: string; // Human-readable evidence requirement
+  isVerifiable?: boolean; // Defaults to true for coding, aptitude, interview, resume, roadmap
 }
 
 export interface WeeklyGoal {

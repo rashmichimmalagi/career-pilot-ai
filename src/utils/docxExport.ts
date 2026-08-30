@@ -208,11 +208,12 @@ export async function exportResumeToDocx(
     addSectionHeader('Certifications & Achievements');
     if (resume.certifications) {
       for (const cert of resume.certifications) {
+        const certStr = typeof cert === 'string' ? cert : `${cert.name}${cert.issuer ? ` (${cert.issuer})` : ''}${cert.date ? ` - ${cert.date}` : ''}`;
         children.push(
           new Paragraph({
             children: [
               new TextRun({ text: 'Certification: ', bold: true }),
-              new TextRun({ text: cert }),
+              new TextRun({ text: certStr }),
             ],
             bullet: { level: 0 },
             spacing: { after: 40 },

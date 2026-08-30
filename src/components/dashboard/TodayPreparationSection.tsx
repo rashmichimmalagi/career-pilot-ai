@@ -20,9 +20,11 @@ interface TodayPreparationSectionProps {
 }
 
 export const TodayPreparationSection: React.FC<TodayPreparationSectionProps> = ({
-  recommendations,
+  recommendations = [],
   onNavigate,
 }) => {
+  const safeRecommendations = recommendations || [];
+
   const getIcon = (iconName: string) => {
     switch (iconName) {
       case 'Code2':
@@ -79,14 +81,14 @@ export const TodayPreparationSection: React.FC<TodayPreparationSectionProps> = (
           </p>
         </div>
 
-        {recommendations.length > 0 && (
+        {safeRecommendations.length > 0 && (
           <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-3 py-1 rounded-full border border-indigo-200 dark:border-indigo-800">
-            {recommendations.length} Recommended Actions
+            {safeRecommendations.length} Recommended Actions
           </span>
         )}
       </div>
 
-      {recommendations.length === 0 ? (
+      {safeRecommendations.length === 0 ? (
         <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-3">
           <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
             <Sparkles className="w-6 h-6" />
@@ -116,7 +118,7 @@ export const TodayPreparationSection: React.FC<TodayPreparationSectionProps> = (
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {recommendations.map((rec) => (
+          {safeRecommendations.map((rec) => (
             <div
               key={rec.id}
               className="flex flex-col justify-between p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs hover:shadow-md transition-all space-y-4"

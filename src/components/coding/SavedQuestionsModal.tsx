@@ -10,7 +10,11 @@ import {
   Filter,
   ExternalLink,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 import { SavedQuestion, CodingLanguage, CodingProblem } from '../../types/coding';
 import { getSubjectDefaultLanguage } from '../../services/codingService';
@@ -21,6 +25,7 @@ interface SavedQuestionsModalProps {
   savedQuestions: SavedQuestion[];
   onSelectProblem: (problem: CodingProblem, language?: CodingLanguage) => void;
   onRemoveSaved: (questionId: string) => void;
+  onRetrySync?: (problem: CodingProblem) => Promise<void>;
 }
 
 export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
@@ -29,10 +34,13 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
   savedQuestions,
   onSelectProblem,
   onRemoveSaved,
+  onRetrySync,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSubject, setSelectedSubject] = useState<string>('all');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all');
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const subjectsList = useMemo(() => {
     const set = new Set<string>();
@@ -58,6 +66,25 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
     });
   }, [savedQuestions, searchQuery, selectedSubject, selectedDifficulty]);
 
+  const handleRetry = async (q: SavedQuestion) => {
+    if (!onRetrySync || !q.question_data) return;
+    try {
+      setRetryingId(q.question_id || q.id);
+      await onRetrySync(q.question_data);
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
+  const handleDelete = async (questionId: string) => {
+    try {
+      setDeletingId(questionId);
+      await onRemoveSaved(questionId);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -80,7 +107,7 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
                 </span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Review and practice your bookmarked coding problems across all subjects.
+                Authoritative Supabase storage with offline backup. Access on any device.
               </p>
             </div>
           </div>
@@ -88,7 +115,7 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
           <button
             onClick={onClose}
             id="close-saved-modal-btn"
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -146,7 +173,7 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
               <h4 className="text-sm font-semibold text-slate-300">No bookmarked questions</h4>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
                 {savedQuestions.length === 0
-                  ? 'Click the bookmark icon on any question in the Question Series to save it for quick access later.'
+                  ? 'Click the Save bookmark icon on any question in the Practice view to persist it authoritatively to Supabase cloud.'
                   : 'No saved questions match your current search or filter.'}
               </p>
             </div>
@@ -159,10 +186,13 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                   : 'bg-rose-500/10 text-rose-400 border-rose-500/20';
 
+              const isPending = q.cloudSynced === false || q.persistenceStatus === 'pending';
+              const targetQId = q.question_id || q.id;
+
               return (
                 <div
-                  key={q.id || q.question_id}
-                  id={`saved-card-${q.question_id}`}
+                  key={targetQId}
+                  id={`saved-card-${targetQId}`}
                   className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-700 transition-all group"
                 >
                   <div className="flex-1 min-w-0">
@@ -176,23 +206,61 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
                       <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
                         {q.subject} • {q.topic}
                       </span>
+
+                      {/* Cloud Sync Status Badge */}
+                      {isPending ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          <CloudOff className="w-3 h-3 text-amber-400" />
+                          <span>Sync Pending</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <Cloud className="w-3 h-3 text-emerald-400" />
+                          <span>Synced</span>
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-2">
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3 text-slate-600" />
-                        Saved on {new Date(q.created_at || Date.now()).toLocaleDateString()}
+                        Saved on {new Date(q.saved_at || q.created_at || Date.now()).toLocaleDateString()}
                       </span>
+                      {isPending && onRetrySync && (
+                        <button
+                          type="button"
+                          onClick={() => handleRetry(q)}
+                          disabled={retryingId === targetQId}
+                          className="inline-flex items-center gap-1 text-amber-400 hover:text-amber-300 underline text-[11px] cursor-pointer"
+                        >
+                          {retryingId === targetQId ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>Syncing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="w-3 h-3" />
+                              <span>Retry Cloud Sync</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 self-end sm:self-center">
                     <button
-                      onClick={() => onRemoveSaved(q.question_id || q.id)}
+                      onClick={() => handleDelete(targetQId)}
+                      disabled={deletingId === targetQId}
                       title="Remove Bookmark"
-                      className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition-all"
+                      className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition-all cursor-pointer"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      {deletingId === targetQId ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-rose-400" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
                     </button>
 
                     <button
@@ -202,7 +270,7 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
                           onClose();
                         }
                       }}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold transition-all shadow-sm"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold transition-all shadow-sm cursor-pointer"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
                       <span>Solve</span>
@@ -216,10 +284,10 @@ export const SavedQuestionsModal: React.FC<SavedQuestionsModalProps> = ({
 
         {/* Modal Footer */}
         <div className="p-4 border-t border-slate-800 bg-slate-900/80 flex items-center justify-between text-xs text-slate-400">
-          <span>Bookmarked questions persist across sessions in Supabase.</span>
+          <span>Persisted authoritatively to Supabase table <code className="text-amber-300">saved_coding_questions</code>.</span>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-xl transition-all"
+            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-xl transition-all cursor-pointer"
           >
             Close
           </button>

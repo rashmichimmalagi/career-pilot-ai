@@ -29,6 +29,7 @@ interface ResumeViewerModalProps {
   onImprove?: (resume: ResumeVersionItem) => void;
   onImproveResume?: (resume: ResumeVersionItem) => void;
   onPrint?: (resume: ResumeVersionItem) => void;
+  onEdit?: (resume: ResumeVersionItem) => void;
 }
 
 export const ResumeViewerModal: React.FC<ResumeViewerModalProps> = ({
@@ -41,6 +42,7 @@ export const ResumeViewerModal: React.FC<ResumeViewerModalProps> = ({
   onImprove,
   onImproveResume,
   onPrint,
+  onEdit,
 }) => {
   const [activeTab, setActiveTab] = useState<'preview' | 'text' | 'analysis'>('preview');
   const [isDownloading, setIsDownloading] = useState(false);
@@ -315,6 +317,18 @@ export const ResumeViewerModal: React.FC<ResumeViewerModalProps> = ({
           {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
             
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => onEdit(resume)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-colors cursor-pointer shadow-xs"
+                title="Open in Live Resume Editor"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>Edit in Live Editor</span>
+              </button>
+            )}
+
             {!resume.isCurrent && (
               <button
                 type="button"

@@ -643,11 +643,15 @@ export const ResumePreviewEditor: React.FC<ResumePreviewEditorProps> = ({
                 Certifications & Achievements
               </h2>
               <ul className="list-disc list-outside ml-4 space-y-1 text-xs sm:text-[13px] text-slate-800">
-                {structured.certifications?.map((c, idx) => (
-                  <li key={`cert-${idx}`}>
-                    <span className="font-bold font-sans">Certification:</span> {c}
-                  </li>
-                ))}
+                {structured.certifications?.map((c, idx) => {
+                  const certName = typeof c === 'string' ? c : c?.name || '';
+                  const certIssuer = typeof c !== 'string' && c?.issuer ? ` (${c.issuer})` : '';
+                  return (
+                    <li key={`cert-${idx}`}>
+                      <span className="font-bold font-sans">Certification:</span> {certName}{certIssuer}
+                    </li>
+                  );
+                })}
                 {structured.achievements?.map((a, idx) => (
                   <li key={`ach-${idx}`}>
                     <span className="font-bold font-sans">Achievement:</span> {a}
