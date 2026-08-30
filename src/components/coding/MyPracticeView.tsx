@@ -747,19 +747,19 @@ export const MyPracticeView: React.FC<MyPracticeViewProps> = ({
                           </span>
                         ) : sub.persistenceStatus === 'saving' ? (
                           <span
-                            title="Saving to Supabase Cloud..."
+                            title="Syncing to Cloud..."
                             className="inline-flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400 font-medium"
                           >
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Saving...</span>
+                            <span>Syncing...</span>
                           </span>
                         ) : (
                           <span
-                            title={sub.cloudSyncError || 'Saved locally only. Click Retry to sync to cloud.'}
+                            title={sub.cloudSyncError ? 'Cloud sync pending. Click to retry.' : 'Saved on this device. Will sync automatically.'}
                             className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-medium"
                           >
                             <CloudOff className="w-3.5 h-3.5" />
-                            <span>Local only</span>
+                            <span>Saved on device</span>
                             <button
                               type="button"
                               onClick={(e) => handleRetryCloudSync(sub, e)}

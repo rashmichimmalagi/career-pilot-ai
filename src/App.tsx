@@ -215,10 +215,13 @@ function AppContent() {
     pendingQueueCount,
     isSyncing,
     syncError,
+    quoteSecondsLeft,
+    totalQuoteIntervalSeconds,
     triggerSync,
     nextQuote,
   } = useNetworkInterruption({
     user,
+    currentPage,
     showToast,
   });
 
@@ -529,6 +532,8 @@ function AppContent() {
         pendingQueueCount={pendingQueueCount}
         isSyncing={isSyncing}
         syncError={syncError}
+        quoteSecondsLeft={quoteSecondsLeft}
+        totalQuoteIntervalSeconds={totalQuoteIntervalSeconds}
         onRetrySync={triggerSync}
         onNextQuote={nextQuote}
       />

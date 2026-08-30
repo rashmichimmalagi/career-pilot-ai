@@ -497,11 +497,11 @@ export const ProblemView: React.FC<ProblemViewProps> = React.memo(({
                           </span>
                         ) : (
                           <span
-                            title={sub.cloudSyncError || 'Saved locally only. Click to retry syncing to cloud.'}
+                            title={sub.cloudSyncError ? 'Cloud sync pending. Click to retry.' : 'Saved on this device. Will sync automatically.'}
                             className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-medium"
                           >
                             <CloudOff className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Local only</span>
+                            <span className="hidden sm:inline">Saved on device</span>
                             {onRetryCloudSave && (
                               <button
                                 type="button"

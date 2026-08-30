@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   WifiOff,
-  Wifi,
   ShieldCheck,
   RefreshCw,
   CheckCircle2,
@@ -11,8 +10,12 @@ import {
   Maximize2,
   Sparkles,
   Database,
-  Cloud,
   X,
+  Code2,
+  FileText,
+  Briefcase,
+  Layers,
+  GraduationCap,
 } from 'lucide-react';
 import { SyncState } from '../../hooks/useNetworkInterruption';
 import { OfflineQuote } from '../../data/offlineQuotes';
@@ -24,6 +27,8 @@ interface OfflineNetworkBannerProps {
   pendingQueueCount: number;
   isSyncing: boolean;
   syncError: string | null;
+  quoteSecondsLeft?: number;
+  totalQuoteIntervalSeconds?: number;
   onRetrySync: () => void;
   onNextQuote: () => void;
 }
@@ -35,6 +40,8 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
   pendingQueueCount,
   isSyncing,
   syncError,
+  quoteSecondsLeft = 5,
+  totalQuoteIntervalSeconds = 5,
   onRetrySync,
   onNextQuote,
 }) => {
@@ -50,6 +57,33 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
   if (isExplicitlyDismissed && isOnline) {
     return null;
   }
+
+  // Calculate percentage of remaining time for the 5-second countdown progress bar
+  const progressPercent = Math.max(0, Math.min(100, (quoteSecondsLeft / totalQuoteIntervalSeconds) * 100));
+
+  // Category Icon Resolver
+  const renderCategoryIcon = () => {
+    switch (currentQuote.iconType) {
+      case 'coding':
+      case 'debugging':
+      case 'typescript':
+      case 'javascript':
+        return <Code2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />;
+      case 'resume':
+      case 'resumeanalysis':
+      case 'ats':
+        return <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />;
+      case 'techinterview':
+      case 'hrinterview':
+      case 'career':
+        return <Briefcase className="w-3.5 h-3.5 text-amber-400 shrink-0" />;
+      case 'placement':
+      case 'learning':
+        return <GraduationCap className="w-3.5 h-3.5 text-indigo-400 shrink-0" />;
+      default:
+        return <Layers className="w-3.5 h-3.5 text-purple-400 shrink-0" />;
+    }
+  };
 
   return (
     <div
@@ -79,7 +113,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 font-medium">
-                  Connection lost.
+                  Connection interrupted.
                 </p>
               </div>
             </div>
@@ -97,51 +131,69 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
             </div>
           </div>
 
-          {/* Safety & Persistence Status */}
+          {/* Status-Aware Safety & Persistence Indicator */}
           <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs">
             <div className="flex items-center gap-2 text-emerald-400 font-medium">
               <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-400" />
-              <span className="text-[11px]">🛡️ Your CareerPilot data is safe.</span>
+              <span className="text-[11px]">
+                {pendingQueueCount > 0 ? 'Changes saved on this device' : 'Your CareerPilot data is safe'}
+              </span>
             </div>
             <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">
-              Saved locally
+              {pendingQueueCount > 0 ? 'Offline changes saved' : 'Protected'}
             </span>
           </div>
 
           {!isMinimized && (
             <>
-              {/* Detailed Explanation */}
+              {/* Context Explanation */}
               <p className="text-xs text-slate-300 leading-relaxed">
-                The system will automatically reconnect when internet returns. You can continue reading cached study materials and practicing offline.
+                You can continue practicing problems and reviewing materials. Everything will automatically synchronize when your internet connection is restored.
               </p>
 
               {pendingQueueCount > 0 && (
                 <div className="flex items-center gap-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg">
                   <Database className="w-3.5 h-3.5 shrink-0" />
-                  <span>{pendingQueueCount} change{pendingQueueCount > 1 ? 's' : ''} queued to sync with Supabase on reconnect.</span>
+                  <span>{pendingQueueCount} change{pendingQueueCount > 1 ? 's' : ''} queued to sync automatically once connected.</span>
                 </div>
               )}
 
-              {/* Career & Developer Offline Quote / Tip */}
+              {/* Motivational & Developer Tip Rotating Panel (5s Continuous Cycle) */}
               <div className="pt-2 border-t border-slate-800 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                    <Sparkles className="w-3 h-3 text-cyan-400" />
-                    <span>{currentQuote.categoryLabel}</span>
+                    {renderCategoryIcon()}
+                    <span className="truncate max-w-[170px]">{currentQuote.categoryLabel}</span>
                   </span>
                   
-                  <button
-                    onClick={onNextQuote}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
-                    title="Read another developer tip"
-                    aria-label="Next tip"
-                  >
-                    <span>Next Tip</span>
-                    <ChevronRight className="w-3 h-3" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {/* Subtle 5s Countdown Indicator */}
+                    <span className="text-[10px] text-slate-400 font-mono font-medium">
+                      {quoteSecondsLeft}s
+                    </span>
+
+                    <button
+                      onClick={onNextQuote}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer bg-slate-800/60 hover:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700/50"
+                      title="Next developer tip"
+                      aria-label="Next developer tip"
+                    >
+                      <span>Next Tip</span>
+                      <ChevronRight className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-950/40 via-purple-950/20 to-slate-900/60 border border-indigo-500/20 text-xs text-slate-200 italic leading-relaxed">
+                {/* Progress bar across the 5-second tip interval */}
+                <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
+                  <div
+                    className="bg-gradient-to-r from-indigo-500 via-cyan-400 to-purple-400 h-full transition-all duration-1000 ease-linear rounded-full"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+
+                {/* Tip Content */}
+                <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-950/40 via-purple-950/20 to-slate-900/60 border border-indigo-500/20 text-xs text-slate-200 leading-relaxed">
                   "{currentQuote.quote}"
                 </div>
               </div>
@@ -165,7 +217,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
                   <span>🟢 CONNECTION RESTORED</span>
                 </span>
                 <p className="text-[11px] text-slate-300">
-                  {syncState === 'reconnecting' ? 'Reconnecting to CareerPilot...' : 'Syncing your latest data...'}
+                  {syncState === 'reconnecting' ? 'Reconnecting to CareerPilot...' : 'Synchronizing your recent progress...'}
                 </p>
               </div>
             </div>
@@ -203,7 +255,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
 
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Synced ✓
+                All changes synced ✓
               </span>
               <button
                 onClick={() => setIsExplicitlyDismissed(true)}
@@ -216,7 +268,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-slate-400 pl-10.5">
-            Your offline submissions and practice progress are securely updated in Supabase.
+            Your submissions, notes, and practice progress are securely updated.
           </p>
         </div>
       )}
@@ -252,7 +304,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
           </div>
 
           {syncError && (
-            <p className="text-[11px] text-rose-300 bg-rose-950/40 p-2 rounded-lg border border-rose-900/40">
+            <p className="text-[11px] text-amber-200 bg-amber-950/40 p-2.5 rounded-lg border border-amber-900/40 leading-relaxed">
               {syncError}
             </p>
           )}

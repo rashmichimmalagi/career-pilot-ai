@@ -15,10 +15,13 @@ export type SyncState =
 
 interface UseNetworkInterruptionOptions {
   user: User | null;
+  currentPage?: string;
   showToast?: (title: string, subtitle?: string, type?: 'info' | 'warning' | 'error' | 'success') => void;
 }
 
-export function useNetworkInterruption({ user, showToast }: UseNetworkInterruptionOptions) {
+const QUOTE_INTERVAL_SECONDS = 5;
+
+export function useNetworkInterruption({ user, currentPage, showToast }: UseNetworkInterruptionOptions) {
   const [isOnline, setIsOnline] = useState<boolean>(() => {
     return typeof navigator !== 'undefined' ? navigator.onLine : true;
   });
@@ -27,15 +30,34 @@ export function useNetworkInterruption({ user, showToast }: UseNetworkInterrupti
     return typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'idle';
   });
 
-  const [currentQuote, setCurrentQuote] = useState<OfflineQuote>(() => getRandomOfflineQuote());
+  const [currentQuote, setCurrentQuote] = useState<OfflineQuote>(() => getRandomOfflineQuote(undefined, currentPage));
   const [pendingQueueCount, setPendingQueueCount] = useState<number>(0);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isDismissed, setIsDismissed] = useState<boolean>(false);
+  const [quoteSecondsLeft, setQuoteSecondsLeft] = useState<number>(QUOTE_INTERVAL_SECONDS);
 
   const quoteTimerRef = useRef<NodeJS.Timeout | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const wasOfflineRef = useRef<boolean>(false);
+  const currentPageRef = useRef<string | undefined>(currentPage);
+  currentPageRef.current = currentPage;
+
+  // Sanitize technical/database errors for display
+  const sanitizeSyncError = (err: any): string => {
+    if (!err) return 'Sync could not be completed at this time.';
+    const raw = typeof err === 'string' ? err : err.message || JSON.stringify(err);
+    if (raw.toLowerCase().includes('violates row-level') || raw.toLowerCase().includes('jwt') || raw.toLowerCase().includes('auth')) {
+      return 'Please ensure you are signed in so your changes can sync securely to your account.';
+    }
+    if (raw.toLowerCase().includes('network') || raw.toLowerCase().includes('fetch') || raw.toLowerCase().includes('failed to fetch')) {
+      return 'Network connection was interrupted during sync. Your changes remain saved on this device.';
+    }
+    if (raw.toLowerCase().includes('schema') || raw.toLowerCase().includes('column')) {
+      return 'Temporary sync service update in progress. Your data is safely preserved on this device.';
+    }
+    return 'Some changes are waiting for a stronger connection. They remain safe on this device.';
+  };
 
   // Update pending queue count
   const refreshQueueCount = useCallback(() => {
@@ -76,7 +98,7 @@ export function useNetworkInterruption({ user, showToast }: UseNetworkInterrupti
           }, 4000);
         } else if (result.errors.length > 0) {
           setSyncState('sync_partial');
-          setSyncError(result.errors[0]);
+          setSyncError(sanitizeSyncError(result.errors[0]));
         } else {
           setSyncState('synced');
           if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
@@ -95,16 +117,46 @@ export function useNetworkInterruption({ user, showToast }: UseNetworkInterrupti
     } catch (err: any) {
       console.warn('Network reconnection sync error:', err);
       setSyncState('sync_failed');
-      setSyncError(err?.message || 'Sync failed');
+      setSyncError(sanitizeSyncError(err));
     } finally {
       setIsSyncing(false);
     }
   }, [user?.id, refreshQueueCount]);
 
-  // Rotate to next quote
+  // Rotate to next quote immediately and reset 5s timer
   const nextQuote = useCallback(() => {
-    setCurrentQuote((prev) => getRandomOfflineQuote(prev.id));
+    setCurrentQuote((prev) => getRandomOfflineQuote(prev.id, currentPageRef.current));
+    setQuoteSecondsLeft(QUOTE_INTERVAL_SECONDS);
   }, []);
+
+  // Continuous 5-second quote rotation timer while offline
+  useEffect(() => {
+    if (!isOnline && syncState === 'offline') {
+      setQuoteSecondsLeft(QUOTE_INTERVAL_SECONDS);
+      
+      const interval = setInterval(() => {
+        setQuoteSecondsLeft((prev) => {
+          if (prev <= 1) {
+            setCurrentQuote((current) => getRandomOfflineQuote(current.id, currentPageRef.current));
+            return QUOTE_INTERVAL_SECONDS;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      quoteTimerRef.current = interval;
+
+      return () => {
+        clearInterval(interval);
+        quoteTimerRef.current = null;
+      };
+    } else {
+      if (quoteTimerRef.current) {
+        clearInterval(quoteTimerRef.current);
+        quoteTimerRef.current = null;
+      }
+    }
+  }, [isOnline, syncState]);
 
   // Monitor network online / offline events
   useEffect(() => {
@@ -136,7 +188,7 @@ export function useNetworkInterruption({ user, showToast }: UseNetworkInterrupti
       nextQuote();
       refreshQueueCount();
       if (showToast) {
-        showToast('Offline Mode Active', 'Your CareerPilot data is safe and saved locally.', 'warning');
+        showToast('Offline Mode Active', 'Your CareerPilot data is safe. Changes will be saved on this device.', 'warning');
       }
     };
 
@@ -152,29 +204,9 @@ export function useNetworkInterruption({ user, showToast }: UseNetworkInterrupti
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      if (quoteTimerRef.current) clearInterval(quoteTimerRef.current);
     };
   }, [triggerSync, nextQuote, refreshQueueCount, showToast]);
-
-  // Quote rotation timer while offline (every 25 seconds)
-  useEffect(() => {
-    if (!isOnline && syncState === 'offline') {
-      quoteTimerRef.current = setInterval(() => {
-        nextQuote();
-      }, 25000);
-    } else {
-      if (quoteTimerRef.current) {
-        clearInterval(quoteTimerRef.current);
-        quoteTimerRef.current = null;
-      }
-    }
-
-    return () => {
-      if (quoteTimerRef.current) {
-        clearInterval(quoteTimerRef.current);
-        quoteTimerRef.current = null;
-      }
-    };
-  }, [isOnline, syncState, nextQuote]);
 
   // Refresh pending queue periodically
   useEffect(() => {
@@ -189,6 +221,8 @@ export function useNetworkInterruption({ user, showToast }: UseNetworkInterrupti
     isSyncing,
     syncError,
     isDismissed,
+    quoteSecondsLeft,
+    totalQuoteIntervalSeconds: QUOTE_INTERVAL_SECONDS,
     setIsDismissed,
     triggerSync,
     nextQuote,
