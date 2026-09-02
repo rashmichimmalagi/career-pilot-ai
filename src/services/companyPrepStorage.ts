@@ -251,3 +251,34 @@ export function getActiveStudentTarget(studentId: string = 'guest'): StudentTarg
 
   return targets[0];
 }
+
+const CHECKLIST_STORAGE_PREFIX = 'careerpilot_company_checklist_';
+
+export function getCompanyChecklistCompleted(studentId: string = 'guest', companyName: string = 'general'): string[] {
+  try {
+    const key = `${CHECKLIST_STORAGE_PREFIX}${studentId}_${companyName.toLowerCase().replace(/\s+/g, '_')}`;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function toggleCompanyChecklistItem(
+  studentId: string = 'guest',
+  companyName: string = 'general',
+  itemId: string
+): string[] {
+  try {
+    const key = `${CHECKLIST_STORAGE_PREFIX}${studentId}_${companyName.toLowerCase().replace(/\s+/g, '_')}`;
+    const current = getCompanyChecklistCompleted(studentId, companyName);
+    const updated = current.includes(itemId)
+      ? current.filter((id) => id !== itemId)
+      : [...current, itemId];
+    localStorage.setItem(key, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
+  }
+}
+

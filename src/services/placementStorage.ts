@@ -5,6 +5,7 @@ import {
   TopicPerformance,
 } from '../types/placement';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { persistenceManager } from './persistenceManager';
 
 const STORAGE_PREFIX = 'careerpilot_placement_sessions_';
 
@@ -134,11 +135,39 @@ export function savePlacementSession(
             created_at: session.completedAt || new Date().toISOString(),
             updated_at: new Date().toISOString(),
           };
-          await supabase.from('placement_sessions').upsert(dbPayload);
+          const { error } = await supabase.from('placement_sessions').upsert(dbPayload);
+          if (error) {
+            console.warn('[PlacementStorage] Remote save error, enqueuing offline mutation:', error);
+            persistenceManager.enqueueOfflineMutation({
+              id: `mut_placement_${session.id}_${Date.now()}`,
+              userId: effectiveId,
+              type: 'save_placement_session',
+              payload: session,
+              timestamp: new Date().toISOString(),
+              attempts: 0,
+            });
+          }
         } catch (err) {
-          console.warn('[PlacementStorage] Remote save notice:', err);
+          console.warn('[PlacementStorage] Remote save notice, enqueuing offline mutation:', err);
+          persistenceManager.enqueueOfflineMutation({
+            id: `mut_placement_${session.id}_${Date.now()}`,
+            userId: effectiveId,
+            type: 'save_placement_session',
+            payload: session,
+            timestamp: new Date().toISOString(),
+            attempts: 0,
+          });
         }
       })();
+    } else if (effectiveId !== 'guest') {
+      persistenceManager.enqueueOfflineMutation({
+        id: `mut_placement_${session.id}_${Date.now()}`,
+        userId: effectiveId,
+        type: 'save_placement_session',
+        payload: session,
+        timestamp: new Date().toISOString(),
+        attempts: 0,
+      });
     }
 
     if (typeof window !== 'undefined') {

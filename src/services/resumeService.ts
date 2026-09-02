@@ -454,7 +454,7 @@ ${structured.achievements.concat(structured.certifications).map((a) => `* ${a}`)
     const cGoal = formData.careerGoal || ({} as any);
 
     const structured: StructuredResumeData = {
-      fullName: pInfo.fullName || 'Candidate Name',
+      fullName: pInfo.fullName || '',
       title: role,
       contactInfo: {
         email: pInfo.email || undefined,
@@ -643,20 +643,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
             };
           });
 
-          // Ensure exactly one resume is marked isCurrent if resumes exist
-          const hasCurrent = databaseItems.some((r) => r.isCurrent);
-          if (databaseItems.length > 0 && !hasCurrent) {
-            // Auto-mark the highest version as current
-            const latest = databaseItems[0];
-            latest.isCurrent = true;
-            await supabase
-              .from('resumes')
-              .update({ is_current: true })
-              .eq('id', latest.id)
-              .eq('user_id', userId);
-          }
-
-          // Sync database items to local storage cache for instant offline access
+          // Sync database items to local storage cache for instant access
           try {
             const storageKey = `careerpilot_resumes_${userId}`;
             localStorage.setItem(storageKey, JSON.stringify(databaseItems));
@@ -975,23 +962,8 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           console.warn('[Resume Service] Supabase delete error:', error.message);
         }
 
-        // Step D: If deleted was current, make the newest remaining resume current
-        if (wasCurrent) {
-          const { data: remaining } = await supabase
-            .from('resumes')
-            .select('id')
-            .eq('user_id', userId)
-            .order('version', { ascending: false })
-            .limit(1);
-
-          if (remaining && remaining.length > 0) {
-            await supabase
-              .from('resumes')
-              .update({ is_current: true })
-              .eq('id', remaining[0].id)
-              .eq('user_id', userId);
-          }
-        }
+        // Note: If deleted was current, do NOT auto-promote another resume.
+        // Active Resume strictly becomes null/none.
       } catch (err) {
         console.warn('[Resume Service] Error deleting resume from Supabase:', err);
       }
@@ -1004,12 +976,14 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
       if (raw) {
         const list: ResumeVersionItem[] = JSON.parse(raw);
         if (Array.isArray(list)) {
+          const wasCurrentInCache = list.some((item) => item.id === resumeId && item.isCurrent);
           const filtered = list.filter((item) => item.id !== resumeId);
-          // If deleted was current and list not empty, make first one current
-          if (filtered.length > 0 && !filtered.some((r) => r.isCurrent)) {
-            filtered[0].isCurrent = true;
-          }
           localStorage.setItem(storageKey, JSON.stringify(filtered));
+
+          // If active resume was deleted, clear stale active analysis cache
+          if (wasCurrentInCache || !filtered.some((r) => r.isCurrent)) {
+            localStorage.removeItem(`careerpilot_latest_resume_analysis_${effectiveUserId}`);
+          }
         }
       }
     } catch (_) {}
@@ -1078,39 +1052,40 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
   /**
    * Universal Resume Downloader:
    * For Uploaded Resumes: Downloads the exact original PDF file byte-for-byte from storage/IndexedDB.
-   * For AI-Improved Resumes: Generates PDF from the exact structured improved version.
+   * For AI-Improved Resumes: Generates vector PDF from the exact structured improved version.
    */
   async downloadResume(resume: ResumeVersionItem): Promise<void> {
     if (!resume) return;
 
-    const resolvedStoragePath = resume.storagePath || (resume as any).storage_path || (resume as any).filePath || (resume as any).file_path;
-    const resolvedFileName = resume.fileName || (resume as any).file_name || `Resume_v${resume.version || 1}.pdf`;
+    const resolvedFileName = resume.fileName || resume.versionLabel || `Resume_v${resume.version || 1}.pdf`;
+    const fileNameToSave = resolvedFileName.toLowerCase().endsWith('.pdf') ? resolvedFileName : `${resolvedFileName}.pdf`;
 
-    console.log("Downloading resume:", {
+    console.log('[Resume Service] Downloading resume:', {
       resumeId: resume.id,
-      fileName: resolvedFileName,
-      storagePath: resolvedStoragePath
+      fileName: fileNameToSave,
+      resumeType: resume.resumeType,
+      isAiImproved: resume.isAiImproved,
+      storagePath: resume.storagePath,
     });
 
     // A. AI-generated / improved resume -> generate document from that exact generated resume version
     if (resume.isAiImproved || resume.resumeType === 'ai_generated') {
       const { exportResumeToPdf } = await import('../utils/pdfExport');
-      const structured = resume.improvedData?.structured || resume.structuredData;
-      if (!structured) {
-        throw new Error('AI-improved resume structured data not found.');
+      let structured = resume.improvedData?.structured || resume.structuredData;
+      if (!structured && resume.resumeText && resume.resumeText.trim()) {
+        structured = this.parseResumeTextToStructured(resume.resumeText, resume.targetRole);
       }
-      const cleanName = (resolvedFileName || `CareerPilot_Resume_v${resume.version}`).replace(
-        /[^a-zA-Z0-9._-]/g,
-        '_'
-      );
-      const filename = cleanName.toLowerCase().endsWith('.pdf') ? cleanName : `${cleanName}.pdf`;
-      await exportResumeToPdf(structured, filename);
+      if (!structured) {
+        structured = this.parseResumeTextToStructured(
+          `${resume.fileName || resume.versionLabel || 'Candidate Resume'}\nTarget: ${resume.targetRole || 'Software Engineer'}`,
+          resume.targetRole
+        );
+      }
+      await exportResumeToPdf(structured, fileNameToSave);
       return;
     }
 
     // B. Uploaded original resume -> Download the EXACT original PDF byte-for-byte
-    const fileNameToSave = resolvedFileName.toLowerCase().endsWith('.pdf') ? resolvedFileName : `${resolvedFileName}.pdf`;
-
     // Step 1: Check local IndexedDB for exact original binary Blob
     try {
       const localBlob = await getResumeBlob(resume.id);
@@ -1130,6 +1105,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     }
 
     // Step 2: Download from Supabase Storage by storagePath
+    const resolvedStoragePath = resume.storagePath || (resume as any).storage_path || (resume as any).filePath || (resume as any).file_path;
     if (isSupabaseConfigured() && resolvedStoragePath) {
       try {
         // Attempt A: Direct download
@@ -1138,7 +1114,9 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           .download(resolvedStoragePath);
 
         if (!error && storageBlob && storageBlob.size > 0) {
-          await saveResumeBlob(resume.id, storageBlob);
+          try {
+            await saveResumeBlob(resume.id, storageBlob);
+          } catch (_) {}
           const blobUrl = URL.createObjectURL(storageBlob);
           const link = document.createElement('a');
           link.href = blobUrl;
@@ -1150,17 +1128,19 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           return;
         }
 
-        // Attempt B: Signed URL (in case of private bucket / RLS)
+        // Attempt B: Signed URL
         const { data: signedData, error: signedErr } = await supabase.storage
           .from('resumes')
-          .createSignedUrl(resolvedStoragePath, 120);
+          .createSignedUrl(resolvedStoragePath, 3600);
 
         if (!signedErr && signedData?.signedUrl) {
-          const resp = await fetchWithTimeout(signedData.signedUrl, { timeoutMs: 8000 });
+          const resp = await fetchWithTimeout(signedData.signedUrl, { timeoutMs: 10000 });
           if (resp.ok) {
             const fetchedBlob = await resp.blob();
             if (fetchedBlob.size > 0) {
-              await saveResumeBlob(resume.id, fetchedBlob);
+              try {
+                await saveResumeBlob(resume.id, fetchedBlob);
+              } catch (_) {}
               const blobUrl = URL.createObjectURL(fetchedBlob);
               const link = document.createElement('a');
               link.href = blobUrl;
@@ -1182,11 +1162,13 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     const resolvedUrl = resume.fileUrl || (resume as any).file_url;
     if (resolvedUrl) {
       try {
-        const response = await fetchWithTimeout(resolvedUrl, { timeoutMs: 8000 });
+        const response = await fetchWithTimeout(resolvedUrl, { timeoutMs: 10000 });
         if (response.ok) {
           const fetchedBlob = await response.blob();
           if (fetchedBlob.size > 0) {
-            await saveResumeBlob(resume.id, fetchedBlob);
+            try {
+              await saveResumeBlob(resume.id, fetchedBlob);
+            } catch (_) {}
             const blobUrl = URL.createObjectURL(fetchedBlob);
             const link = document.createElement('a');
             link.href = blobUrl;
@@ -1203,7 +1185,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
       }
     }
 
-    // Step 4: If exact binary is not in storage/IndexedDB, fallback to high-quality PDF export if resumeText / structuredData is present
+    // Step 4: If exact binary is not in storage/IndexedDB, fallback to vector PDF generation from structuredData or resumeText
     if (resume.structuredData) {
       const { exportResumeToPdf } = await import('../utils/pdfExport');
       await exportResumeToPdf(resume.structuredData, fileNameToSave);
@@ -1212,39 +1194,11 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
 
     if (resume.resumeText && resume.resumeText.trim()) {
       const { exportResumeToPdf } = await import('../utils/pdfExport');
-      const lines = resume.resumeText.split('\n').map((l) => l.trim()).filter(Boolean);
-      let candidateName = 'Candidate';
-      if (lines.length > 0) {
-        const topCandidate = lines[0].replace(/[^a-zA-Z\s.-]/g, '').trim();
-        if (topCandidate && !topCandidate.toLowerCase().includes('resume') && topCandidate.length < 50) {
-          candidateName = topCandidate;
-        } else if (resume.fileName) {
-          candidateName = resume.fileName.replace(/\.pdf$/i, '').replace(/[\(_\)\d]/g, ' ').trim() || 'Candidate';
-        }
-      }
-
-      const emailMatch = resume.resumeText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-      const phoneMatch = resume.resumeText.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
-
-      const fallbackStructured: StructuredResumeData = {
-        fullName: candidateName,
-        title: resume.targetRole || 'Professional',
-        contactInfo: {
-          email: emailMatch ? emailMatch[0] : undefined,
-          phone: phoneMatch ? phoneMatch[0] : undefined,
-        },
-        summary: lines.slice(1, 4).join(' ').slice(0, 400) || resume.resumeText.slice(0, 400),
-        skills: [{ category: 'Core Skills', items: [resume.targetRole || 'Professional Competencies'] }],
-        experience: [],
-        projects: [],
-        education: [],
-      };
-
-      await exportResumeToPdf(fallbackStructured, fileNameToSave);
+      const structured = this.parseResumeTextToStructured(resume.resumeText, resume.targetRole);
+      await exportResumeToPdf(structured, fileNameToSave);
       return;
     }
 
-    // If storage path or binary cannot be resolved
     if (!resolvedStoragePath && !resolvedUrl) {
       throw new Error('Original resume file is unavailable.');
     }
@@ -1253,11 +1207,31 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
   },
 
   /**
-   * Get direct Blob for original uploaded PDF (byte-for-byte exact)
+   * Get direct Blob for resume (byte-for-byte original PDF or high-fidelity vector PDF)
    */
   async getResumeFileBlob(resume: ResumeVersionItem): Promise<Blob | null> {
     if (!resume) return null;
 
+    // A. For AI generated / improved resumes, generate vector PDF directly from structured data
+    if (resume.isAiImproved || resume.resumeType === 'ai_generated') {
+      try {
+        let structured = resume.improvedData?.structured || resume.structuredData;
+        if (!structured && resume.resumeText && resume.resumeText.trim()) {
+          structured = this.parseResumeTextToStructured(resume.resumeText, resume.targetRole);
+        }
+        if (structured) {
+          const { generateResumePdfBlob } = await import('../utils/pdfExport');
+          const generatedBlob = await generateResumePdfBlob(structured);
+          if (generatedBlob && generatedBlob.size > 0) {
+            return generatedBlob;
+          }
+        }
+      } catch (genErr) {
+        console.warn('[Resume Service] AI resume vector PDF generation notice:', genErr);
+      }
+    }
+
+    // B. For uploaded resumes (or fallback):
     // 1. Try local IndexedDB
     try {
       const localBlob = await getResumeBlob(resume.id);
@@ -1276,25 +1250,29 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           .from('resumes')
           .download(resolvedPath);
         if (!error && storageBlob && storageBlob.size > 0) {
-          await saveResumeBlob(resume.id, storageBlob);
+          try {
+            await saveResumeBlob(resume.id, storageBlob);
+          } catch (_) {}
           return storageBlob;
         }
 
         const { data: signedData, error: signedErr } = await supabase.storage
           .from('resumes')
-          .createSignedUrl(resolvedPath, 300);
+          .createSignedUrl(resolvedPath, 3600);
         if (!signedErr && signedData?.signedUrl) {
-          const resp = await fetchWithTimeout(signedData.signedUrl, { timeoutMs: 8000 });
+          const resp = await fetchWithTimeout(signedData.signedUrl, { timeoutMs: 10000 });
           if (resp.ok) {
             const fetchedBlob = await resp.blob();
             if (fetchedBlob && fetchedBlob.size > 0) {
-              await saveResumeBlob(resume.id, fetchedBlob);
+              try {
+                await saveResumeBlob(resume.id, fetchedBlob);
+              } catch (_) {}
               return fetchedBlob;
             }
           }
         }
       } catch (err) {
-        console.warn('[Resume Service] Supabase storage blob download error:', err);
+        console.warn('[Resume Service] Supabase storage blob download notice:', err);
       }
     }
 
@@ -1302,24 +1280,43 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     const resolvedUrl = resume.fileUrl || (resume as any).file_url;
     if (resolvedUrl) {
       try {
-        const resp = await fetchWithTimeout(resolvedUrl, { timeoutMs: 8000 });
+        const resp = await fetchWithTimeout(resolvedUrl, { timeoutMs: 10000 });
         if (resp.ok) {
           const fetchedBlob = await resp.blob();
           if (fetchedBlob && fetchedBlob.size > 0) {
-            await saveResumeBlob(resume.id, fetchedBlob);
+            try {
+              await saveResumeBlob(resume.id, fetchedBlob);
+            } catch (_) {}
             return fetchedBlob;
           }
         }
       } catch (err) {
-        console.warn('[Resume Service] fileUrl blob fetch error:', err);
+        console.warn('[Resume Service] fileUrl blob fetch notice:', err);
       }
+    }
+
+    // 4. Fallback vector PDF generation from structuredData or resumeText
+    try {
+      let structured = resume.improvedData?.structured || resume.structuredData;
+      if (!structured && resume.resumeText && resume.resumeText.trim()) {
+        structured = this.parseResumeTextToStructured(resume.resumeText, resume.targetRole);
+      }
+      if (structured) {
+        const { generateResumePdfBlob } = await import('../utils/pdfExport');
+        const generatedBlob = await generateResumePdfBlob(structured);
+        if (generatedBlob && generatedBlob.size > 0) {
+          return generatedBlob;
+        }
+      }
+    } catch (genErr) {
+      console.warn('[Resume Service] Fallback vector PDF generation notice:', genErr);
     }
 
     return null;
   },
 
   /**
-   * Get direct viewable Blob URL or URL for original uploaded PDF
+   * Get direct viewable Blob URL or URL for resume PDF
    */
   async getResumeFileBlobOrUrl(resume: ResumeVersionItem): Promise<string | null> {
     if (!resume) return null;
@@ -1340,13 +1337,15 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           .from('resumes')
           .download(resolvedPath);
         if (!error && storageBlob && storageBlob.size > 0) {
-          await saveResumeBlob(resume.id, storageBlob);
+          try {
+            await saveResumeBlob(resume.id, storageBlob);
+          } catch (_) {}
           return URL.createObjectURL(storageBlob);
         }
 
         const { data: signedData, error: signedErr } = await supabase.storage
           .from('resumes')
-          .createSignedUrl(resolvedPath, 300);
+          .createSignedUrl(resolvedPath, 3600);
         if (!signedErr && signedData?.signedUrl) {
           return signedData.signedUrl;
         }
@@ -1357,6 +1356,12 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     const resolvedUrl = resume.fileUrl || (resume as any).file_url;
     if (resolvedUrl) {
       return resolvedUrl;
+    }
+
+    // 4. Resolve via getResumeFileBlob
+    const resolvedBlob = await this.getResumeFileBlob(resume);
+    if (resolvedBlob && resolvedBlob.size > 0) {
+      return URL.createObjectURL(resolvedBlob);
     }
 
     return null;
@@ -1371,7 +1376,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     const resumes = await this.getUserResumes(effectiveUserId);
     if (!resumes || resumes.length === 0) return null;
     const current = resumes.find((r) => r.isCurrent);
-    return current || resumes[0] || null;
+    return current || null;
   },
 
   /**
@@ -1422,16 +1427,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
         };
       }
 
-      // 2. Check student-specific local cache
-      const key = `careerpilot_latest_resume_analysis_${effectiveUserId}`;
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.result && typeof parsed.result.overall_score === 'number') {
-          return parsed;
-        }
-      }
-
+      // If there is no active resume, do not return stale cache of an old resume
       return null;
     } catch (err) {
       console.warn('[Resume Service] Failed to load latest analysis:', err);
@@ -1581,13 +1577,83 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
   },
 
   /**
-   * Parse raw unformatted resume text into StructuredResumeData
+   * Parse raw unformatted resume text into StructuredResumeData with robust entity extraction
    */
-  parseResumeTextToStructured(text: string, targetRole: string = 'Software Developer'): StructuredResumeData {
+  parseResumeTextToStructured(
+    text: string,
+    targetRole: string = '',
+    fallbackName?: string,
+    fileName?: string
+  ): StructuredResumeData {
+    // 1. Extract candidate name accurately
+    let fullName = '';
+
+    // A. Check top lines of extracted resume text
+    const lines = (text || '')
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    // Look for name in first 8 lines
+    for (const line of lines.slice(0, 8)) {
+      const clean = line
+        .replace(/^[#\*\-•\s]+/, '')
+        .replace(/^(?:name|candidate\s*name|full\s*name)\s*[:\-]\s*/i, '')
+        .trim();
+
+      // Check if line contains a name and contact info on same line (e.g. "Name | email@...")
+      const pipeSplit = clean.split(/[|•·\t]/)[0]?.trim();
+      const testLine = (pipeSplit && pipeSplit.length >= 2 && pipeSplit.length <= 40) ? pipeSplit : clean;
+
+      if (
+        testLine.length >= 2 &&
+        testLine.length <= 45 &&
+        !testLine.includes('@') &&
+        !testLine.includes('http') &&
+        !testLine.includes('www.') &&
+        !testLine.includes('.com') &&
+        !testLine.includes('.in') &&
+        !testLine.includes('.org') &&
+        !testLine.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/) &&
+        !/^(?:resume|curriculum\s*vitae|cv|contact|phone|email|summary|objective|education|experience|skills|projects|profile|about\s*me)$/i.test(testLine) &&
+        /^[a-zA-Z\s.,'-]+$/.test(testLine) &&
+        testLine.split(/\s+/).length >= 1 &&
+        testLine.split(/\s+/).length <= 6
+      ) {
+        fullName = testLine;
+        break;
+      }
+    }
+
+    // B. If not found in text, derive from fileName (e.g. "RASHMI_MADHVACHARYA_CHIMMALAGI_Resume_v7 (1).pdf")
+    if (!fullName && fileName) {
+      const base = fileName
+        .replace(/\.pdf$/i, '')
+        .replace(/\s*\(\d+\)\s*$/g, '')
+        .replace(/[_\s-]*(?:Resume|CV|Curriculum|Vitae|v\d+|\d+)[_\s\d.-]*$/i, '')
+        .replace(/^[_\s-]*(?:Resume|CV|Curriculum|Vitae)[_\s-]*/i, '')
+        .replace(/[_-]+/g, ' ')
+        .trim();
+
+      if (
+        base.length >= 2 &&
+        base.length <= 45 &&
+        /^[a-zA-Z\s.,'-]+$/.test(base) &&
+        !/^(?:resume|document|my_resume|file)$/i.test(base)
+      ) {
+        fullName = base;
+      }
+    }
+
+    // C. If still not found, fallback to authenticated student's profile name if available
+    if (!fullName && fallbackName && fallbackName.trim().length > 0 && fallbackName !== 'Candidate Name') {
+      fullName = fallbackName.trim();
+    }
+
     if (!text || text.trim().length === 0) {
       return {
-        fullName: 'Candidate Name',
-        title: targetRole || 'Software Engineer',
+        fullName: fullName || '',
+        title: targetRole || '',
         contactInfo: {
           email: '',
           phone: '',
@@ -1597,83 +1663,38 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           portfolio: '',
         },
         summary: '',
-        skills: [
-          { id: 'sk-1', category: 'Languages & Frameworks', items: ['TypeScript', 'React', 'Node.js', 'Python'] },
-          { id: 'sk-2', category: 'Databases & Tools', items: ['PostgreSQL', 'Git', 'Docker', 'REST APIs'] },
-        ],
-        experience: [
-          {
-            id: 'exp-1',
-            company: 'Tech Company',
-            role: targetRole || 'Software Engineer',
-            location: 'Remote / City',
-            duration: '2023 – Present',
-            bulletPoints: [
-              'Architected and implemented responsive web applications, increasing user engagement and performance.',
-              'Engineered scalable REST APIs and automated unit test suites with 90%+ code coverage.',
-            ],
-          },
-        ],
-        projects: [
-          {
-            id: 'proj-1',
-            title: 'Full-Stack Web Platform',
-            roleOrSubtitle: 'Lead Developer',
-            technologies: ['React', 'TypeScript', 'Node.js', 'Tailwind CSS'],
-            bulletPoints: [
-              'Built an end-to-end interactive dashboard with real-time state synchronization.',
-              'Optimized database queries and asset delivery, reducing average page load time by 35%.',
-            ],
-          },
-        ],
-        education: [
-          {
-            id: 'edu-1',
-            institution: 'University / College',
-            degree: 'Bachelor of Science',
-            field: 'Computer Science',
-            durationOrYear: '2020 – 2024',
-            details: 'Relevant Coursework: Data Structures, Algorithms, Distributed Systems, Software Engineering.',
-          },
-        ],
+        skills: [],
+        experience: [],
+        projects: [],
+        education: [],
         certifications: [],
         templateId: 'modern',
       };
     }
 
-    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-
     // Extract Contact Info
     const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-    const phoneMatch = text.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+    const phoneMatch = text.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/);
     const linkedinMatch = text.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/(?:in\/)?([a-zA-Z0-9_-]+)/i);
     const githubMatch = text.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_-]+)/i);
-    const portfolioMatch = text.match(/(?:https?:\/\/)?([a-zA-Z0-9-]+\.(?:dev|io|me|app|com|org))(?:\/[^\s]*)?/i);
+    const portfolioMatch = text.match(/(?:https?:\/\/)?([a-zA-Z0-9-]+\.(?:dev|io|me|app|com|org|netlify\.app|vercel\.app))(?:\/[^\s]*)?/i);
 
-    // Extract Name: First line that isn't a header or email/phone
-    let fullName = 'Candidate Name';
-    for (const line of lines.slice(0, 5)) {
-      if (
-        !line.includes('@') &&
-        !line.includes('http') &&
-        !line.match(/\d{3}/) &&
-        !/resume|curriculum|vitae|contact|phone|email/i.test(line) &&
-        line.length > 2 &&
-        line.length < 50
-      ) {
-        fullName = line.replace(/^[#\*\-•\s]+/, '').trim();
-        break;
-      }
+    // Extract Location (e.g. "Bangalore, India", "Karnataka, India", "San Francisco, CA")
+    let location = '';
+    const locMatch = text.match(/(?:[A-Z][a-zA-Z]+(?:[\s-][A-Z][a-zA-Z]+)*,\s*(?:[A-Z]{2}|[A-Z][a-zA-Z]+(?:[\s-][A-Z][a-zA-Z]+)*))/);
+    if (locMatch && !locMatch[0].toLowerCase().includes('university') && !locMatch[0].toLowerCase().includes('college')) {
+      location = locMatch[0];
     }
 
     // Split text into section blocks
     const sectionKeywords = [
-      { key: 'summary', regex: /^(?:professional\s+summary|summary|profile|about\s+me|objective)/i },
-      { key: 'skills', regex: /^(?:technical\s+skills|skills|core\s+competencies|technologies|expertise)/i },
-      { key: 'experience', regex: /^(?:professional\s+experience|work\s+experience|experience|employment\s+history|career)/i },
-      { key: 'projects', regex: /^(?:projects|technical\s+projects|featured\s+projects|key\s+projects|academic\s+projects)/i },
-      { key: 'education', regex: /^(?:education|academic\s+background|qualifications)/i },
-      { key: 'certifications', regex: /^(?:certifications|licenses|credentials|courses|awards)/i },
+      { key: 'summary', regex: /^(?:professional\s+summary|summary|profile|about\s+me|career\s+objective|objective)/i },
+      { key: 'skills', regex: /^(?:technical\s+skills|skills\s*(?:&|and)\s*tools|skills\s*(?:&|and)\s*abilities|skills|core\s+competencies|technologies|expertise|areas\s+of\s+expertise|programming\s+languages|frameworks\s*(?:&|and)\s*libraries|tools\s*(?:&|and)\s*technologies)/i },
+      { key: 'experience', regex: /^(?:professional\s+experience|work\s+experience|experience|employment\s+history|career|work\s+history|internships|internship\s+experience)/i },
+      { key: 'projects', regex: /^(?:technical\s+projects|academic\s+projects|featured\s+projects|key\s+projects|projects|personal\s+projects|major\s+projects)/i },
+      { key: 'education', regex: /^(?:education|academic\s+background|qualifications|academic\s+qualifications|educational\s+qualifications|academics)/i },
+      { key: 'certifications', regex: /^(?:certifications\s*(?:&|and)\s*licenses|licenses\s*(?:&|and)\s*certifications|certifications|licenses|credentials|courses|training|online\s+courses)/i },
+      { key: 'achievements', regex: /^(?:honors\s*(?:&|and)\s*awards|awards\s*(?:&|and)\s*achievements|achievements|honors|awards|extracurricular\s+activities|extra-curricular|co-curricular\s+activities)/i },
     ];
 
     let currentSection = 'header';
@@ -1685,20 +1706,31 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
       projects: [],
       education: [],
       certifications: [],
+      achievements: [],
     };
 
     for (const line of lines) {
-      const isHeader = sectionKeywords.find((sk) => sk.regex.test(line.replace(/^[#\*\-•=\s]+/, '').trim()));
+      const cleanHeaderLine = line.replace(/^[#\*\-•=_\s]+/, '').replace(/[:\-_]+$/, '').trim();
+      const isHeader = sectionKeywords.find((sk) => sk.regex.test(cleanHeaderLine));
       if (isHeader) {
         currentSection = isHeader.key;
       } else {
-        sectionLines[currentSection]?.push(line);
+        if (!sectionLines[currentSection]) {
+          sectionLines[currentSection] = [];
+        }
+        sectionLines[currentSection].push(line);
       }
     }
 
     // Parse Summary
-    const summary = (sectionLines.summary || []).join(' ').trim() ||
-      `Accomplished ${targetRole} with hands-on experience building and deploying robust software applications, optimizing performance, and collaborating in agile teams.`;
+    let summary = (sectionLines.summary || []).join(' ').trim();
+    if (!summary && sectionLines.header.length > 2) {
+      // Check if header lines contain an introductory summary sentence
+      const introLines = sectionLines.header.slice(2).filter((l) => l.length > 40 && !l.includes('@') && !l.includes('http'));
+      if (introLines.length > 0) {
+        summary = introLines.join(' ').trim();
+      }
+    }
 
     // Parse Skills
     const skillsList: { id: string; category: string; items: string[] }[] = [];
@@ -1714,25 +1746,19 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
             currentItems = [];
           }
           const [cat, itemsPart] = sLine.split(':');
-          currentCat = cat.replace(/^[•\-\*#\s]+/, '').trim() || 'Skills';
+          currentCat = cat.replace(/^[•\-\*#\s]+/, '').trim() || 'Technical Skills';
           if (itemsPart) {
-            const splitItems = itemsPart.split(/[,•|·]/).map((i) => i.trim()).filter(Boolean);
+            const splitItems = itemsPart.split(/[,•|·/]/).map((i) => i.trim()).filter(Boolean);
             currentItems.push(...splitItems);
           }
         } else {
-          const splitItems = sLine.split(/[,•|·]/).map((i) => i.trim()).filter(Boolean);
+          const splitItems = sLine.replace(/^[•\-\*#\s]+/, '').split(/[,•|·/]/).map((i) => i.trim()).filter(Boolean);
           currentItems.push(...splitItems);
         }
       }
       if (currentItems.length > 0) {
         skillsList.push({ id: `sk-${skillsList.length + 1}`, category: currentCat, items: currentItems });
       }
-    }
-    if (skillsList.length === 0) {
-      skillsList.push(
-        { id: 'sk-1', category: 'Programming Languages', items: ['TypeScript', 'JavaScript', 'Python', 'Java'] },
-        { id: 'sk-2', category: 'Frameworks & Libraries', items: ['React', 'Node.js', 'Express', 'Tailwind CSS'] }
-      );
     }
 
     // Parse Experience
@@ -1742,7 +1768,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
       let currentExp: any = null;
       for (const line of expLines) {
         const isNewRole =
-          /^(?:senior|junior|lead|staff|software|frontend|backend|full\s*stack|engineer|developer|intern|manager|consultant|analyst)/i.test(line) ||
+          /^(?:senior|junior|lead|staff|software|frontend|backend|full\s*stack|engineer|developer|intern|trainee|analyst|manager|associate)/i.test(line) ||
           line.includes(' – ') ||
           line.includes(' - ') ||
           line.includes('|');
@@ -1754,15 +1780,15 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           const parts = line.split(/[|–\-,]/).map((p) => p.trim()).filter(Boolean);
           currentExp = {
             id: `exp-${experienceList.length + 1}`,
-            role: parts[0] || targetRole,
-            company: parts[1] || 'Technology Company',
+            role: parts[0] || targetRole || 'Software Engineer',
+            company: parts[1] || '',
             location: parts[2] || '',
-            duration: line.match(/\d{4}\s*[-–]\s*(?:\d{4}|present)/i)?.[0] || '2023 – Present',
+            duration: line.match(/(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})\s*[-–]\s*(?:present|\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d{4})/i)?.[0] || '',
             bulletPoints: [],
           };
         } else if (currentExp) {
           const cleanBullet = line.replace(/^[•\-\*#\d\.\s]+/, '').trim();
-          if (cleanBullet.length > 5) {
+          if (cleanBullet.length > 3) {
             currentExp.bulletPoints.push(cleanBullet);
           }
         }
@@ -1771,19 +1797,6 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
         experienceList.push(currentExp);
       }
     }
-    if (experienceList.length === 0) {
-      experienceList.push({
-        id: 'exp-1',
-        company: 'Tech Solutions Inc.',
-        role: targetRole,
-        location: 'Remote',
-        duration: '2023 – Present',
-        bulletPoints: [
-          'Engineered full-stack features using modern React and TypeScript architecture.',
-          'Improved application responsiveness by 25% through performance optimizations and state management.',
-        ],
-      });
-    }
 
     // Parse Projects
     const projectsList: StructuredResumeData['projects'] = [];
@@ -1791,27 +1804,46 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     if (projLines.length > 0) {
       let currentProj: any = null;
       for (const line of projLines) {
-        const isNewProj = !line.startsWith('•') && !line.startsWith('-') && !line.startsWith('*') && line.length < 60;
-        if (isNewProj && currentProj) {
-          if (currentProj.title) projectsList.push(currentProj);
+        const isNewProj = !line.startsWith('•') && !line.startsWith('-') && !line.startsWith('*') && line.length < 120;
+        if (isNewProj) {
+          if (currentProj && currentProj.title) {
+            projectsList.push(currentProj);
+          }
+
+          let title = line.replace(/^[#\*\-•\s]+/, '').trim();
+          let roleOrSubtitle = targetRole || '';
+          let techs: string[] = [];
+
+          // Handle pipe-separated format: e.g. "Smart Attendance Hub | Full Stack Developer | React, Node.js, PostgreSQL"
+          if (title.includes('|')) {
+            const parts = title.split('|').map((p) => p.trim()).filter(Boolean);
+            title = parts[0] || '';
+            if (parts[1]) {
+              roleOrSubtitle = parts[1];
+            }
+            if (parts[2]) {
+              techs = parts[2].split(/[,/]/).map((t) => t.trim()).filter(Boolean);
+            }
+          }
+
+          // Also check for parentheses e.g. "Smart Attendance Hub (React, Node.js)"
+          const techMatch = title.match(/\((.*?)\)|\[(.*?)\]/);
+          if (techMatch) {
+            const rawTechs = techMatch[1] || techMatch[2];
+            techs = rawTechs.split(/[,|/]/).map((t) => t.trim()).filter(Boolean);
+            title = title.replace(/\(.*?\)|\[.*?\]/, '').trim();
+          }
+
           currentProj = {
             id: `proj-${projectsList.length + 1}`,
-            title: line.replace(/^[#\*\-•\s]+/, '').trim(),
-            roleOrSubtitle: 'Developer',
-            technologies: ['React', 'TypeScript', 'Node.js'],
-            bulletPoints: [],
-          };
-        } else if (isNewProj && !currentProj) {
-          currentProj = {
-            id: `proj-${projectsList.length + 1}`,
-            title: line.replace(/^[#\*\-•\s]+/, '').trim(),
-            roleOrSubtitle: 'Developer',
-            technologies: ['React', 'TypeScript', 'Node.js'],
+            title,
+            roleOrSubtitle,
+            technologies: techs,
             bulletPoints: [],
           };
         } else if (currentProj) {
           const cleanBullet = line.replace(/^[•\-\*#\d\.\s]+/, '').trim();
-          if (cleanBullet.length > 5) {
+          if (cleanBullet.length > 3) {
             currentProj.bulletPoints.push(cleanBullet);
           }
         }
@@ -1820,18 +1852,6 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
         projectsList.push(currentProj);
       }
     }
-    if (projectsList.length === 0) {
-      projectsList.push({
-        id: 'proj-1',
-        title: 'CareerPilot AI Web Platform',
-        roleOrSubtitle: 'Full Stack Project',
-        technologies: ['React', 'TypeScript', 'Tailwind CSS', 'Supabase'],
-        bulletPoints: [
-          'Designed and developed interactive career coaching dashboard with instant ATS evaluation.',
-          'Implemented end-to-end cloud synchronization and offline fallback architecture.',
-        ],
-      });
-    }
 
     // Parse Education
     const educationList: StructuredResumeData['education'] = [];
@@ -1839,15 +1859,15 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     if (eduLines.length > 0) {
       let currentEdu: any = null;
       for (const line of eduLines) {
-        const isNewEdu = /bachelor|master|b\.s|b\.a|btech|mtech|degree|university|college|institute|polytechnic/i.test(line) && !line.startsWith('•');
+        const isNewEdu = /bachelor|master|b\.e|b\.tech|m\.tech|degree|university|college|institute|polytechnic|school|vidyalaya|pu|puc|sslc|cbse|icse|class\s*12|class\s*10|12th|10th/i.test(line) && !line.startsWith('•');
         if (isNewEdu) {
           if (currentEdu) educationList.push(currentEdu);
           currentEdu = {
             id: `edu-${educationList.length + 1}`,
-            institution: line.includes(',') ? line.split(',')[1].trim() : line,
-            degree: line.includes(',') ? line.split(',')[0].trim() : 'Bachelor of Science',
-            field: 'Computer Science',
-            durationOrYear: line.match(/\d{4}\s*[-–]\s*(?:\d{4}|present)/i)?.[0] || '2020 – 2024',
+            institution: line.includes('|') ? line.split('|')[1].trim() : (line.includes(',') ? line.split(',')[1].trim() : line),
+            degree: line.includes('|') ? line.split('|')[0].trim() : (line.includes(',') ? line.split(',')[0].trim() : line),
+            field: '',
+            durationOrYear: line.match(/\d{4}\s*[-–]\s*(?:\d{4}|present)/i)?.[0] || line.match(/\d{4}/)?.[0] || '',
             details: '',
           };
         } else if (currentEdu) {
@@ -1859,20 +1879,10 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
       }
       if (currentEdu) educationList.push(currentEdu);
     }
-    if (educationList.length === 0) {
-      educationList.push({
-        id: 'edu-1',
-        institution: 'State University',
-        degree: 'Bachelor of Science',
-        field: 'Computer Science',
-        durationOrYear: '2020 – 2024',
-        details: 'Coursework in Data Structures, Database Systems, Computer Networks.',
-      });
-    }
 
-    // Parse Certifications
+    // Parse Certifications & Achievements
     const certificationsList: StructuredResumeData['certifications'] = [];
-    const certLines = sectionLines.certifications || [];
+    const certLines = [...(sectionLines.certifications || []), ...(sectionLines.achievements || [])];
     for (const cLine of certLines) {
       const clean = cLine.replace(/^[•\-\*#\d\.\s]+/, '').trim();
       if (clean && clean.length > 3) {
@@ -1886,15 +1896,15 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     }
 
     return {
-      fullName,
-      title: targetRole,
+      fullName: fullName || '',
+      title: targetRole || '',
       contactInfo: {
         email: emailMatch ? emailMatch[0] : '',
         phone: phoneMatch ? phoneMatch[0] : '',
-        location: '',
-        linkedin: linkedinMatch ? linkedinMatch[0] : '',
-        github: githubMatch ? githubMatch[0] : '',
-        portfolio: portfolioMatch ? portfolioMatch[0] : '',
+        location,
+        linkedin: linkedinMatch ? (linkedinMatch[0].startsWith('http') ? linkedinMatch[0] : `https://${linkedinMatch[0]}`) : '',
+        github: githubMatch ? (githubMatch[0].startsWith('http') ? githubMatch[0] : `https://${githubMatch[0]}`) : '',
+        portfolio: portfolioMatch ? (portfolioMatch[0].startsWith('http') ? portfolioMatch[0] : `https://${portfolioMatch[0]}`) : '',
       },
       summary,
       skills: skillsList,
@@ -2007,11 +2017,13 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
 
   /**
    * Create a new Resume Version (e.g. Resume_v(N+1) – Edited)
+   * Preserves original resume untouched and sets parentResumeId
    */
   async createNewResumeVersion(
     currentResume: ResumeVersionItem,
     updatedData: StructuredResumeData,
-    customLabel?: string
+    customLabel?: string,
+    editedPdfBlob?: Blob
   ): Promise<ResumeVersionItem> {
     const effectiveUserId = currentResume.userId || 'guest';
     const allResumes = await this.getUserResumes(effectiveUserId);
@@ -2022,15 +2034,35 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
 
     const newMarkdown = this.generateMarkdownFromStructured(updatedData);
 
+    const sanitizedName = (updatedData.fullName || currentResume.fileName || 'Resume')
+      .replace(/\.pdf$/i, '')
+      .replace(/\s+/g, '_')
+      .replace(/[^a-zA-Z0-9_-]/g, '');
+    const fileName = `${sanitizedName || 'Resume'}_v${nextVersion}.pdf`;
+
+    let uploadMeta: { fileUrl?: string; storagePath?: string } = {};
+    if (editedPdfBlob && editedPdfBlob.size > 0) {
+      try {
+        await saveResumeBlob(newId, editedPdfBlob);
+        const fileObj = new File([editedPdfBlob], fileName, { type: 'application/pdf' });
+        uploadMeta = await this.uploadResumeFile(effectiveUserId, newId, fileObj);
+      } catch (saveErr) {
+        console.warn('[Resume Service] Saving edited PDF blob notice:', saveErr);
+      }
+    }
+
     const newResume: ResumeVersionItem = {
       id: newId,
       userId: effectiveUserId,
       version: nextVersion,
       versionLabel: customLabel || `Resume_v${nextVersion} (Edited)`,
-      fileName: `CareerPilot_Resume_v${nextVersion}.pdf`,
+      fileName: fileName,
+      fileSize: editedPdfBlob?.size,
       isCurrent: true,
       targetRole: updatedData.title || currentResume.targetRole || 'Software Developer',
       resumeText: newMarkdown,
+      fileUrl: uploadMeta.fileUrl,
+      storagePath: uploadMeta.storagePath,
       resumeType: 'ai_generated',
       isAiImproved: true,
       parentResumeId: currentResume.id,
@@ -2040,6 +2072,109 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
       updatedAt: now,
     };
 
-    return await this.saveResumeVersion(newResume);
+    const saved = await this.saveResumeVersion(newResume);
+
+    // Fallback if no edited blob was provided
+    if (!editedPdfBlob) {
+      try {
+        const { generateResumePdfBlob } = await import('../utils/pdfExport');
+        const blob = await generateResumePdfBlob(updatedData);
+        if (blob && blob.size > 0) {
+          await saveResumeBlob(newId, blob);
+        }
+      } catch (_) {}
+    }
+
+    return saved;
+  },
+
+  /**
+   * Serializes StructuredResumeData into clean formatted text for indexing and storage
+   */
+  renderStructuredDataToPlainText(data: StructuredResumeData): string {
+    const lines: string[] = [];
+
+    // Header
+    if (data.fullName) lines.push(data.fullName.toUpperCase());
+    if (data.title) lines.push(data.title);
+
+    const contactParts: string[] = [];
+    if (data.contactInfo?.email) contactParts.push(data.contactInfo.email);
+    if (data.contactInfo?.phone) contactParts.push(data.contactInfo.phone);
+    if (data.contactInfo?.location) contactParts.push(data.contactInfo.location);
+    if (data.contactInfo?.linkedin) contactParts.push(data.contactInfo.linkedin);
+    if (data.contactInfo?.github) contactParts.push(data.contactInfo.github);
+    if (data.contactInfo?.portfolio) contactParts.push(data.contactInfo.portfolio);
+    if (contactParts.length > 0) lines.push(contactParts.join(' | '));
+
+    // Summary
+    if (data.summary) {
+      lines.push('');
+      lines.push('PROFESSIONAL SUMMARY');
+      lines.push(data.summary);
+    }
+
+    // Skills
+    if (data.skills && data.skills.length > 0) {
+      lines.push('');
+      lines.push('TECHNICAL SKILLS');
+      for (const group of data.skills) {
+        lines.push(`${group.category}: ${group.items.join(', ')}`);
+      }
+    }
+
+    // Experience
+    if (data.experience && data.experience.length > 0) {
+      lines.push('');
+      lines.push('WORK EXPERIENCE');
+      for (const exp of data.experience) {
+        const expHeader = [exp.role, exp.company, exp.location, exp.duration].filter(Boolean).join(' | ');
+        lines.push(expHeader);
+        for (const b of exp.bulletPoints || []) {
+          lines.push(`• ${b}`);
+        }
+      }
+    }
+
+    // Projects
+    if (data.projects && data.projects.length > 0) {
+      lines.push('');
+      lines.push('TECHNICAL PROJECTS');
+      for (const proj of data.projects) {
+        const techStr = proj.technologies && proj.technologies.length > 0 ? ` (${proj.technologies.join(', ')})` : '';
+        lines.push(`${proj.title}${techStr}`);
+        if (proj.roleOrSubtitle) lines.push(proj.roleOrSubtitle);
+        for (const b of proj.bulletPoints || []) {
+          lines.push(`• ${b}`);
+        }
+      }
+    }
+
+    // Education
+    if (data.education && data.education.length > 0) {
+      lines.push('');
+      lines.push('EDUCATION');
+      for (const edu of data.education) {
+        const eduHeader = [edu.degree, edu.institution, edu.durationOrYear].filter(Boolean).join(' | ');
+        lines.push(eduHeader);
+        if (edu.details) lines.push(edu.details);
+      }
+    }
+
+    // Certifications
+    if (data.certifications && data.certifications.length > 0) {
+      lines.push('');
+      lines.push('CERTIFICATIONS');
+      for (const cert of data.certifications) {
+        if (typeof cert === 'string') {
+          lines.push(`• ${cert}`);
+        } else if (cert && typeof cert === 'object') {
+          const certHeader = [cert.name, cert.issuer, cert.date].filter(Boolean).join(' | ');
+          lines.push(`• ${certHeader}`);
+        }
+      }
+    }
+
+    return lines.join('\n');
   },
 };

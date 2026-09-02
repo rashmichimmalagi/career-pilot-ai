@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { persistenceManager } from './persistenceManager';
 import {
   CareerReadinessScore,
   CareerReadinessTrendPoint,
@@ -80,12 +81,39 @@ export class CareerReadinessHistoryService {
     // 2. Persist to Supabase if configured
     if (isSupabaseConfigured()) {
       try {
-        await supabase
+        const { error } = await supabase
           .from('career_readiness_history')
           .upsert(payload, { onConflict: 'id' });
+        if (error) {
+          persistenceManager.enqueueOfflineMutation({
+            id: `mut_cr_${snapshotId}_${Date.now()}`,
+            userId,
+            type: 'save_career_readiness',
+            payload,
+            timestamp: new Date().toISOString(),
+            attempts: 0,
+          });
+        }
       } catch (err) {
-        console.warn('[CareerReadinessHistory] Supabase write skipped:', err);
+        console.warn('[CareerReadinessHistory] Supabase write notice, enqueued:', err);
+        persistenceManager.enqueueOfflineMutation({
+          id: `mut_cr_${snapshotId}_${Date.now()}`,
+          userId,
+          type: 'save_career_readiness',
+          payload,
+          timestamp: new Date().toISOString(),
+          attempts: 0,
+        });
       }
+    } else {
+      persistenceManager.enqueueOfflineMutation({
+        id: `mut_cr_${snapshotId}_${Date.now()}`,
+        userId,
+        type: 'save_career_readiness',
+        payload,
+        timestamp: new Date().toISOString(),
+        attempts: 0,
+      });
     }
   }
 

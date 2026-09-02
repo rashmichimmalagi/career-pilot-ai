@@ -31,6 +31,8 @@ import { resumeService } from './resumeService';
 import { getPlacementStats, fetchPlacementHistory } from './placementStorage';
 import { fetchRemoteRoadmapData } from './roadmapStorage';
 import { getStoredStudyPlans, getDailyStudyTime } from './studyPlannerService';
+import { fetchJobMatchHistoryResult } from './jobMatchService';
+import { mentorStorageService } from './mentorStorageService';
 
 const CACHE_EXPIRY_MS = 60 * 1000; // 1 minute in-memory cache
 const memoryCache = new Map<string, { data: UnifiedCareerIntelligence; timestamp: number }>();
@@ -64,6 +66,8 @@ export class CareerIntelligenceServiceClass {
       mockInterviewsRes,
       roadmapDataRes,
       readinessHistoryRes,
+      jobMatchesRes,
+      mentorConvsRes,
     ] = await Promise.allSettled([
       Promise.resolve(resumeService.getUserResumes(effectiveId)),
       Promise.resolve(resumeService.getLatestAnalysis(effectiveId)),
@@ -73,6 +77,8 @@ export class CareerIntelligenceServiceClass {
       interviewStorage.fetchReports(effectiveId),
       fetchRemoteRoadmapData(effectiveId),
       careerReadinessHistoryService.getPersistedHistory(effectiveId),
+      fetchJobMatchHistoryResult(effectiveId),
+      mentorStorageService.fetchConversations(effectiveId),
     ]);
 
     const resumes = resumesRes.status === 'fulfilled' && Array.isArray(resumesRes.value) ? resumesRes.value : [];
@@ -82,6 +88,8 @@ export class CareerIntelligenceServiceClass {
     const placementSessions = placementSessionsRes.status === 'fulfilled' && Array.isArray(placementSessionsRes.value) ? placementSessionsRes.value : [];
     const mockInterviews = mockInterviewsRes.status === 'fulfilled' && Array.isArray(mockInterviewsRes.value) ? mockInterviewsRes.value : [];
     const persistedReadinessHistory = readinessHistoryRes.status === 'fulfilled' && Array.isArray(readinessHistoryRes.value) ? readinessHistoryRes.value : [];
+    const jobMatches = jobMatchesRes.status === 'fulfilled' && jobMatchesRes.value && Array.isArray(jobMatchesRes.value.data) ? jobMatchesRes.value.data : [];
+    const mentorConversations = mentorConvsRes.status === 'fulfilled' && Array.isArray(mentorConvsRes.value) ? mentorConvsRes.value : [];
     
     const roadmapTasks = (roadmapDataRes.status === 'fulfilled' && roadmapDataRes.value && Array.isArray(roadmapDataRes.value.tasks)) ? roadmapDataRes.value.tasks : [];
     const completedRoadmapIds = (roadmapDataRes.status === 'fulfilled' && roadmapDataRes.value && Array.isArray(roadmapDataRes.value.completedItemIds)) ? roadmapDataRes.value.completedItemIds : [];
@@ -115,6 +123,8 @@ export class CareerIntelligenceServiceClass {
       mockInterviews,
       resumes,
       latestResumeAnalysis,
+      jobMatches,
+      mentorConversations,
       roadmapTasks,
       completedRoadmapIds,
       studyPlans,
@@ -145,8 +155,23 @@ export class CareerIntelligenceServiceClass {
     // 5. Compute Interview Weakness Tracker
     const interviewWeakness = computeInterviewWeaknessData(mockInterviews);
 
-    // 6. Compute Achievements
-    const userAchievementsSummary = getUserAchievementsSummary(submissions, effectiveId);
+    // 6. Compute Achievements with Multi-Pillar Context
+    const mentorMessagesTotal = mentorConversations.reduce((acc: number, c: any) => acc + (Array.isArray(c.messages) ? c.messages.length : 0), 0);
+    const targetCompanies = options.profile?.target_companies || (options.profile?.target_company ? [options.profile.target_company] : []);
+
+    const userAchievementsSummary = getUserAchievementsSummary(submissions, effectiveId, {
+      placementSessions,
+      placementStats: placementStats || undefined,
+      mockInterviews,
+      resumes,
+      latestResumeAnalysis,
+      jobMatches,
+      mentorConversations,
+      mentorMessagesCount: mentorMessagesTotal,
+      readinessScore: readiness.overallScore,
+      targetCompanies,
+      completedRoadmapIds,
+    });
     const safeAchievementsList = userAchievementsSummary?.achievements || [];
     const safeRecentlyUnlocked = safeAchievementsList.filter((a) => a.unlocked).slice(0, 3);
 
@@ -158,9 +183,9 @@ export class CareerIntelligenceServiceClass {
         title: a.name,
         description: a.description,
         iconName: a.icon || 'Award',
-        category: (a.category === 'streak' ? 'streak' : a.category === 'problem_solving' ? 'coding' : a.category === 'placement' ? 'placement' : 'coding') as any,
+        category: a.category as any,
         targetValue: a.requirement || a.maxProgress || 1,
-        unit: 'challenges',
+        unit: 'milestone',
         badgeLevel: (a.requirement >= 50 ? 'Diamond' : a.requirement >= 25 ? 'Gold' : a.requirement >= 10 ? 'Silver' : 'Bronze') as any,
         color: '#3b82f6',
         isUnlocked: a.unlocked,
@@ -173,9 +198,9 @@ export class CareerIntelligenceServiceClass {
         title: a.name,
         description: a.description,
         iconName: a.icon || 'Award',
-        category: (a.category === 'streak' ? 'streak' : a.category === 'problem_solving' ? 'coding' : a.category === 'placement' ? 'placement' : 'coding') as any,
+        category: a.category as any,
         targetValue: a.requirement || a.maxProgress || 1,
-        unit: 'challenges',
+        unit: 'milestone',
         badgeLevel: (a.requirement >= 50 ? 'Diamond' : a.requirement >= 25 ? 'Gold' : a.requirement >= 10 ? 'Silver' : 'Bronze') as any,
         color: '#3b82f6',
         isUnlocked: a.unlocked,

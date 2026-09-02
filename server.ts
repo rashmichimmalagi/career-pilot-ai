@@ -1743,7 +1743,7 @@ Synthesize the complete ATS resume and return the structured JSON.`;
 
       // Fallback direct synthesis from user form data
       const structuredFallback = {
-        fullName: pInfo.fullName || 'Candidate Name',
+        fullName: pInfo.fullName || '',
         title: role,
         contactInfo: {
           email: pInfo.email || '',

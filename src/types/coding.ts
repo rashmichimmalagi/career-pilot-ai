@@ -296,7 +296,17 @@ export interface MentorRequestParams {
   userId?: string;
 }
 
-export type AchievementCategory = 'streak' | 'problem_solving' | 'difficulty' | 'placement';
+export type AchievementCategory =
+  | 'streak'
+  | 'problem_solving'
+  | 'difficulty'
+  | 'placement'
+  | 'interview'
+  | 'resume'
+  | 'mentor'
+  | 'career'
+  | 'company'
+  | 'improvement';
 
 export interface Achievement {
   id: string;

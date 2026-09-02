@@ -170,6 +170,24 @@ export interface ResumeProgressAnalytics {
   latestMissingSkills: string[];
   latestStrengths: string[];
   isAssessed: boolean;
+  jobMatchesCount: number;
+  jobMatches: JobMatchAnalysis[];
+  mostCommonMissingSkills: string[];
+  mostCommonKeywordGaps: string[];
+}
+
+export interface CareerActivityItem {
+  id: string;
+  type: 'coding' | 'resume' | 'interview' | 'placement' | 'roadmap' | 'mentor';
+  title: string;
+  description: string;
+  timestamp: string;
+  displayDate: string;
+  score?: number | string;
+  statusBadge?: string;
+  badgeColor?: string;
+  actionRoute?: string;
+  actionText?: string;
 }
 
 export interface RoadmapProgressAnalytics {
@@ -252,6 +270,7 @@ export interface ProgressAnalyticsData {
   provenStrengths: ProvenStrengthItem[];
   areasToImprove: ImprovementAreaItem[];
   trendIndicators: Record<string, MetricTrendIndicator>;
+  activityTimeline: CareerActivityItem[];
   calculatedAt: string;
 }
 
@@ -288,6 +307,7 @@ export interface TodaysFocusTask {
   reason: string;
   actionRoute: string;
   actionText: string;
+  actionParams?: Record<string, any>;
   isCompleted: boolean;
   isVerifiable?: boolean;
   requiredCount?: number;
@@ -553,9 +573,14 @@ export interface WeeklyCareerReport {
   studentName?: string;
   targetRole?: string;
   coding: {
-    attemptedCount: number;
-    solvedCount: number;
-    accuracyRate: number;
+    totalSubmissions: number;
+    uniqueQuestionsAttempted: number;
+    uniqueQuestionsSolved: number;
+    attemptedCount: number; // alias to uniqueQuestionsAttempted
+    solvedCount: number; // alias to uniqueQuestionsSolved
+    totalAcceptedSubmissions?: number;
+    accuracyRate: number; // submission pass rate (accepted / total submissions)
+    successRate?: number; // question solve rate (solved / attempted)
     topicsPracticed: string[];
   };
   placement: {
@@ -591,6 +616,28 @@ export interface WeeklyCareerReport {
   }>;
   readinessDeltaThisWeek: number;
   currentReadinessScore: number | null;
+  comparisonWithPreviousWeek?: {
+    hasComparisonData: boolean;
+    message: string;
+    submissionsDelta?: number;
+    solvedDelta?: number;
+    interviewDelta?: number;
+    readinessDelta?: number;
+  };
+  mentor?: {
+    sessionsCount: number;
+    messagesCount: number;
+  };
+  topicBreakdown?: {
+    strongestTopic: string | null;
+    weakestTopic: string | null;
+    allTopics: Array<{ topic: string; attempted: number; solved: number }>;
+  };
+  interviewWeaknesses?: string[];
+  resumeInsights?: {
+    missingSkills: string[];
+    targetRoleMatched: boolean;
+  };
   biggestImprovement: {
     area: string;
     metric: string;

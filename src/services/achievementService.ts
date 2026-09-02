@@ -1,6 +1,97 @@
 import { CodingSubmission, Achievement, AchievementCategory, UserAchievementsSummary } from '../types/coding';
-import { getPlacementStats } from './placementStorage';
+import { getPlacementStats, getPlacementHistory } from './placementStorage';
 import { persistenceManager } from './persistenceManager';
+import { notificationService } from './notificationService';
+import { interviewStorage } from './interviewStorage';
+import { resumeService } from './resumeService';
+import { mentorStorageService } from './mentorStorageService';
+import { getCompletedItemIds } from './roadmapStorage';
+import { getStudentTargets } from './companyPrepStorage';
+
+export type AchievementStatus = 'LOCKED' | 'IN_PROGRESS' | 'UNLOCKED';
+
+export interface EvaluatedAchievement {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: AchievementCategory;
+  currentValue: number;
+  targetValue: number;
+  requirement: number;
+  progress: number;
+  maxProgress: number;
+  progressLabel: string;
+  percentage: number;
+  status: AchievementStatus;
+  unlocked: boolean;
+  unlockedAt?: string;
+  unlockMessage: string;
+  criteria: string;
+}
+
+export interface MultiPillarAchievementContext {
+  placementSessions?: any[];
+  placementStats?: {
+    totalTests: number;
+    totalQuestions?: number;
+    totalQuestionsSolved?: number;
+    totalCorrect: number;
+    accuracy?: number;
+    overallAccuracy?: number;
+    aptitudeSolved: number;
+    technicalSolved: number;
+    perfectScoresCount: number;
+    aptitudeAccuracy?: number;
+    technicalAccuracy?: number;
+  };
+  mockInterviews?: any[];
+  resumes?: any[];
+  latestResumeAnalysis?: any;
+  jobMatches?: any[];
+  mentorConversations?: any[];
+  mentorMessagesCount?: number;
+  readinessScore?: number | null;
+  targetCompanies?: string[];
+  completedRoadmapIds?: string[];
+}
+
+/**
+ * Synchronously gather multi-pillar student context across all preparation pillars.
+ * Ensures identical context calculation between Practice, Achievements, Intelligence, and Notifications.
+ */
+export function getStudentMultiPillarContext(userId: string = 'guest'): MultiPillarAchievementContext {
+  try {
+    const placementSessions = getPlacementHistory(userId);
+    const placementStats = getPlacementStats(userId);
+    const mockInterviews = interviewStorage.getReports(userId);
+    const resumes = resumeService.getCachedUserResumes(userId);
+    const latestResume = resumes.find((r) => r.isCurrent) || resumes[0] || null;
+    const mentorConversations = mentorStorageService.getCachedConversations(userId);
+    const mentorMessagesCount = mentorConversations.reduce(
+      (acc: number, c: any) => acc + (Array.isArray(c.messages) ? c.messages.length : 0),
+      0
+    );
+    const targetCompanies = getStudentTargets(userId).map((t) => t.companyName || t.id);
+    const completedRoadmapIds = getCompletedItemIds(userId);
+
+    return {
+      placementSessions,
+      placementStats,
+      mockInterviews,
+      resumes,
+      latestResumeAnalysis: latestResume?.analysisResult,
+      mentorConversations,
+      mentorMessagesCount,
+      targetCompanies,
+      completedRoadmapIds,
+    };
+  } catch (err) {
+    console.warn('[AchievementService] Error reading student multi-pillar context:', err);
+    return {};
+  }
+}
 
 /**
  * Format a Date to local calendar string YYYY-MM-DD
@@ -429,6 +520,162 @@ export const ACHIEVEMENT_DEFINITIONS: AchievementDefinition[] = [
     requirement: 30,
     unlockMessage: 'CS Core Master! Solved 30+ Technical questions with 80%+ accuracy.',
   },
+
+  // 5. Technical Mock Interview Badges (4)
+  {
+    id: 'interview_first',
+    name: 'Interview Debut',
+    description: 'Completed your first AI-evaluated Mock Interview',
+    icon: '🎤',
+    category: 'interview',
+    requirement: 1,
+    unlockMessage: 'Great job! Stepped into the technical arena and completed your first mock interview.',
+  },
+  {
+    id: 'interview_5',
+    name: 'Interview Veteran',
+    description: 'Completed 5 technical mock interview sessions',
+    icon: '🎙️',
+    category: 'interview',
+    requirement: 5,
+    unlockMessage: 'Incredible dedication! Completed 5 full mock interview sessions.',
+  },
+  {
+    id: 'interview_improver',
+    name: 'Interview Improver',
+    description: 'Completed 2+ interviews with avg score >= 70',
+    icon: '📈',
+    category: 'interview',
+    requirement: 2,
+    unlockMessage: 'Demonstrated real interview performance improvement!',
+  },
+  {
+    id: 'interview_high_scorer',
+    name: 'Top Candidate',
+    description: 'Scored 85+ on an AI-evaluated mock interview',
+    icon: '⭐',
+    category: 'interview',
+    requirement: 85,
+    unlockMessage: 'Elite performance! Scored 85+ on a technical mock interview.',
+  },
+
+  // 6. Resume & ATS Badges (3)
+  {
+    id: 'resume_analyzed',
+    name: 'Resume Benchmarked',
+    description: 'Uploaded & analyzed resume for ATS compliance',
+    icon: '📄',
+    category: 'resume',
+    requirement: 1,
+    unlockMessage: 'Resume scanned! Generated your baseline ATS and keyword match analysis.',
+  },
+  {
+    id: 'ats_optimized_75',
+    name: 'ATS Ready',
+    description: 'Achieved an ATS score of 75+ on your resume',
+    icon: '✨',
+    category: 'resume',
+    requirement: 75,
+    unlockMessage: 'ATS Optimized! Your resume scored 75+ against industry hiring standards.',
+  },
+  {
+    id: 'job_matcher',
+    name: 'Job Target Aligned',
+    description: 'Analyzed resume match against a specific job role',
+    icon: '🎯',
+    category: 'resume',
+    requirement: 1,
+    unlockMessage: 'Role targeted! Tailored your profile to a specific employer job description.',
+  },
+
+  // 7. AI Career Mentor Badges (2)
+  {
+    id: 'mentor_first_chat',
+    name: 'Mentor Guidance',
+    description: 'Consulted with the AI Career Mentor',
+    icon: '🤖',
+    category: 'mentor',
+    requirement: 1,
+    unlockMessage: 'Strategic thinking! Started personalized consultation with AI Career Mentor.',
+  },
+  {
+    id: 'mentor_deep_dive',
+    name: 'Strategic Direction',
+    description: '5+ mentorship exchanges for career roadmap advice',
+    icon: '🧭',
+    category: 'mentor',
+    requirement: 5,
+    unlockMessage: 'Deep career clarity! Actively refining your trajectory with AI Mentor advice.',
+  },
+
+  // 8. Career Readiness Milestones (3)
+  {
+    id: 'readiness_tier_50',
+    name: 'On the Radar',
+    description: 'Reached 50% overall Career Readiness',
+    icon: '🌱',
+    category: 'career',
+    requirement: 50,
+    unlockMessage: 'Halfway there! Passed 50% overall career readiness.',
+  },
+  {
+    id: 'readiness_tier_70',
+    name: 'Placement Ready',
+    description: 'Reached 70% overall Career Readiness',
+    icon: '🚀',
+    category: 'career',
+    requirement: 70,
+    unlockMessage: 'Interview Ready! Passed 70% overall career readiness.',
+  },
+  {
+    id: 'readiness_tier_85',
+    name: 'Elite Benchmark',
+    description: 'Reached 85% overall Career Readiness',
+    icon: '👑',
+    category: 'career',
+    requirement: 85,
+    unlockMessage: 'Top 5% Candidate! Reached 85%+ overall career readiness.',
+  },
+
+  // 9. Company Preparation Badges (2)
+  {
+    id: 'company_target_set',
+    name: 'Target Locked',
+    description: 'Targeted a specific dream company for preparation',
+    icon: '🏢',
+    category: 'company',
+    requirement: 1,
+    unlockMessage: 'Laser focus! Added target company to your personalized prep roadmap.',
+  },
+  {
+    id: 'company_prep_champion',
+    name: 'Company Prep Pro',
+    description: 'Completed customized prep for target companies',
+    icon: '💼',
+    category: 'company',
+    requirement: 2,
+    unlockMessage: 'Tailored mastery! Prepped specifically for company hiring benchmarks.',
+  },
+
+  // 10. Multi-Pillar & Precision Badges (2)
+  {
+    id: 'multi_pillar_builder',
+    name: 'All-Round Prep',
+    description: 'Active across 3 or more preparation pillars',
+    icon: '🌐',
+    category: 'improvement',
+    requirement: 3,
+    unlockMessage: 'Holistic growth! Active in coding, interviews, tests, and resume building.',
+  },
+  {
+    id: 'accuracy_ace',
+    name: 'High Precision',
+    description: 'Maintained 80%+ test-case pass rate (min 5 submissions)',
+    icon: '🎯',
+    category: 'improvement',
+    requirement: 80,
+    unlockMessage: 'Precision engineer! Maintained 80%+ test case pass rate on coding challenges.',
+  },
 ];
 
 /**
@@ -505,30 +752,376 @@ export function groupAchievements(achievements: Achievement[]): {
   };
 }
 
+export interface AchievementEvaluationMetrics {
+  currentStreak: number;
+  longestStreak: number;
+  maxStreakAchieved: number;
+  totalUniqueSolved: number;
+  easyCount: number;
+  medCount: number;
+  hardCount: number;
+  allRounderProgress: number;
+  placementStats: any;
+  interviewCount: number;
+  interviewScores: number[];
+  maxInterviewScore: number;
+  avgInterviewScore: number;
+  mockInterviews: any[];
+  resumes: any[];
+  latestResumeScore: number;
+  hasResume: boolean;
+  jobMatchesCount: number;
+  mentorMessagesCount: number;
+  readinessScore: number;
+  targetCompaniesCount: number;
+  activePillarsCount: number;
+  totalSubmissionsCount: number;
+  totalAcceptedSubmissionsCount: number;
+  accuracyRate: number;
+  isPermanentlyUnlocked: boolean;
+  unlockedAt?: string;
+}
+
+/**
+ * Single source of truth for individual achievement evaluation.
+ * Returns consistent status ('LOCKED' | 'IN_PROGRESS' | 'UNLOCKED'), percentage, and values.
+ */
+export function evaluateAchievement(
+  def: (typeof ACHIEVEMENT_DEFINITIONS)[0],
+  metrics: AchievementEvaluationMetrics
+): EvaluatedAchievement {
+  const {
+    currentStreak,
+    maxStreakAchieved,
+    totalUniqueSolved,
+    easyCount,
+    medCount,
+    hardCount,
+    allRounderProgress,
+    placementStats,
+    interviewCount,
+    maxInterviewScore,
+    avgInterviewScore,
+    latestResumeScore,
+    hasResume,
+    jobMatchesCount,
+    mentorMessagesCount,
+    readinessScore,
+    targetCompaniesCount,
+    activePillarsCount,
+    totalSubmissionsCount,
+    accuracyRate,
+    isPermanentlyUnlocked,
+  } = metrics;
+
+  let unlockedAt = metrics.unlockedAt;
+  let progress = 0;
+  let maxProgress = def.requirement;
+  let currentValue = 0;
+  let targetValue = def.requirement;
+  let progressLabel = '';
+  let qualifiesNow = false;
+  let criteria = def.description;
+
+  if (def.category === 'streak') {
+    qualifiesNow = maxStreakAchieved >= def.requirement;
+    targetValue = def.requirement;
+    currentValue = Math.min(maxStreakAchieved, def.requirement);
+    if (isPermanentlyUnlocked || qualifiesNow) {
+      progress = def.requirement;
+      progressLabel = `${def.requirement} / ${def.requirement} days`;
+    } else {
+      progress = Math.min(currentStreak, def.requirement);
+      progressLabel = `${progress} / ${def.requirement} days`;
+    }
+    criteria = `Practice for ${def.requirement} consecutive days`;
+  } else if (def.category === 'problem_solving') {
+    qualifiesNow = totalUniqueSolved >= def.requirement;
+    targetValue = def.requirement;
+    currentValue = Math.min(totalUniqueSolved, def.requirement);
+    if (isPermanentlyUnlocked || qualifiesNow) {
+      progress = def.requirement;
+      progressLabel = `${def.requirement} / ${def.requirement} problems`;
+    } else {
+      progress = Math.min(totalUniqueSolved, def.requirement);
+      progressLabel = `${progress} / ${def.requirement} problems`;
+    }
+    criteria = `Solve ${def.requirement} distinct coding problems`;
+  } else if (def.category === 'difficulty') {
+    if (def.id === 'easy_10') {
+      qualifiesNow = easyCount >= 10;
+      targetValue = 10;
+      currentValue = Math.min(easyCount, 10);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 10 : Math.min(easyCount, 10);
+      progressLabel = `${progress} / 10 Easy`;
+      criteria = 'Solve 10 Easy-level coding challenges';
+    } else if (def.id === 'medium_10') {
+      qualifiesNow = medCount >= 10;
+      targetValue = 10;
+      currentValue = Math.min(medCount, 10);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 10 : Math.min(medCount, 10);
+      progressLabel = `${progress} / 10 Medium`;
+      criteria = 'Solve 10 Medium-level coding challenges';
+    } else if (def.id === 'hard_10') {
+      qualifiesNow = hardCount >= 10;
+      targetValue = 10;
+      currentValue = Math.min(hardCount, 10);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 10 : Math.min(hardCount, 10);
+      progressLabel = `${progress} / 10 Hard`;
+      criteria = 'Solve 10 Hard-level coding challenges';
+    } else if (def.id === 'all_rounder') {
+      qualifiesNow = allRounderProgress === 3;
+      targetValue = 3;
+      currentValue = allRounderProgress;
+      progress = isPermanentlyUnlocked || qualifiesNow ? 3 : allRounderProgress;
+      progressLabel = qualifiesNow || isPermanentlyUnlocked ? 'Easy + Med + Hard' : `${allRounderProgress} / 3 tiers`;
+      criteria = 'Solve at least 1 Easy, 1 Medium, and 1 Hard problem';
+    }
+  } else if (def.category === 'placement') {
+    if (def.id === 'mcq_first_test') {
+      qualifiesNow = placementStats.totalTests >= 1;
+      targetValue = 1;
+      currentValue = Math.min(placementStats.totalTests, 1);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 1 : currentValue;
+      progressLabel = `${progress} / 1 Test`;
+      criteria = 'Complete your first placement practice assessment';
+    } else if (def.id === 'mcq_solved_10') {
+      qualifiesNow = placementStats.totalCorrect >= 10;
+      targetValue = 10;
+      currentValue = Math.min(placementStats.totalCorrect, 10);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 10 : currentValue;
+      progressLabel = `${progress} / 10 Solved`;
+      criteria = 'Solve 10 placement questions correctly';
+    } else if (def.id === 'mcq_solved_50') {
+      qualifiesNow = placementStats.totalCorrect >= 50;
+      targetValue = 50;
+      currentValue = Math.min(placementStats.totalCorrect, 50);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 50 : currentValue;
+      progressLabel = `${progress} / 50 Solved`;
+      criteria = 'Solve 50 placement questions correctly';
+    } else if (def.id === 'mcq_solved_100') {
+      qualifiesNow = placementStats.totalCorrect >= 100;
+      targetValue = 100;
+      currentValue = Math.min(placementStats.totalCorrect, 100);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 100 : currentValue;
+      progressLabel = `${progress} / 100 Solved`;
+      criteria = 'Solve 100 placement questions correctly';
+    } else if (def.id === 'mcq_perfect_score') {
+      qualifiesNow = placementStats.perfectScoresCount >= 1;
+      targetValue = 1;
+      currentValue = placementStats.perfectScoresCount >= 1 ? 1 : 0;
+      progress = isPermanentlyUnlocked || qualifiesNow ? 1 : 0;
+      progressLabel = qualifiesNow || isPermanentlyUnlocked ? '100% Score' : '0 / 1 Perfect Test';
+      criteria = 'Score 100% accuracy on a complete placement test';
+    } else if (def.id === 'mcq_aptitude_master') {
+      qualifiesNow = placementStats.aptitudeSolved >= 30 && (placementStats.aptitudeAccuracy ?? 0) >= 80;
+      targetValue = 30;
+      currentValue = Math.min(placementStats.aptitudeSolved, 30);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 30 : currentValue;
+      progressLabel = `${progress} / 30 Aptitude (${placementStats.aptitudeAccuracy ?? 0}% acc)`;
+      criteria = 'Solve 30 Aptitude questions with 80%+ accuracy';
+    } else if (def.id === 'mcq_technical_master') {
+      qualifiesNow = placementStats.technicalSolved >= 30 && (placementStats.technicalAccuracy ?? 0) >= 80;
+      targetValue = 30;
+      currentValue = Math.min(placementStats.technicalSolved, 30);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 30 : currentValue;
+      progressLabel = `${progress} / 30 Tech (${placementStats.technicalAccuracy ?? 0}% acc)`;
+      criteria = 'Solve 30 Technical MCQs with 80%+ accuracy';
+    }
+  } else if (def.category === 'interview') {
+    if (def.id === 'interview_first') {
+      qualifiesNow = interviewCount >= 1;
+      targetValue = 1;
+      currentValue = Math.min(interviewCount, 1);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 1 : currentValue;
+      progressLabel = `${progress} / 1 Interview`;
+      criteria = 'Complete your first AI mock interview session';
+    } else if (def.id === 'interview_5') {
+      qualifiesNow = interviewCount >= 5;
+      targetValue = 5;
+      currentValue = Math.min(interviewCount, 5);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 5 : currentValue;
+      progressLabel = `${progress} / 5 Interviews`;
+      criteria = 'Complete 5 AI mock interview sessions';
+    } else if (def.id === 'interview_improver') {
+      qualifiesNow = interviewCount >= 2 && avgInterviewScore >= 70;
+      targetValue = 2;
+      currentValue = Math.min(interviewCount, 2);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 2 : currentValue;
+      progressLabel = qualifiesNow || isPermanentlyUnlocked ? 'Avg 70+ (2+ rounds)' : `${interviewCount} / 2 rounds (${avgInterviewScore} avg)`;
+      criteria = 'Complete 2+ interviews with an average score of 70%+';
+    } else if (def.id === 'interview_high_scorer') {
+      qualifiesNow = maxInterviewScore >= 85;
+      targetValue = 85;
+      currentValue = Math.min(maxInterviewScore, 85);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 85 : currentValue;
+      progressLabel = `${currentValue} / 85 Score`;
+      criteria = 'Score 85%+ overall in an AI mock interview';
+    }
+  } else if (def.category === 'resume') {
+    if (def.id === 'resume_analyzed') {
+      qualifiesNow = hasResume;
+      targetValue = 1;
+      currentValue = hasResume ? 1 : 0;
+      progress = isPermanentlyUnlocked || qualifiesNow ? 1 : 0;
+      progressLabel = qualifiesNow || isPermanentlyUnlocked ? 'Resume Analyzed' : '0 / 1 Uploaded';
+      criteria = 'Upload and evaluate a resume in Resume Analyzer';
+    } else if (def.id === 'ats_optimized_75') {
+      qualifiesNow = latestResumeScore >= 75;
+      targetValue = 75;
+      currentValue = Math.min(latestResumeScore, 75);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 75 : currentValue;
+      progressLabel = `${currentValue} / 75 ATS`;
+      criteria = 'Achieve an ATS compatibility score of 75%+';
+    } else if (def.id === 'job_matcher') {
+      qualifiesNow = jobMatchesCount >= 1;
+      targetValue = 1;
+      currentValue = Math.min(jobMatchesCount, 1);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 1 : 0;
+      progressLabel = qualifiesNow || isPermanentlyUnlocked ? 'Target Aligned' : '0 / 1 Matched';
+      criteria = 'Match your resume against a target job description';
+    }
+  } else if (def.category === 'mentor') {
+    if (def.id === 'mentor_first_chat') {
+      qualifiesNow = mentorMessagesCount >= 1;
+      targetValue = 1;
+      currentValue = Math.min(mentorMessagesCount, 1);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 1 : 0;
+      progressLabel = qualifiesNow || isPermanentlyUnlocked ? 'Consulted' : '0 / 1 Session';
+      criteria = 'Ask your first guidance question to AI Career Mentor';
+    } else if (def.id === 'mentor_deep_dive') {
+      qualifiesNow = mentorMessagesCount >= 5;
+      targetValue = 5;
+      currentValue = Math.min(mentorMessagesCount, 5);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 5 : currentValue;
+      progressLabel = `${progress} / 5 Exchanges`;
+      criteria = 'Engage in 5 or more career mentor discussions';
+    }
+  } else if (def.category === 'career') {
+    if (def.id === 'readiness_tier_50') {
+      qualifiesNow = readinessScore >= 50;
+      targetValue = 50;
+      currentValue = Math.min(readinessScore, 50);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 50 : currentValue;
+      progressLabel = `${currentValue}% / 50% Readiness`;
+      criteria = 'Reach 50%+ overall Career Readiness score';
+    } else if (def.id === 'readiness_tier_70') {
+      qualifiesNow = readinessScore >= 70;
+      targetValue = 70;
+      currentValue = Math.min(readinessScore, 70);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 70 : currentValue;
+      progressLabel = `${currentValue}% / 70% Readiness`;
+      criteria = 'Reach 70%+ overall Career Readiness score';
+    } else if (def.id === 'readiness_tier_85') {
+      qualifiesNow = readinessScore >= 85;
+      targetValue = 85;
+      currentValue = Math.min(readinessScore, 85);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 85 : currentValue;
+      progressLabel = `${currentValue}% / 85% Readiness`;
+      criteria = 'Reach 85%+ overall Career Readiness score';
+    }
+  } else if (def.category === 'company') {
+    if (def.id === 'company_target_set') {
+      qualifiesNow = targetCompaniesCount >= 1;
+      targetValue = 1;
+      currentValue = Math.min(targetCompaniesCount, 1);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 1 : 0;
+      progressLabel = qualifiesNow || isPermanentlyUnlocked ? `${targetCompaniesCount} Target Companies` : '0 / 1 Target Set';
+      criteria = 'Add at least 1 target company to your prep plan';
+    } else if (def.id === 'company_prep_champion') {
+      qualifiesNow = targetCompaniesCount >= 2 || (targetCompaniesCount >= 1 && (interviewCount >= 1 || totalUniqueSolved >= 5));
+      targetValue = 2;
+      currentValue = Math.min(targetCompaniesCount, 2);
+      progress = isPermanentlyUnlocked || qualifiesNow ? 2 : currentValue;
+      progressLabel = qualifiesNow || isPermanentlyUnlocked ? 'Company Prep Mastered' : `${progress} / 2 Targets`;
+      criteria = 'Add 2+ target companies or complete company-aligned prep';
+    }
+  } else if (def.category === 'improvement') {
+    if (def.id === 'multi_pillar_builder') {
+      // STRICT CRITERIA: Exactly activePillarsCount >= 3 required to qualify
+      qualifiesNow = activePillarsCount >= 3;
+      targetValue = 3;
+      currentValue = Math.min(activePillarsCount, 3);
+      progress = qualifiesNow ? 3 : currentValue;
+      progressLabel = `${activePillarsCount} / 3 Active Pillars`;
+      criteria = 'Be active across 3 or more preparation pillars (Coding, Tests, Interviews, Resume, Mentor, Target Companies)';
+    } else if (def.id === 'accuracy_ace') {
+      qualifiesNow = totalSubmissionsCount >= 5 && accuracyRate >= 80;
+      targetValue = 80;
+      currentValue = totalSubmissionsCount >= 5 ? Math.min(accuracyRate, 80) : 0;
+      progress = isPermanentlyUnlocked || qualifiesNow ? 80 : currentValue;
+      progressLabel = totalSubmissionsCount >= 5 ? `${accuracyRate}% Acc (min 5)` : `${totalSubmissionsCount} / 5 submissions`;
+      criteria = 'Achieve 80%+ submission accuracy with at least 5 submissions';
+    }
+  }
+
+  // Strict Unlock & Status Logic
+  // For multi_pillar_builder, unlock state is strictly based on qualifiesNow (must actually meet the 3 pillars)
+  const isUnlocked = def.id === 'multi_pillar_builder' ? qualifiesNow : (isPermanentlyUnlocked || qualifiesNow);
+  if (isUnlocked && !unlockedAt) {
+    unlockedAt = new Date().toISOString();
+  }
+
+  const percentage = targetValue > 0 ? Math.min(100, Math.round((currentValue / targetValue) * 100)) : (isUnlocked ? 100 : 0);
+  const status: AchievementStatus = isUnlocked ? 'UNLOCKED' : (progress > 0 ? 'IN_PROGRESS' : 'LOCKED');
+
+  return {
+    id: def.id,
+    name: def.name,
+    title: def.name,
+    description: def.description,
+    icon: def.icon,
+    category: def.category,
+    requirement: def.requirement,
+    currentValue,
+    targetValue,
+    progress,
+    maxProgress: targetValue,
+    progressLabel,
+    percentage,
+    status,
+    unlocked: isUnlocked,
+    unlockedAt: isUnlocked ? unlockedAt : undefined,
+    unlockMessage: def.unlockMessage,
+    criteria,
+  };
+}
+
 /**
  * Calculate all achievements dynamically and merge with permanently unlocked badges
  * Single Source of Truth + Permanent Badge Retention
  */
 export function calculateAchievements(
   submissions: CodingSubmission[],
-  userId: string = 'guest'
+  userId: string = 'guest',
+  context?: MultiPillarAchievementContext
 ): UserAchievementsSummary {
   const { currentStreak, longestStreak } = calculateStreaks(submissions, userId);
   const permanentBadges = getPermanentUnlockedBadges(userId);
+
+  // Synchronously resolve full student context so practice views, intelligence, and notifications evaluate identically
+  const resolvedContext: MultiPillarAchievementContext = {
+    ...getStudentMultiPillarContext(userId),
+    ...context,
+  };
 
   // 1. Gather unique solved problems (status === 'accepted')
   const uniqueSolvedProblemIds = new Set<string>();
   const uniqueEasySolvedIds = new Set<string>();
   const uniqueMedSolvedIds = new Set<string>();
   const uniqueHardSolvedIds = new Set<string>();
+  let totalSubmissionsCount = 0;
+  let totalAcceptedSubmissionsCount = 0;
 
   if (Array.isArray(submissions)) {
+    totalSubmissionsCount = submissions.length;
     for (const sub of submissions) {
       const totalTC = typeof sub.total_test_cases === 'number' && sub.total_test_cases > 0 ? sub.total_test_cases : 5;
       const passedTC = typeof sub.test_cases_passed === 'number' ? sub.test_cases_passed : (sub.status === 'accepted' ? totalTC : 0);
       const isAccepted = sub.status?.toLowerCase() === 'accepted' && passedTC === totalTC && totalTC > 0;
 
       if (isAccepted) {
+        totalAcceptedSubmissionsCount++;
         const pId = sub.problem_id || sub.problem_title || sub.id;
         if (pId && !uniqueSolvedProblemIds.has(pId)) {
           uniqueSolvedProblemIds.add(pId);
@@ -555,167 +1148,106 @@ export function calculateAchievements(
   const hasHard = hardCount >= 1 ? 1 : 0;
   const allRounderProgress = hasEasy + hasMed + hasHard;
 
-  // Maximum streak achieved (to unlock badges when current or longest reaches requirement)
+  // Maximum streak achieved
   const maxStreakAchieved = Math.max(longestStreak, currentStreak);
 
-  // Placement stats for real student activity evaluation
-  const placementStats = getPlacementStats(userId);
+  // Placement stats
+  const placementStats = resolvedContext.placementStats || getPlacementStats(userId);
 
-  // 2. Evaluate each achievement and ensure permanent unlock state is never revoked
+  // Interview metrics
+  const mockInterviews = resolvedContext.mockInterviews || [];
+  const interviewCount = mockInterviews.length;
+  const interviewScores = mockInterviews
+    .map((i: any) => i.overall_score ?? i.overallScore ?? 0)
+    .filter((s: number) => typeof s === 'number' && s > 0);
+  const maxInterviewScore = interviewScores.length > 0 ? Math.max(...interviewScores) : 0;
+  const avgInterviewScore = interviewScores.length > 0
+    ? Math.round(interviewScores.reduce((a: number, b: number) => a + b, 0) / interviewScores.length)
+    : 0;
+
+  // Resume metrics
+  const resumes = resolvedContext.resumes || [];
+  const latestResumeScore = resolvedContext.latestResumeAnalysis?.result?.overall_score ?? (resumes[0] as any)?.atsScore ?? (resumes[0] as any)?.score ?? 0;
+  const hasResume = resumes.length > 0 || Boolean(resolvedContext.latestResumeAnalysis);
+  const jobMatchesCount = resolvedContext.jobMatches?.length || 0;
+
+  // Mentor metrics
+  const mentorMessagesCount = (resolvedContext.mentorMessagesCount || 0) + (resolvedContext.mentorConversations?.length || 0);
+
+  // Career Readiness
+  const readinessScore = typeof resolvedContext.readinessScore === 'number' ? resolvedContext.readinessScore : 0;
+
+  // Company prep
+  const targetCompanies = resolvedContext.targetCompanies || [];
+  const targetCompaniesCount = targetCompanies.length;
+
+  // Active pillars count (holistic growth)
+  let activePillarsCount = 0;
+  if (totalSubmissionsCount > 0) activePillarsCount++;
+  if (placementStats.totalTests > 0) activePillarsCount++;
+  if (interviewCount > 0) activePillarsCount++;
+  if (hasResume) activePillarsCount++;
+  if (mentorMessagesCount > 0) activePillarsCount++;
+  if (targetCompaniesCount > 0) activePillarsCount++;
+
+  // Accuracy calculation
+  const accuracyRate = totalSubmissionsCount > 0
+    ? Math.round((totalAcceptedSubmissionsCount / totalSubmissionsCount) * 100)
+    : 0;
+
+  const evaluationMetrics: AchievementEvaluationMetrics = {
+    currentStreak,
+    longestStreak,
+    maxStreakAchieved,
+    totalUniqueSolved,
+    easyCount,
+    medCount,
+    hardCount,
+    allRounderProgress,
+    placementStats,
+    interviewCount,
+    interviewScores,
+    maxInterviewScore,
+    avgInterviewScore,
+    mockInterviews,
+    resumes,
+    latestResumeScore,
+    hasResume,
+    jobMatchesCount,
+    mentorMessagesCount,
+    readinessScore,
+    targetCompaniesCount,
+    activePillarsCount,
+    totalSubmissionsCount,
+    totalAcceptedSubmissionsCount,
+    accuracyRate,
+    isPermanentlyUnlocked: false,
+  };
+
+  // 2. Evaluate each achievement through centralized evaluateAchievement
   const achievements: Achievement[] = ACHIEVEMENT_DEFINITIONS.map((def) => {
     const isPermanentlyUnlocked = Boolean(permanentBadges[def.id]);
-    let unlockedAt = permanentBadges[def.id]?.unlockedAt;
+    const unlockedAt = permanentBadges[def.id]?.unlockedAt;
 
-    let progress = 0;
-    let maxProgress = def.requirement;
-    let progressLabel = '';
-    let qualifiesNow = false;
-
-    if (def.category === 'streak') {
-      qualifiesNow = maxStreakAchieved >= def.requirement;
-      if (isPermanentlyUnlocked || qualifiesNow) {
-        progress = def.requirement;
-        progressLabel = `${def.requirement} / ${def.requirement} days`;
-      } else {
-        // Locked badge progress reflects current metric
-        progress = Math.min(currentStreak, def.requirement);
-        progressLabel = `${progress} / ${def.requirement} days`;
-      }
-    } else if (def.category === 'problem_solving') {
-      qualifiesNow = totalUniqueSolved >= def.requirement;
-      if (isPermanentlyUnlocked || qualifiesNow) {
-        progress = def.requirement;
-        progressLabel = `${def.requirement} / ${def.requirement} problems`;
-      } else {
-        progress = Math.min(totalUniqueSolved, def.requirement);
-        progressLabel = `${progress} / ${def.requirement} problems`;
-      }
-    } else if (def.category === 'difficulty') {
-      if (def.id === 'easy_10') {
-        qualifiesNow = easyCount >= 10;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 10;
-          progressLabel = '10 / 10 Easy';
-        } else {
-          progress = Math.min(easyCount, 10);
-          progressLabel = `${easyCount} / 10 Easy`;
-        }
-      } else if (def.id === 'medium_10') {
-        qualifiesNow = medCount >= 10;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 10;
-          progressLabel = '10 / 10 Medium';
-        } else {
-          progress = Math.min(medCount, 10);
-          progressLabel = `${medCount} / 10 Medium`;
-        }
-      } else if (def.id === 'hard_10') {
-        qualifiesNow = hardCount >= 10;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 10;
-          progressLabel = '10 / 10 Hard';
-        } else {
-          progress = Math.min(hardCount, 10);
-          progressLabel = `${hardCount} / 10 Hard`;
-        }
-      } else if (def.id === 'all_rounder') {
-        qualifiesNow = allRounderProgress === 3;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 3;
-          progressLabel = 'Easy + Med + Hard';
-        } else {
-          progress = allRounderProgress;
-          progressLabel = `${allRounderProgress} / 3 tiers`;
-        }
-      }
-    } else if (def.category === 'placement') {
-      if (def.id === 'mcq_first_test') {
-        qualifiesNow = placementStats.totalTests >= 1;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 1;
-          progressLabel = '1 / 1 Test';
-        } else {
-          progress = Math.min(placementStats.totalTests, 1);
-          progressLabel = `${progress} / 1 Test`;
-        }
-      } else if (def.id === 'mcq_solved_10') {
-        qualifiesNow = placementStats.totalCorrect >= 10;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 10;
-          progressLabel = '10 / 10 Solved';
-        } else {
-          progress = Math.min(placementStats.totalCorrect, 10);
-          progressLabel = `${progress} / 10 Solved`;
-        }
-      } else if (def.id === 'mcq_solved_50') {
-        qualifiesNow = placementStats.totalCorrect >= 50;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 50;
-          progressLabel = '50 / 50 Solved';
-        } else {
-          progress = Math.min(placementStats.totalCorrect, 50);
-          progressLabel = `${progress} / 50 Solved`;
-        }
-      } else if (def.id === 'mcq_solved_100') {
-        qualifiesNow = placementStats.totalCorrect >= 100;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 100;
-          progressLabel = '100 / 100 Solved';
-        } else {
-          progress = Math.min(placementStats.totalCorrect, 100);
-          progressLabel = `${progress} / 100 Solved`;
-        }
-      } else if (def.id === 'mcq_perfect_score') {
-        qualifiesNow = placementStats.perfectScoresCount >= 1;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 1;
-          progressLabel = '100% Score';
-        } else {
-          progress = 0;
-          progressLabel = '0 / 1 Perfect Test';
-        }
-      } else if (def.id === 'mcq_aptitude_master') {
-        qualifiesNow = placementStats.aptitudeSolved >= 30 && placementStats.aptitudeAccuracy >= 80;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 30;
-          progressLabel = '30 / 30 Aptitude (80%+ Acc)';
-        } else {
-          progress = Math.min(placementStats.aptitudeSolved, 30);
-          progressLabel = `${progress} / 30 Aptitude (${placementStats.aptitudeAccuracy}% acc)`;
-        }
-      } else if (def.id === 'mcq_technical_master') {
-        qualifiesNow = placementStats.technicalSolved >= 30 && placementStats.technicalAccuracy >= 80;
-        if (isPermanentlyUnlocked || qualifiesNow) {
-          progress = 30;
-          progressLabel = '30 / 30 Tech (80%+ Acc)';
-        } else {
-          progress = Math.min(placementStats.technicalSolved, 30);
-          progressLabel = `${progress} / 30 Tech (${placementStats.technicalAccuracy}% acc)`;
-        }
-      }
-    }
-
-    const isUnlocked = isPermanentlyUnlocked || qualifiesNow;
-
-    // If newly qualified, persist to permanent storage immediately
-    if (qualifiesNow && !isPermanentlyUnlocked) {
-      unlockedAt = new Date().toISOString();
-      savePermanentUnlockedBadge(userId, def.id, unlockedAt);
-    }
+    const evaluated = evaluateAchievement(def, {
+      ...evaluationMetrics,
+      isPermanentlyUnlocked,
+      unlockedAt,
+    });
 
     return {
-      id: def.id,
-      name: def.name,
-      description: def.description,
-      icon: def.icon,
-      category: def.category,
-      requirement: def.requirement,
-      unlocked: isUnlocked,
-      progress,
-      maxProgress,
-      progressLabel,
-      unlockedAt,
-      unlockMessage: def.unlockMessage,
+      id: evaluated.id,
+      name: evaluated.name,
+      description: evaluated.description,
+      icon: evaluated.icon,
+      category: evaluated.category,
+      requirement: evaluated.requirement,
+      unlocked: evaluated.unlocked,
+      progress: evaluated.progress,
+      maxProgress: evaluated.maxProgress,
+      progressLabel: evaluated.progressLabel,
+      unlockedAt: evaluated.unlockedAt,
+      unlockMessage: evaluated.unlockMessage,
     };
   });
 
@@ -792,15 +1324,18 @@ export function calculateAchievements(
 }
 
 /**
- * Helper to check for newly unlocked achievements after a submission
- * Uses a dedicated notified list so toasts are only shown once per unlock
+ * Helper to check for newly unlocked achievements after an activity (submission, test, interview, etc.)
+ * Strictly verifies state transition: previous state != UNLOCKED AND current state == UNLOCKED.
+ * Persists permanent unlocked badge state and creates deduplicated notification.
  */
 export function checkNewlyUnlockedAchievements(
   submissions: CodingSubmission[],
-  userId: string = 'guest'
+  userId: string = 'guest',
+  context?: MultiPillarAchievementContext
 ): Achievement[] {
-  const summary = calculateAchievements(submissions, userId);
-  const currentlyUnlocked = summary.achievements.filter((a) => a.unlocked);
+  const permanentBadges = getPermanentUnlockedBadges(userId);
+  const summary = calculateAchievements(submissions, userId, context);
+  const nowIso = new Date().toISOString();
 
   const notifiedKey = `careerpilot_notified_achievements_${userId}`;
   let notifiedIds: string[] = [];
@@ -811,15 +1346,37 @@ export function checkNewlyUnlockedAchievements(
   }
 
   const newlyUnlocked: Achievement[] = [];
-  for (const ach of currentlyUnlocked) {
-    if (!notifiedIds.includes(ach.id)) {
-      newlyUnlocked.push(ach);
-      notifiedIds.push(ach.id);
+  for (const ach of summary.achievements) {
+    const wasPermanentlyUnlocked = Boolean(permanentBadges[ach.id]);
+    const isNowQualified = ach.unlocked;
+
+    // Transition condition: Only newly unlocked if it was NOT unlocked before and is NOW qualified
+    if (isNowQualified && !wasPermanentlyUnlocked) {
+      savePermanentUnlockedBadge(userId, ach.id, nowIso);
+      newlyUnlocked.push({
+        ...ach,
+        unlockedAt: nowIso,
+      });
+
+      if (!notifiedIds.includes(ach.id)) {
+        notifiedIds.push(ach.id);
+        if (userId && userId !== 'guest') {
+          notificationService.createNotification(userId, {
+            type: 'system',
+            category: 'ACHIEVEMENT',
+            title: '🏆 Achievement Unlocked!',
+            message: `Congratulations! You unlocked the "${ach.name}" achievement badge.`,
+            action_url: '/coding?tab=achievements',
+            action_label: 'View Achievements',
+            dedup_key: `achievement_${ach.id}`,
+          }).catch(() => {});
+        }
+      }
     }
   }
 
   // Update notified in persistent storage
-  if (newlyUnlocked.length > 0) {
+  if (notifiedIds.length > 0) {
     try {
       localStorage.setItem(notifiedKey, JSON.stringify(notifiedIds));
     } catch (_) {}
@@ -833,9 +1390,10 @@ export function checkNewlyUnlockedAchievements(
  */
 export function getUserAchievementsSummary(
   submissions: CodingSubmission[],
-  userId: string = 'guest'
+  userId: string = 'guest',
+  context?: MultiPillarAchievementContext
 ): UserAchievementsSummary & { recentlyUnlocked: Achievement[] } {
-  const summary = calculateAchievements(submissions, userId);
+  const summary = calculateAchievements(submissions, userId, context);
   const recentlyUnlocked = summary.achievements
     .filter((a) => a.unlocked)
     .sort((a, b) => (b.unlockedAt ? new Date(b.unlockedAt).getTime() : 0) - (a.unlockedAt ? new Date(a.unlockedAt).getTime() : 0))

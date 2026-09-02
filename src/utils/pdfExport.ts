@@ -59,9 +59,11 @@ export function buildResumeJsPdf(resume: StructuredResumeData): jsPDF {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
   doc.setTextColor(15, 23, 42); // slate-900
-  const nameText = (resume.fullName || 'Candidate Name').trim();
-  doc.text(nameText, pageWidth / 2, cursorY, { align: 'center' });
-  cursorY += 15;
+  const nameText = (resume.fullName || '').trim();
+  if (nameText) {
+    doc.text(nameText, pageWidth / 2, cursorY, { align: 'center' });
+    cursorY += 15;
+  }
 
   // 2. Title & Contact Info (Centered, auto-wrapping if long)
   const contactParts: string[] = [];

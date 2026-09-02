@@ -16,6 +16,7 @@ import {
   Layers,
   Loader2,
   Printer,
+  Edit3,
 } from 'lucide-react';
 import { ResumeVersionItem } from '../../types/resume';
 import { resumeService } from '../../services/resumeService';
@@ -144,11 +145,11 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
       {currentResume ? (
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-50/90 via-white to-slate-50 dark:from-indigo-950/40 dark:via-slate-900 dark:to-slate-900 border-2 border-indigo-500/40 dark:border-indigo-500/30 p-5 sm:p-6 shadow-md transition-all">
           
-          {/* Current Badge Header */}
+          {/* Active Badge Header */}
           <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-600 text-white text-xs font-bold shadow-xs">
               <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-              <span>CURRENT RESUME</span>
+              <span>ACTIVE RESUME</span>
             </div>
 
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -206,17 +207,17 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
                 <button
                   onClick={() => onEditResume(currentResume)}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
-                  title="Open in Live Resume Editor"
+                  title="Open and edit this resume directly in-place"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Edit Live</span>
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit Resume</span>
                 </button>
               )}
 
               <button
                 onClick={() => onViewResume(currentResume)}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-xs transition-all cursor-pointer"
-                title="View and edit this resume"
+                title="View and inspect this resume"
               >
                 <Eye className="w-3.5 h-3.5 text-slate-500" />
                 <span>View</span>
@@ -235,10 +236,10 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
                 <button
                   onClick={() => onPrintResume(currentResume)}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 text-xs font-semibold text-indigo-700 dark:text-indigo-300 shadow-xs transition-all cursor-pointer"
-                  title="Print this resume"
+                  title={currentResume.isAiImproved || currentResume.resumeType === 'ai_generated' ? 'Print this resume' : 'Print the exact original uploaded PDF'}
                 >
                   <Printer className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                  <span>Print</span>
+                  <span>{currentResume.isAiImproved || currentResume.resumeType === 'ai_generated' ? 'Print' : 'Print Original Resume'}</span>
                 </button>
               )}
 
@@ -259,7 +260,7 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
               <button
                 onClick={() => setResumeToDelete(currentResume)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 shadow-xs transition-all cursor-pointer"
-                title="Delete this resume"
+                title="Delete this active resume"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Delete</span>
@@ -271,33 +272,42 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
 
         </div>
       ) : (
-        /* Empty State: No current resume selected */
+        /* Empty State: No active resume selected */
         <div className="rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 p-8 text-center space-y-4">
           <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400">
             <FileText className="w-6 h-6" />
           </div>
           <div className="space-y-1">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              {previousVersions.length > 0 ? 'No current resume selected.' : '📄 No Current Resume'}
+              📄 No Active Resume
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              {previousVersions.length > 0
-                ? 'Select a previous version below with "Make Current" or upload your latest resume.'
-                : 'Upload your latest resume to continue placement analysis.'}
+              You don't currently have an active resume. Upload a new resume or choose a previous version to continue.
             </p>
           </div>
-          <button
-            onClick={onTriggerUpload}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs sm:text-sm shadow-md transition-all cursor-pointer"
-          >
-            <UploadCloud className="w-4 h-4" />
-            <span>Upload Resume</span>
-          </button>
+          <div className="flex items-center justify-center gap-3 flex-wrap">
+            <button
+              onClick={onTriggerUpload}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs sm:text-sm shadow-md transition-all cursor-pointer"
+            >
+              <UploadCloud className="w-4 h-4" />
+              <span>Upload Resume</span>
+            </button>
+            {previousVersions.length > 0 && (
+              <button
+                onClick={() => setShowPreviousVersions(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm border border-slate-200 dark:border-slate-700 shadow-xs transition-all cursor-pointer"
+              >
+                <Layers className="w-4 h-4 text-indigo-500" />
+                <span>Choose Previous Version ({previousVersions.length})</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
       {/* ==================================================== */}
-      {/* 2. PREVIOUS VERSIONS SECTION */}
+      {/* 2. RESUME HISTORY / PREVIOUS VERSIONS SECTION */}
       {/* ==================================================== */}
       {previousVersions.length > 0 && (
         <div className="space-y-3 pt-2">
@@ -308,7 +318,7 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
           >
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-indigo-500" />
-              <span>Previous Versions</span>
+              <span>Resume History</span>
               <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-mono">
                 {previousVersions.length} {previousVersions.length === 1 ? 'version' : 'versions'}
               </span>
@@ -370,20 +380,20 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
                       <button
                         onClick={() => onEditResume(prevResume)}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition-all cursor-pointer"
-                        title="Edit in Live Resume Editor"
+                        title="Edit this version directly in-place"
                       >
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                        <span>Edit</span>
+                        <Edit3 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span>Edit Resume</span>
                       </button>
                     )}
 
                     <button
                       onClick={() => onMakeCurrent(prevResume)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-all cursor-pointer"
-                      title="Make this the current active resume"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                      title={`Use ${prevResume.fileName || prevResume.versionLabel} as your active resume`}
                     >
                       <Check className="w-3.5 h-3.5" />
-                      <span>Make Current</span>
+                      <span>Use this version</span>
                     </button>
 
                     <button
@@ -459,7 +469,9 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
               </div>
               <div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                  Delete Resume?
+                  {resumeToDelete.isCurrent || resumeToDelete.id === currentResume?.id
+                    ? 'Delete active resume?'
+                    : 'Delete Resume?'}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {resumeToDelete.fileName || resumeToDelete.versionLabel}
@@ -468,7 +480,9 @@ export const MyResumesManager: React.FC<MyResumesManagerProps> = ({
             </div>
 
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              Are you sure you want to delete this resume? This action cannot be undone.
+              {resumeToDelete.isCurrent || resumeToDelete.id === currentResume?.id
+                ? 'This is your current active resume. Deleting it will leave you without an active resume. Your older resume versions will not be automatically activated.'
+                : 'Are you sure you want to delete this historical resume version? This action cannot be undone.'}
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">

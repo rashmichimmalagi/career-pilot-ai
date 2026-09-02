@@ -140,10 +140,49 @@ export const SetupGuideModal: React.FC<SetupGuideModalProps> = ({ isOpen, onClos
 
           {activeTab === 'oauth' && (
             <div className="space-y-4 text-xs sm:text-sm text-slate-300">
+              {/* Google OAuth Setup */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <h3 className="font-semibold text-slate-100 flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-blue-400" />
+                  Google OAuth Configuration
+                </h3>
+                <ol className="list-decimal list-inside space-y-2 text-slate-300">
+                  <li>Go to Google Cloud Console: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-indigo-400 underline">Credentials Page</a></li>
+                  <li>Click <strong>Create Credentials</strong> &rarr; <strong>OAuth client ID</strong> (Application type: <em>Web application</em>).</li>
+                  <li>
+                    In <strong>Authorized redirect URIs</strong>, add your Supabase Auth callback URL:
+                    <div className="flex items-center gap-2 mt-1.5 font-mono bg-slate-900 border border-slate-800 p-2 rounded-lg text-xs text-indigo-300">
+                      <span className="truncate flex-1">{supabaseCallbackUrl}</span>
+                      <button
+                        onClick={() => copyToClipboard(supabaseCallbackUrl, 'supabase_cb_google')}
+                        className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white shrink-0"
+                      >
+                        {copiedUrl === 'supabase_cb_google' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </li>
+                  <li>Go to Supabase Dashboard &rarr; <a href={`${supabaseProjectUrl}/settings/auth/providers`} target="_blank" rel="noreferrer" className="text-indigo-400 underline">Auth Providers</a> &rarr; Enable <strong>Google</strong>.</li>
+                  <li>Paste your Google <strong>Client ID</strong> and <strong>Client Secret</strong>, then click <strong>Save</strong>.</li>
+                  <li>
+                    In Supabase <strong>URL Configuration</strong> &rarr; <strong>Redirect URLs</strong>, add:
+                    <div className="flex items-center gap-2 mt-1.5 font-mono bg-slate-900 border border-slate-800 p-2 rounded-lg text-xs text-emerald-300">
+                      <span className="truncate flex-1">{appAuthCallbackUrl}</span>
+                      <button
+                        onClick={() => copyToClipboard(appAuthCallbackUrl, 'app_cb_google')}
+                        className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white shrink-0"
+                      >
+                        {copiedUrl === 'app_cb_google' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </li>
+                </ol>
+              </div>
+
+              {/* GitHub OAuth Setup */}
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                 <h3 className="font-semibold text-slate-100 flex items-center gap-2">
                   <Globe className="w-4 h-4 text-emerald-400" />
-                  Step 1: Create a GitHub OAuth App
+                  GitHub OAuth Configuration
                 </h3>
                 <ol className="list-decimal list-inside space-y-2 text-slate-300">
                   <li>Go to GitHub Developer Settings: <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer" className="text-indigo-400 underline">GitHub Developer Settings</a></li>
@@ -160,30 +199,8 @@ export const SetupGuideModal: React.FC<SetupGuideModalProps> = ({ isOpen, onClos
                       </button>
                     </div>
                   </li>
-                </ol>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                <h3 className="font-semibold text-slate-100 flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                  Step 2: Enable GitHub Provider in Supabase Auth
-                </h3>
-                <ol className="list-decimal list-inside space-y-2 text-slate-300">
-                  <li>Open Supabase Auth Providers setting: <a href={`${supabaseProjectUrl}/settings/auth/providers`} target="_blank" rel="noreferrer" className="text-indigo-400 underline">Supabase Auth Providers</a></li>
-                  <li>Enable <strong>GitHub</strong> provider.</li>
-                  <li>Paste your GitHub Client ID & Client Secret from GitHub.</li>
-                  <li>
-                    In <strong>URL Configuration & Redirect URLs</strong>, ensure this Application URL is whitelisted:
-                    <div className="flex items-center gap-2 mt-1.5 font-mono bg-slate-900 border border-slate-800 p-2 rounded-lg text-xs text-emerald-300">
-                      <span className="truncate flex-1">{appAuthCallbackUrl}</span>
-                      <button
-                        onClick={() => copyToClipboard(appAuthCallbackUrl, 'app_cb')}
-                        className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white shrink-0"
-                      >
-                        {copiedUrl === 'app_cb' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                  </li>
+                  <li>Go to Supabase Dashboard &rarr; <a href={`${supabaseProjectUrl}/settings/auth/providers`} target="_blank" rel="noreferrer" className="text-indigo-400 underline">Auth Providers</a> &rarr; Enable <strong>GitHub</strong>.</li>
+                  <li>Paste your GitHub <strong>Client ID</strong> and <strong>Client Secret</strong>.</li>
                 </ol>
               </div>
             </div>

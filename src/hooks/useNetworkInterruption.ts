@@ -3,6 +3,8 @@ import { User } from '@supabase/supabase-js';
 import { persistenceManager } from '../services/persistenceManager';
 import { cloudSyncService } from '../services/cloudSyncService';
 import { getRandomOfflineQuote, OfflineQuote } from '../data/offlineQuotes';
+import { classifySyncError } from '../services/syncAuditService';
+import { SyncErrorCategory } from '../types/sync';
 
 export type SyncState =
   | 'idle'
@@ -19,8 +21,6 @@ interface UseNetworkInterruptionOptions {
   showToast?: (title: string, subtitle?: string, type?: 'info' | 'warning' | 'error' | 'success') => void;
 }
 
-const QUOTE_INTERVAL_SECONDS = 5;
-
 export function useNetworkInterruption({ user, currentPage, showToast }: UseNetworkInterruptionOptions) {
   const [isOnline, setIsOnline] = useState<boolean>(() => {
     return typeof navigator !== 'undefined' ? navigator.onLine : true;
@@ -30,34 +30,19 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
     return typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'idle';
   });
 
+  // Single tip initialized on open and displayed indefinitely
   const [currentQuote, setCurrentQuote] = useState<OfflineQuote>(() => getRandomOfflineQuote(undefined, currentPage));
   const [pendingQueueCount, setPendingQueueCount] = useState<number>(0);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSummary, setSyncSummary] = useState<string | null>(null);
+  const [errorCategory, setErrorCategory] = useState<SyncErrorCategory | null>(null);
   const [isDismissed, setIsDismissed] = useState<boolean>(false);
-  const [quoteSecondsLeft, setQuoteSecondsLeft] = useState<number>(QUOTE_INTERVAL_SECONDS);
 
-  const quoteTimerRef = useRef<NodeJS.Timeout | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const wasOfflineRef = useRef<boolean>(false);
   const currentPageRef = useRef<string | undefined>(currentPage);
   currentPageRef.current = currentPage;
-
-  // Sanitize technical/database errors for display
-  const sanitizeSyncError = (err: any): string => {
-    if (!err) return 'Sync could not be completed at this time.';
-    const raw = typeof err === 'string' ? err : err.message || JSON.stringify(err);
-    if (raw.toLowerCase().includes('violates row-level') || raw.toLowerCase().includes('jwt') || raw.toLowerCase().includes('auth')) {
-      return 'Please ensure you are signed in so your changes can sync securely to your account.';
-    }
-    if (raw.toLowerCase().includes('network') || raw.toLowerCase().includes('fetch') || raw.toLowerCase().includes('failed to fetch')) {
-      return 'Network connection was interrupted during sync. Your changes remain saved on this device.';
-    }
-    if (raw.toLowerCase().includes('schema') || raw.toLowerCase().includes('column')) {
-      return 'Temporary sync service update in progress. Your data is safely preserved on this device.';
-    }
-    return 'Some changes are waiting for a stronger connection. They remain safe on this device.';
-  };
 
   // Update pending queue count
   const refreshQueueCount = useCallback(() => {
@@ -69,7 +54,7 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
     }
   }, [user?.id]);
 
-  // Execute full cloud sync with real status
+  // Execute full cloud sync with honest classification and exact queue accounting
   const triggerSync = useCallback(async () => {
     if (!navigator.onLine) {
       setSyncState('offline');
@@ -79,36 +64,58 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
     setIsSyncing(true);
     setSyncState('syncing');
     setSyncError(null);
+    setSyncSummary(null);
+    setErrorCategory(null);
 
     try {
       if (user?.id) {
-        // 1. Process offline queue
-        await persistenceManager.processOfflineQueue(user.id);
-        // 2. Perform local-to-cloud sync
-        const result = await cloudSyncService.syncLocalDataToCloud(user.id);
+        // 1. Process offline queue with atomic confirmation
+        const queueResult = await persistenceManager.processOfflineQueue(user.id);
+        
+        // 2. Perform local-to-cloud bidirectional sweep
+        const syncResult = await cloudSyncService.syncLocalDataToCloud(user.id);
         
         refreshQueueCount();
 
-        if (result.success && result.errors.length === 0) {
+        const allErrors = [...queueResult.errors, ...(syncResult.structuredErrors || [])];
+        const totalPending = queueResult.remainingQueueCount;
+
+        if (allErrors.length === 0 && syncResult.success && totalPending === 0) {
           setSyncState('synced');
-          // Auto-hide synced state after 4 seconds
+          setSyncSummary('All changes synced successfully.');
           if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
           syncTimeoutRef.current = setTimeout(() => {
             setSyncState('idle');
           }, 4000);
-        } else if (result.errors.length > 0) {
-          setSyncState('sync_partial');
-          setSyncError(sanitizeSyncError(result.errors[0]));
+        } else if (allErrors.length > 0 || totalPending > 0) {
+          const primaryErr = allErrors[0] || classifySyncError(syncResult.errors[0] || 'Sync incomplete');
+          setErrorCategory(primaryErr.category);
+          setSyncError(primaryErr.userMessage);
+
+          if (queueResult.syncedCount > 0 && queueResult.failedCount > 0) {
+            setSyncState('sync_partial');
+            setSyncSummary(
+              `${queueResult.syncedCount} change${queueResult.syncedCount > 1 ? 's' : ''} synced. ${queueResult.failedCount} change${queueResult.failedCount > 1 ? 's' : ''} waiting to retry.`
+            );
+          } else if (queueResult.failedCount > 0 || syncResult.errors.length > 0) {
+            setSyncState('sync_failed');
+            setSyncSummary('Connection restored, but some changes could not be synchronized.');
+          } else {
+            setSyncState('sync_partial');
+            setSyncSummary('Some changes are still synchronizing with the cloud.');
+          }
         } else {
           setSyncState('synced');
+          setSyncSummary('All changes synced successfully.');
           if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
           syncTimeoutRef.current = setTimeout(() => {
             setSyncState('idle');
           }, 4000);
         }
       } else {
-        // Unauthenticated - local only, no cloud sync needed
+        // Guest mode / Unauthenticated
         setSyncState('synced');
+        setSyncSummary('Local changes preserved on this device.');
         if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
         syncTimeoutRef.current = setTimeout(() => {
           setSyncState('idle');
@@ -116,47 +123,20 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
       }
     } catch (err: any) {
       console.warn('Network reconnection sync error:', err);
+      const classified = classifySyncError(err);
       setSyncState('sync_failed');
-      setSyncError(sanitizeSyncError(err));
+      setErrorCategory(classified.category);
+      setSyncError(classified.userMessage);
+      setSyncSummary('Connection restored, but changes could not be synchronized.');
     } finally {
       setIsSyncing(false);
     }
   }, [user?.id, refreshQueueCount]);
 
-  // Rotate to next quote immediately and reset 5s timer
+  // Manually rotate to next tip on explicit user button click (guaranteed non-repeating)
   const nextQuote = useCallback(() => {
-    setCurrentQuote((prev) => getRandomOfflineQuote(prev.id, currentPageRef.current));
-    setQuoteSecondsLeft(QUOTE_INTERVAL_SECONDS);
+    setCurrentQuote((prev) => getRandomOfflineQuote(prev?.id, currentPageRef.current));
   }, []);
-
-  // Continuous 5-second quote rotation timer while offline
-  useEffect(() => {
-    if (!isOnline && syncState === 'offline') {
-      setQuoteSecondsLeft(QUOTE_INTERVAL_SECONDS);
-      
-      const interval = setInterval(() => {
-        setQuoteSecondsLeft((prev) => {
-          if (prev <= 1) {
-            setCurrentQuote((current) => getRandomOfflineQuote(current.id, currentPageRef.current));
-            return QUOTE_INTERVAL_SECONDS;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      quoteTimerRef.current = interval;
-
-      return () => {
-        clearInterval(interval);
-        quoteTimerRef.current = null;
-      };
-    } else {
-      if (quoteTimerRef.current) {
-        clearInterval(quoteTimerRef.current);
-        quoteTimerRef.current = null;
-      }
-    }
-  }, [isOnline, syncState]);
 
   // Monitor network online / offline events
   useEffect(() => {
@@ -170,7 +150,7 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
           showToast('Connection Restored', 'Reconnecting to CareerPilot...', 'info');
         }
 
-        // Brief reconnecting delay, then actual sync
+        // Reconnection transition, then actual sync
         setTimeout(() => {
           triggerSync();
         }, 1200);
@@ -185,7 +165,8 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
       setIsDismissed(false);
       wasOfflineRef.current = true;
       setSyncState('offline');
-      nextQuote();
+      // Show fresh tip when panel opens on offline transition
+      setCurrentQuote((prev) => getRandomOfflineQuote(prev?.id, currentPageRef.current));
       refreshQueueCount();
       if (showToast) {
         showToast('Offline Mode Active', 'Your CareerPilot data is safe. Changes will be saved on this device.', 'warning');
@@ -204,9 +185,8 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      if (quoteTimerRef.current) clearInterval(quoteTimerRef.current);
     };
-  }, [triggerSync, nextQuote, refreshQueueCount, showToast]);
+  }, [triggerSync, refreshQueueCount, showToast]);
 
   // Refresh pending queue periodically
   useEffect(() => {
@@ -220,9 +200,9 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
     pendingQueueCount,
     isSyncing,
     syncError,
+    syncSummary,
+    errorCategory,
     isDismissed,
-    quoteSecondsLeft,
-    totalQuoteIntervalSeconds: QUOTE_INTERVAL_SECONDS,
     setIsDismissed,
     triggerSync,
     nextQuote,

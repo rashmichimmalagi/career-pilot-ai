@@ -49,7 +49,7 @@ import {
 import { resumeService } from '../../services/resumeService';
 import { exportResumeToPdf } from '../../utils/pdfExport';
 import { exportResumeToDocx } from '../../utils/docxExport';
-import { openResumePrintPage } from '../../utils/resumePrint';
+import { openResumePrintPage, printEditedResume } from '../../utils/resumePrint';
 
 interface ResumeBuilderFlowProps {
   onComplete: (resumeItem: ResumeVersionItem) => void;
@@ -183,7 +183,7 @@ export const ResumeBuilderFlow: React.FC<ResumeBuilderFlowProps> = ({
 
   // Compute draft structured resume for print preview
   const draftStructuredData: StructuredResumeData = {
-    fullName: formData.personalInfo.fullName || 'Candidate Name',
+    fullName: formData.personalInfo.fullName || profile?.full_name || (user?.user_metadata?.full_name as string) || '',
     title: formData.careerGoal.targetRole || 'Software Engineer',
     contactInfo: {
       email: formData.personalInfo.email,
@@ -2119,7 +2119,7 @@ export const ResumeBuilderFlow: React.FC<ResumeBuilderFlowProps> = ({
                   Candidate & Target Role
                 </span>
                 <p className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
-                  {formData.personalInfo.fullName || 'Candidate'}
+                  {formData.personalInfo.fullName || profile?.full_name || 'Resume'}
                 </p>
                 <p className="text-xs text-indigo-600 dark:text-indigo-400 font-mono">
                   {formData.careerGoal.targetRole}
@@ -2178,20 +2178,10 @@ export const ResumeBuilderFlow: React.FC<ResumeBuilderFlowProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const draftResumeItem: ResumeVersionItem = {
-                      id: 'draft_builder',
-                      userId: effectiveUserId,
-                      fileName: `${formData.personalInfo.fullName || 'Resume'}_Draft.pdf`,
-                      version: 1,
-                      versionLabel: 'Draft',
-                      isCurrent: true,
-                      createdAt: new Date().toISOString(),
-                      updatedAt: new Date().toISOString(),
-                      targetRole: formData.careerGoal.targetRole,
-                      structuredData: draftStructuredData,
-                      resumeText: '',
-                    };
-                    openResumePrintPage(draftResumeItem);
+                    printEditedResume(
+                      draftStructuredData,
+                      `${formData.personalInfo.fullName || 'Resume'}_Draft.pdf`
+                    );
                   }}
                   className="px-4 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
                   title="Print this resume draft"

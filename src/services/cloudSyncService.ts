@@ -4,6 +4,8 @@ import { MockInterviewReport } from '../types/interview';
 import { PlacementTestSession } from '../types/placement';
 import { StudentTargetCompany } from '../types/companyPrep';
 import { DailyRoadmapTask } from '../types/roadmap';
+import { StructuredSyncError } from '../types/sync';
+import { classifySyncError, recordSyncAuditLog } from './syncAuditService';
 
 export interface LocalHarvestSummary {
   resumes: ResumeVersionItem[];
@@ -40,6 +42,7 @@ export interface CloudSyncResult {
     placementSessions: number;
   };
   errors: string[];
+  structuredErrors?: StructuredSyncError[];
   lastSyncedAt: string;
 }
 
@@ -633,15 +636,21 @@ export const cloudSyncService = {
             user_id: effectiveUserId,
             category: sess.category || 'aptitude',
             subject: sess.subject || 'Quantitative Aptitude',
+            topic: sess.topic || sess.subject || 'General',
             difficulty: sess.difficulty || 'Medium',
             score: typeof sess.score === 'number' ? sess.score : 0,
             accuracy: typeof sess.accuracy === 'number' ? sess.accuracy : 0,
             total_questions: typeof sess.total_questions === 'number' ? sess.total_questions : (sess as any).totalQuestions || 10,
-            correct_answers: typeof sess.correct_answers === 'number' ? sess.correct_answers : (sess as any).correctAnswers || 0,
-            time_taken_seconds: typeof sess.time_taken_seconds === 'number' ? sess.time_taken_seconds : (sess as any).timeTakenSeconds || 300,
+            correct_count: typeof sess.correct_count === 'number' ? sess.correct_count : ((sess as any).correctCount || (sess as any).correctAnswers || 0),
+            incorrect_count: typeof sess.incorrect_count === 'number' ? sess.incorrect_count : ((sess as any).incorrectCount || (sess as any).incorrectAnswers || 0),
+            skipped_count: typeof sess.skipped_count === 'number' ? sess.skipped_count : ((sess as any).skippedCount || 0),
+            time_spent_seconds: typeof sess.time_spent_seconds === 'number' ? sess.time_spent_seconds : ((sess as any).timeSpentSeconds || (sess as any).timeTakenSeconds || 300),
+            questions: Array.isArray(sess.questions) ? sess.questions : [],
             answers: sess.answers || {},
+            session_data: sess.session_data || sess,
             created_at: sess.created_at || (sess as any).createdAt || new Date().toISOString(),
             completed_at: sess.completed_at || (sess as any).completedAt || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           };
 
           const { error } = await supabase.from('placement_sessions').upsert(payload, { onConflict: 'id' });
@@ -723,6 +732,8 @@ export const cloudSyncService = {
       result.cloudRecordCounts.placementSessions = sessCount.count || 0;
     } catch (_) {}
 
+    result.structuredErrors = result.errors.map((err) => classifySyncError(err));
+
     return result;
   },
 
@@ -759,7 +770,7 @@ export const cloudSyncService = {
         }));
         localStorage.setItem(`careerpilot_resumes_${userId}`, JSON.stringify(formattedResumes));
 
-        const currentResume = formattedResumes.find((r) => r.isCurrent) || formattedResumes[0];
+        const currentResume = formattedResumes.find((r) => r.isCurrent);
         if (currentResume && currentResume.analysisResult) {
           localStorage.setItem(
             `careerpilot_latest_resume_analysis_${userId}`,
@@ -771,7 +782,12 @@ export const cloudSyncService = {
               resumeId: currentResume.id,
             })
           );
+        } else {
+          localStorage.removeItem(`careerpilot_latest_resume_analysis_${userId}`);
         }
+      } else {
+        localStorage.removeItem(`careerpilot_resumes_${userId}`);
+        localStorage.removeItem(`careerpilot_latest_resume_analysis_${userId}`);
       }
 
       // 2. Fetch Coding Submissions

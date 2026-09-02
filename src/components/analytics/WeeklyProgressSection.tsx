@@ -69,77 +69,89 @@ export const WeeklyProgressSection: React.FC<WeeklyProgressSectionProps> = ({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {/* Coding */}
-        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
-            <Code2 className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Coding</span>
-          </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
-            {weekly.codingProblems.currentValue}{' '}
-            <span className="text-xs font-semibold text-slate-400">problems</span>
-          </div>
-          <div>{renderTrendBadge(weekly.codingProblems.trend, weekly.codingProblems.delta)}</div>
+      {!weekly.hasSufficientData ? (
+        <div className="py-8 px-6 rounded-2xl bg-slate-50 dark:bg-slate-800/30 border border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-center space-y-2">
+          <Clock className="w-6 h-6 text-slate-400" />
+          <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">
+            Keep practicing to unlock weekly comparisons.
+          </h4>
+          <p className="text-xs text-slate-500 max-w-md">
+            Complete activities across coding challenges, mock interviews, aptitude tests, or resume updates to track your week-over-week performance trajectory.
+          </p>
         </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {/* Coding */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <Code2 className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Coding</span>
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
+              {weekly.codingProblems.currentValue}{' '}
+              <span className="text-xs font-semibold text-slate-400">problems</span>
+            </div>
+            <div>{renderTrendBadge(weekly.codingProblems.trend, weekly.codingProblems.delta)}</div>
+          </div>
 
-        {/* Aptitude */}
-        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
-            <Brain className="w-3.5 h-3.5 text-cyan-500" />
-            <span>Aptitude</span>
+          {/* Aptitude */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <Brain className="w-3.5 h-3.5 text-cyan-500" />
+              <span>Aptitude</span>
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
+              {weekly.placementQuestions.currentValue}{' '}
+              <span className="text-xs font-semibold text-slate-400">tests</span>
+            </div>
+            <div>{renderTrendBadge(weekly.placementQuestions.trend, weekly.placementQuestions.delta)}</div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
-            {weekly.placementQuestions.currentValue}{' '}
-            <span className="text-xs font-semibold text-slate-400">tests</span>
-          </div>
-          <div>{renderTrendBadge(weekly.placementQuestions.trend, weekly.placementQuestions.delta)}</div>
-        </div>
 
-        {/* Mock Interview */}
-        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
-            <Cpu className="w-3.5 h-3.5 text-purple-500" />
-            <span>Interviews</span>
+          {/* Mock Interview */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <Cpu className="w-3.5 h-3.5 text-purple-500" />
+              <span>Interviews</span>
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
+              {weekly.interviewsCompleted.currentValue}{' '}
+              <span className="text-xs font-semibold text-slate-400">rounds</span>
+            </div>
+            <div>{renderTrendBadge(weekly.interviewsCompleted.trend, weekly.interviewsCompleted.delta)}</div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
-            {weekly.interviewsCompleted.currentValue}{' '}
-            <span className="text-xs font-semibold text-slate-400">rounds</span>
-          </div>
-          <div>{renderTrendBadge(weekly.interviewsCompleted.trend, weekly.interviewsCompleted.delta)}</div>
-        </div>
 
-        {/* Resume Activity */}
-        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
-            <FileText className="w-3.5 h-3.5 text-indigo-500" />
-            <span>Resume Updates</span>
+          {/* Resume Activity */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <FileText className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Resume Updates</span>
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
+              {weekly.resumeActivity.currentValue}{' '}
+              <span className="text-xs font-semibold text-slate-400">versions</span>
+            </div>
+            <div>{renderTrendBadge(weekly.resumeActivity.trend, weekly.resumeActivity.delta)}</div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
-            {weekly.resumeActivity.currentValue}{' '}
-            <span className="text-xs font-semibold text-slate-400">versions</span>
-          </div>
-          <div>{renderTrendBadge(weekly.resumeActivity.trend, weekly.resumeActivity.delta)}</div>
-        </div>
 
-        {/* Career Readiness Delta */}
-        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
-            <TrendingUp className="w-3.5 h-3.5 text-amber-500" />
-            <span>Readiness Delta</span>
+          {/* Career Readiness Delta */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <TrendingUp className="w-3.5 h-3.5 text-amber-500" />
+              <span>Readiness Delta</span>
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
+              {weekly.overallReadinessDelta !== null ? (
+                <span className={weekly.overallReadinessDelta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                  {weekly.overallReadinessDelta >= 0 ? `+${weekly.overallReadinessDelta}` : weekly.overallReadinessDelta} pts
+                </span>
+              ) : (
+                <span className="text-slate-400 text-sm font-bold">Stable</span>
+              )}
+            </div>
+            <div className="text-[10px] text-slate-400">{weekly.comparisonNote}</div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
-            {weekly.overallReadinessDelta !== null ? (
-              <span className={weekly.overallReadinessDelta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
-                {weekly.overallReadinessDelta >= 0 ? `+${weekly.overallReadinessDelta}` : weekly.overallReadinessDelta} pts
-              </span>
-            ) : (
-              <span className="text-slate-400 text-sm font-bold">Stable</span>
-            )}
-          </div>
-          <div className="text-[10px] text-slate-400">{weekly.comparisonNote}</div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

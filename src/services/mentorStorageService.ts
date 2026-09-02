@@ -58,7 +58,15 @@ function getCachedConversations(userId: string): MentorConversation[] {
     const raw = localStorage.getItem(`${CONVERSATIONS_CACHE_PREFIX}${userId}`);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((c: MentorConversation) => {
+      if (typeof c.messageCount === 'number') return c;
+      const cachedMsgs = getCachedMessages(userId, c.id);
+      return {
+        ...c,
+        messageCount: cachedMsgs.length,
+      };
+    });
   } catch {
     return [];
   }
@@ -205,7 +213,8 @@ export const mentorStorageService = {
     }
 
     try {
-      const { data, error } = await supabase
+      // 1. Query conversations ordered by updated_at
+      const { data: convData, error: convError } = await supabase
         .from('mentor_conversations')
         .select(`
           id,
@@ -217,9 +226,9 @@ export const mentorStorageService = {
         .eq('user_id', effectiveUserId)
         .order('updated_at', { ascending: false });
 
-      if (error) {
-        if (!isTableMissingError(error)) {
-          console.warn('[mentorStorageService] Supabase fetchConversations query notice:', error.message);
+      if (convError) {
+        if (!isTableMissingError(convError)) {
+          console.warn('[mentorStorageService] Supabase fetchConversations query notice:', convError.message);
         }
 
         // Fallback: load from profile_data backup
@@ -238,22 +247,84 @@ export const mentorStorageService = {
           }
 
           if (Array.isArray(metaObj.mentor_conversations) && metaObj.mentor_conversations.length > 0) {
-            setCachedConversations(effectiveUserId, metaObj.mentor_conversations);
-            return metaObj.mentor_conversations;
+            const enrichedFromProfile: MentorConversation[] = metaObj.mentor_conversations.map((c: any) => {
+              const msgs = metaObj.mentor_messages_by_conv?.[c.id];
+              const count = Array.isArray(msgs) ? msgs.length : (c.messageCount || 0);
+              return {
+                ...c,
+                messageCount: count,
+              };
+            });
+            setCachedConversations(effectiveUserId, enrichedFromProfile);
+            return enrichedFromProfile;
           }
         } catch (_) {}
 
         return getCachedConversations(targetUserId);
       }
 
-      if (Array.isArray(data)) {
-        const convs: MentorConversation[] = data.map((row) => ({
-          id: row.id,
-          userId: row.user_id,
-          title: row.title || 'Career Guidance Chat',
-          createdAt: row.created_at,
-          updatedAt: row.updated_at || row.created_at,
-        }));
+      if (Array.isArray(convData)) {
+        // 2. Fetch message counts grouped by conversation for this user in a single efficient query
+        const countMap: Record<string, number> = {};
+        const convIds = convData.map((c) => c.id).filter(Boolean);
+
+        if (convIds.length > 0) {
+          try {
+            const { data: msgRows, error: msgError } = await supabase
+              .from('mentor_messages')
+              .select('conversation_id')
+              .in('conversation_id', convIds);
+
+            if (!msgError && Array.isArray(msgRows)) {
+              for (const m of msgRows) {
+                if (m.conversation_id) {
+                  countMap[m.conversation_id] = (countMap[m.conversation_id] || 0) + 1;
+                }
+              }
+            } else if (msgError && isTableMissingError(msgError)) {
+              // If mentor_messages table missing, check profile_data
+              try {
+                const { data: profileRow } = await supabase
+                  .from('profiles')
+                  .select('profile_data, career_goal')
+                  .eq('id', effectiveUserId)
+                  .maybeSingle();
+                let metaObj: any = (profileRow?.profile_data as Record<string, any>) || {};
+                if (profileRow?.career_goal && profileRow.career_goal.startsWith('__CP_DATA__')) {
+                  metaObj = { ...metaObj, ...JSON.parse(profileRow.career_goal.replace(/^__CP_DATA__/, '')) };
+                }
+                const byConv = metaObj.mentor_messages_by_conv || {};
+                for (const [cid, msgs] of Object.entries(byConv)) {
+                  if (Array.isArray(msgs)) {
+                    countMap[cid] = msgs.length;
+                  }
+                }
+              } catch (_) {}
+            }
+          } catch (msgCountErr) {
+            console.warn('[mentorStorageService] Notice calculating message counts:', msgCountErr);
+          }
+        }
+
+        const convs: MentorConversation[] = convData.map((row) => {
+          let count = countMap[row.id];
+          if (typeof count !== 'number' || count === 0) {
+            const localCached = getCachedMessages(effectiveUserId, row.id);
+            if (localCached && localCached.length > 0) {
+              count = localCached.length;
+            } else {
+              count = countMap[row.id] || 0;
+            }
+          }
+          return {
+            id: row.id,
+            userId: row.user_id,
+            title: row.title || 'Career Guidance Chat',
+            createdAt: row.created_at,
+            updatedAt: row.updated_at || row.created_at,
+            messageCount: count,
+          };
+        });
 
         setCachedConversations(effectiveUserId, convs);
         return convs;
@@ -401,13 +472,26 @@ export const mentorStorageService = {
     const targetUserId = effectiveUserId || userId || 'guest';
     const now = message.timestamp || new Date().toISOString();
 
-    // 1. Update local cache immediately with optimistic syncStatus
+    // 1. Update local messages cache immediately with optimistic syncStatus
     const currentCached = getCachedMessages(targetUserId, conversationId);
     const msgExists = currentCached.some((m) => m.id === message.id);
     const updatedMessages = msgExists
       ? currentCached.map((m) => (m.id === message.id ? message : m))
       : [...currentCached, message];
     setCachedMessages(targetUserId, conversationId, updatedMessages);
+
+    // Also update conversation in cache with incremented messageCount and latest updatedAt
+    const cachedConvs = getCachedConversations(targetUserId);
+    const convIdx = cachedConvs.findIndex((c) => c.id === conversationId);
+    if (convIdx >= 0) {
+      const updatedConvs = [...cachedConvs];
+      updatedConvs[convIdx] = {
+        ...updatedConvs[convIdx],
+        updatedAt: now,
+        messageCount: updatedMessages.length,
+      };
+      setCachedConversations(targetUserId, updatedConvs);
+    }
 
     // 2. Persist to Supabase if authenticated and online
     if (effectiveUserId && isSupabaseConfigured() && typeof navigator !== 'undefined' && navigator.onLine) {
@@ -634,6 +718,14 @@ export const mentorStorageService = {
     }
 
     return { success: true };
+  },
+
+  getCachedConversations(userId: string = 'guest'): MentorConversation[] {
+    return getCachedConversations(userId);
+  },
+
+  getCachedMessages(userId: string = 'guest', conversationId: string): MentorMessage[] {
+    return getCachedMessages(userId, conversationId);
   },
 };
 

@@ -18,7 +18,7 @@ import { StructuredResumeData, ImprovedResumeResponse, ResumeVersionItem } from 
 import { exportResumeToDocx } from '../../utils/docxExport';
 import { exportResumeToPdf } from '../../utils/pdfExport';
 import { useAuth } from '../../context/AuthContext';
-import { openResumePrintPage } from '../../utils/resumePrint';
+import { openResumePrintPage, printEditedResume } from '../../utils/resumePrint';
 
 interface ResumePreviewEditorProps {
   improvedData: ImprovedResumeResponse;
@@ -301,23 +301,13 @@ export const ResumePreviewEditor: React.FC<ResumePreviewEditorProps> = ({
           <button
             type="button"
             onClick={() => {
-              const draftItem: ResumeVersionItem = {
-                id: 'improved_preview',
-                userId: 'user',
-                fileName: `${structured.fullName || 'Resume'}.pdf`,
-                version: 1,
-                versionLabel: 'Improved Version',
-                isCurrent: true,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                targetRole: structured.title || 'Software Developer',
-                structuredData: structured,
-                resumeText: '',
-              };
-              openResumePrintPage(draftItem);
+              printEditedResume(
+                structured,
+                `${(structured.fullName || 'Resume').replace(/[^a-z0-9]/gi, '_')}.pdf`
+              );
             }}
             className="px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-500/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-            title="Print preview and print this resume"
+            title="Print this resume"
           >
             <Printer className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
             <span>Print</span>
@@ -384,7 +374,7 @@ export const ResumePreviewEditor: React.FC<ResumePreviewEditorProps> = ({
               />
             ) : (
               <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight font-sans">
-                {structured.fullName || 'Candidate Name'}
+                {structured.fullName || ''}
               </h1>
             )}
 

@@ -19,11 +19,10 @@ export const ResumePrintPage: React.FC<ResumePrintPageProps> = ({
     if (!resumeId) return null;
     try {
       const activeStr = sessionStorage.getItem(`careerpilot_print_resume_${resumeId}`) ||
-        sessionStorage.getItem('careerpilot_active_print_resume') ||
         localStorage.getItem(`careerpilot_print_resume_${resumeId}`);
       if (activeStr) {
         const parsed = JSON.parse(activeStr);
-        if (parsed && (parsed.id === resumeId || !parsed.id)) {
+        if (parsed && parsed.id === resumeId) {
           return parsed;
         }
       }
@@ -62,11 +61,10 @@ export const ResumePrintPage: React.FC<ResumePrintPageProps> = ({
       try {
         const cachedStr =
           sessionStorage.getItem(`careerpilot_print_resume_${resumeId}`) ||
-          sessionStorage.getItem('careerpilot_active_print_resume') ||
           localStorage.getItem(`careerpilot_print_resume_${resumeId}`);
         if (cachedStr) {
           const cached = JSON.parse(cachedStr);
-          if (cached) {
+          if (cached && cached.id === resumeId) {
             if (isMounted) {
               setResume(cached);
               setIsLoadingResume(false);
@@ -230,7 +228,7 @@ export const ResumePrintPage: React.FC<ResumePrintPageProps> = ({
   }
 
   const {
-    fullName = 'Candidate Name',
+    fullName = resume.fileName?.replace(/\.[^/.]+$/, '') || resume.versionLabel || 'Resume',
     title,
     contactInfo = {},
     summary,

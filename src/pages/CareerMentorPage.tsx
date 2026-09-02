@@ -262,6 +262,17 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
 
+    // Update conversation messageCount in local conversations state
+    if (currentConvId) {
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === currentConvId
+            ? { ...c, updatedAt: userMessage.timestamp, messageCount: updatedMessages.length }
+            : c
+        )
+      );
+    }
+
     // Asynchronously persist user message to Supabase
     if (currentConvId) {
       saveMentorMessage(currentConvId, userMessage, studentId).then((res) => {
@@ -306,6 +317,17 @@ export const CareerMentorPage: React.FC<CareerMentorPageProps> = ({ onNavigate }
 
       const finalMessages = [...updatedMessages, mentorMessage];
       setMessages(finalMessages);
+
+      // Update conversation messageCount in local conversations state
+      if (currentConvId) {
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === currentConvId
+              ? { ...c, updatedAt: mentorMessage.timestamp, messageCount: finalMessages.length }
+              : c
+          )
+        );
+      }
 
       // Asynchronously persist mentor response to Supabase
       if (currentConvId) {

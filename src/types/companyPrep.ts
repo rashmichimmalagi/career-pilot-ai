@@ -164,6 +164,51 @@ export interface CompanyReadinessAnalysis {
   improvingAreas: ImprovingAreaItem[];
   weakAreas: WeakAreaItem[];
   priorities: PreparationPriorityItem[];
+  skillGap?: CompanySkillGapData;
+  checklist?: CompanyChecklistItem[];
+  jobMatch?: CompanyJobMatchInfo | null;
   formulaExplanation: string;
   analyzedAt: string;
+}
+
+export interface CompanySkillGapItem {
+  skill: string;
+  category: 'DSA' | 'Core CS' | 'Languages & Frameworks' | 'System Design' | 'Soft Skills / Behavioral' | 'Domain';
+  status: 'possessed' | 'needs_attention';
+  evidence: string;
+  proficiencyLevel?: 'Proficient' | 'Intermediate' | 'Needs Practice' | 'Unverified';
+  actionRoute?: string;
+  actionText?: string;
+  actionParams?: Record<string, any>;
+}
+
+export interface CompanySkillGapData {
+  youHave: CompanySkillGapItem[];
+  needsAttention: CompanySkillGapItem[];
+  matchPercentage: number;
+  totalRequired: number;
+}
+
+export interface CompanyChecklistItem {
+  id: string;
+  title: string;
+  description: string;
+  category: 'Resume' | 'Skills' | 'Coding' | 'Technical Interview' | 'Behavioral Interview' | 'Weak Areas' | 'Review';
+  isAutoVerified: boolean;
+  isCompleted: boolean;
+  verifiedEvidence?: string;
+  actionRoute: string;
+  actionText: string;
+  actionParams?: Record<string, any>;
+}
+
+export interface CompanyJobMatchInfo {
+  id: string;
+  matchScore: number;
+  matchingSkills: string[];
+  missingSkills: string[];
+  keywordGaps: string[];
+  recommendations: string[];
+  analyzedAt: string;
+  resumeName?: string;
 }

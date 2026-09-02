@@ -9,6 +9,7 @@ import {
   Calendar,
   Award,
   RefreshCw,
+  History,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { careerIntelligenceService } from '../services/careerIntelligenceService';
@@ -22,6 +23,7 @@ import { AptitudeAnalyticsSection } from '../components/analytics/AptitudeAnalyt
 import { InterviewAnalyticsSection } from '../components/analytics/InterviewAnalyticsSection';
 import { ResumeAnalyticsSection } from '../components/analytics/ResumeAnalyticsSection';
 import { RoadmapAnalyticsSection } from '../components/analytics/RoadmapAnalyticsSection';
+import { ActivityTimelineSection } from '../components/analytics/ActivityTimelineSection';
 import { TimeRangeFilterBar } from '../components/analytics/TimeRangeFilterBar';
 import { ReadinessDetailedModal } from '../components/readiness/ReadinessDetailedModal';
 import { WeeklyReportModal } from '../components/intelligence/WeeklyReportModal';
@@ -30,7 +32,7 @@ interface ProgressAnalyticsPageProps {
   onNavigate: (route: string) => void;
 }
 
-type PillarTab = 'all' | 'coding' | 'placement' | 'interview' | 'resume' | 'roadmap';
+type PillarTab = 'all' | 'coding' | 'placement' | 'interview' | 'resume' | 'roadmap' | 'timeline';
 
 export const ProgressAnalyticsPage: React.FC<ProgressAnalyticsPageProps> = ({ onNavigate }) => {
   const { user, profile } = useAuth();
@@ -183,6 +185,7 @@ export const ProgressAnalyticsPage: React.FC<ProgressAnalyticsPageProps> = ({ on
             { id: 'interview', label: 'Mock Interviews', icon: Cpu },
             { id: 'resume', label: 'Resume & ATS', icon: FileText },
             { id: 'roadmap', label: 'Roadmap Progress', icon: Map },
+            { id: 'timeline', label: 'Activity Timeline', icon: History },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -246,7 +249,15 @@ export const ProgressAnalyticsPage: React.FC<ProgressAnalyticsPageProps> = ({ on
               />
             )}
 
-            {/* 6. Cross-Platform Achievements */}
+            {/* 6. Activity & Preparation Timeline */}
+            {(activeTab === 'all' || activeTab === 'timeline') && (
+              <ActivityTimelineSection
+                activities={analytics.activityTimeline || []}
+                onNavigate={onNavigate}
+              />
+            )}
+
+            {/* 7. Cross-Platform Achievements */}
             {achievements && activeTab === 'all' && (
               <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
                 <div className="flex items-center justify-between">
@@ -334,3 +345,4 @@ export const ProgressAnalyticsPage: React.FC<ProgressAnalyticsPageProps> = ({ on
     </div>
   );
 };
+

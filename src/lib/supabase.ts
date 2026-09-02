@@ -79,6 +79,12 @@ export const signInWithGoogle = async () => {
     );
   }
 
+  // Check if a session already exists before initiating OAuth
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) {
+    return { session, user: session.user };
+  }
+
   const redirectTo = getAuthRedirectUrl();
 
   const { data, error } = await supabase.auth.signInWithOAuth({

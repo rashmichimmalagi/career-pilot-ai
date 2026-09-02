@@ -609,7 +609,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
       } else {
         showToastRef.current(
           'Cloud Sync Pending',
-          newSaved.cloudSyncError || 'Saved locally. Cloud sync pending.',
+          newSaved.cloudSyncError || 'Offline changes saved. Cloud sync pending.',
           'warning'
         );
       }
@@ -647,8 +647,8 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
           showToastRef.current('Question Saved', `"${problem.title}" saved and synced to Supabase cloud.`, 'success');
         } else {
           showToastRef.current(
-            'Saved locally — cloud sync pending',
-            'Question saved locally. You can retry syncing anytime.',
+            'Changes saved on this device — cloud sync pending',
+            'Changes saved on this device. You can retry syncing anytime.',
             'warning',
             {
               label: 'Retry Sync',
@@ -1760,7 +1760,7 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
                           ? 'Persisting to Supabase cloud...'
                           : isCurrentActiveSaved
                           ? currentActiveSavedItem?.cloudSynced === false || currentActiveSavedItem?.persistenceStatus === 'pending'
-                            ? 'Saved locally (Cloud sync pending) - Click to toggle'
+                            ? 'Changes saved on this device (Cloud sync pending) - Click to toggle'
                             : 'Question saved and synced to Supabase'
                           : 'Save question to cloud'
                       }

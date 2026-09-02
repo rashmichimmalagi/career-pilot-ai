@@ -26,6 +26,8 @@ import {
   ProvenStrengthItem,
   ImprovementAreaItem,
   MetricTrendIndicator,
+  JobMatchAnalysis,
+  CareerActivityItem,
 } from '../types/intelligence';
 import { CodingSubmission } from '../types/coding';
 import { MockInterviewReport } from '../types/interview';
@@ -601,11 +603,54 @@ export function computeInterviewProgressAnalytics(
 
 export function computeResumeProgressAnalytics(
   resumes: ResumeVersionItem[] = [],
-  latestAnalysis: { result: ResumeAnalysisResult; targetRole: string; analyzedAt: string } | null = null
+  latestAnalysis: { result: ResumeAnalysisResult; targetRole: string; analyzedAt: string } | null = null,
+  jobMatches: JobMatchAnalysis[] = []
 ): ResumeProgressAnalytics {
   const safeResumes = Array.isArray(resumes) ? resumes.filter(Boolean) : [];
+  const safeMatches = Array.isArray(jobMatches) ? jobMatches.filter(Boolean) : [];
   const versionsCount = Math.max(safeResumes.length, latestAnalysis ? 1 : 0);
-  const isAssessed = versionsCount > 0 || !!latestAnalysis?.result;
+  const isAssessed = versionsCount > 0 || !!latestAnalysis?.result || safeMatches.length > 0;
+
+  // Aggregate missing skills across resumes and job matches
+  const missingSkillsCountMap: Record<string, number> = {};
+  const addMissingSkill = (skill: string) => {
+    if (!skill || typeof skill !== 'string') return;
+    const clean = skill.trim();
+    if (clean.length > 1) {
+      missingSkillsCountMap[clean] = (missingSkillsCountMap[clean] || 0) + 1;
+    }
+  };
+
+  (latestAnalysis?.result?.missing_skills || []).forEach(addMissingSkill);
+  safeResumes.forEach((r) => {
+    (r.analysisResult?.missing_skills || []).forEach(addMissingSkill);
+  });
+  safeMatches.forEach((jm) => {
+    (jm.missingSkills || []).forEach(addMissingSkill);
+  });
+
+  const mostCommonMissingSkills = Object.entries(missingSkillsCountMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(([skill]) => skill)
+    .slice(0, 8);
+
+  // Aggregate keyword gaps across job matches
+  const keywordGapsMap: Record<string, number> = {};
+  safeMatches.forEach((jm) => {
+    (jm.missingKeywords || []).forEach((kw) => {
+      if (kw && typeof kw === 'string') {
+        const clean = kw.trim();
+        if (clean.length > 1) {
+          keywordGapsMap[clean] = (keywordGapsMap[clean] || 0) + 1;
+        }
+      }
+    });
+  });
+
+  const mostCommonKeywordGaps = Object.entries(keywordGapsMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(([kw]) => kw)
+    .slice(0, 8);
 
   if (!isAssessed) {
     return {
@@ -620,6 +665,10 @@ export function computeResumeProgressAnalytics(
       latestMissingSkills: [],
       latestStrengths: [],
       isAssessed: false,
+      jobMatchesCount: 0,
+      jobMatches: [],
+      mostCommonMissingSkills: [],
+      mostCommonKeywordGaps: [],
     };
   }
 
@@ -635,7 +684,7 @@ export function computeResumeProgressAnalytics(
     latestAnalysis?.result?.ats_score ??
     safeResumes[0]?.analysisResult?.ats_score ??
     safeResumes[0]?.analysisResult?.overall_score ??
-    0;
+    (safeMatches.length > 0 ? safeMatches[0].matchScore : 0);
 
   const previousResume = chronological.length > 1 ? chronological[chronological.length - 2] : null;
   const previousAtsScore = previousResume
@@ -655,6 +704,8 @@ export function computeResumeProgressAnalytics(
     ? formatDisplayDate(latestAnalysis.analyzedAt)
     : safeResumes[0]?.createdAt || (safeResumes[0] as any)?.uploadedAt
     ? formatDisplayDate(safeResumes[0].createdAt || (safeResumes[0] as any)?.uploadedAt)
+    : safeMatches[0]?.analyzedAt
+    ? formatDisplayDate(safeMatches[0].analyzedAt)
     : null;
 
   return {
@@ -665,10 +716,14 @@ export function computeResumeProgressAnalytics(
     versionsList: safeResumes,
     scoreImprovementDelta,
     latestAnalysisDate,
-    targetRole: latestAnalysis?.targetRole || 'Software Engineer',
-    latestMissingSkills: latestAnalysis?.result?.missing_skills || [],
+    targetRole: latestAnalysis?.targetRole || safeMatches[0]?.jobTitle || 'Software Engineer',
+    latestMissingSkills: latestAnalysis?.result?.missing_skills || mostCommonMissingSkills,
     latestStrengths: latestAnalysis?.result?.strengths || [],
     isAssessed: true,
+    jobMatchesCount: safeMatches.length,
+    jobMatches: safeMatches.slice(0, 10),
+    mostCommonMissingSkills,
+    mostCommonKeywordGaps,
   };
 }
 
@@ -1122,7 +1177,150 @@ export function computeTrendIndicators(params: {
 }
 
 // ============================================================================
-// 10. UNIFIED CALCULATION ENTRY POINT
+// 10. AUTHENTIC ACTIVITY TIMELINE GENERATOR
+// ============================================================================
+
+export function computeActivityTimeline(params: {
+  submissions?: CodingSubmission[];
+  placementSessions?: PlacementTestSession[];
+  mockInterviews?: MockInterviewReport[];
+  resumes?: ResumeVersionItem[];
+  latestResumeAnalysis?: { result: ResumeAnalysisResult; targetRole: string; analyzedAt: string } | null;
+  jobMatches?: JobMatchAnalysis[];
+  mentorConversations?: Array<{ id: string; title: string; createdAt: string; updatedAt?: string }>;
+  roadmapTasks?: DailyRoadmapTask[];
+  completedRoadmapIds?: string[];
+}): CareerActivityItem[] {
+  const items: CareerActivityItem[] = [];
+
+  // Coding Submissions
+  (params.submissions || []).forEach((s) => {
+    const isAccepted = s.status === 'accepted' || (s as any).status === 'pass' || (s as any).passed;
+    const dateStr = s.created_at || (s as any).createdAt;
+    if (!dateStr) return;
+    items.push({
+      id: `coding_${s.id || s.problem_id}_${dateStr}`,
+      type: 'coding',
+      title: isAccepted ? `Solved Problem: ${s.problem_title || 'DSA Challenge'}` : `Attempted: ${s.problem_title || 'DSA Challenge'}`,
+      description: `${s.difficulty || 'Medium'} • ${s.topic || 'Algorithms'} • ${s.language || 'Python'}`,
+      timestamp: dateStr,
+      displayDate: formatDisplayDate(dateStr),
+      score: isAccepted ? 'Solved' : 'Attempted',
+      statusBadge: isAccepted ? 'Solved' : 'Attempted',
+      badgeColor: isAccepted ? 'emerald' : 'slate',
+      actionRoute: 'coding',
+      actionText: 'Open Problem',
+    });
+  });
+
+  // Mock Interviews
+  (params.mockInterviews || []).forEach((m) => {
+    const dateStr = m.completedAt || (m as any).completed_at || (m as any).createdAt;
+    if (!dateStr) return;
+    const score = (m as any).overall_score ?? m.overallScore ?? 0;
+    const isHr = (m as any).interview_type === 'hr' || m.subject?.toLowerCase().includes('hr');
+    items.push({
+      id: `interview_${m.id}_${dateStr}`,
+      type: 'interview',
+      title: isHr ? `HR Behavioral Interview: ${m.topic || 'Culture Alignment'}` : `Technical Mock Interview: ${m.subject || m.topic || 'System Design & Algorithms'}`,
+      description: `Evaluation score: ${score}/100 • Verdict: ${(m as any).verdict || 'Completed'}`,
+      timestamp: dateStr,
+      displayDate: formatDisplayDate(dateStr),
+      score: `${score}/100`,
+      statusBadge: score >= 75 ? 'Strong' : 'Completed',
+      badgeColor: score >= 75 ? 'emerald' : 'purple',
+      actionRoute: 'interview',
+      actionText: 'View Report',
+    });
+  });
+
+  // Placement Tests
+  (params.placementSessions || []).forEach((p) => {
+    const dateStr = p.completedAt || p.createdAt;
+    if (!dateStr) return;
+    const score = p.score || p.accuracy || 0;
+    items.push({
+      id: `placement_${p.id}_${dateStr}`,
+      type: 'placement',
+      title: `Aptitude Assessment: ${p.subject || p.topic || 'Quantitative Reasoning'}`,
+      description: `Answered ${p.totalQuestions || 0} questions with ${p.accuracy || score}% accuracy`,
+      timestamp: dateStr,
+      displayDate: formatDisplayDate(dateStr),
+      score: `${score}%`,
+      statusBadge: `${score}% Acc`,
+      badgeColor: score >= 80 ? 'emerald' : 'cyan',
+      actionRoute: 'placement',
+      actionText: 'Practice Test',
+    });
+  });
+
+  // Resumes
+  (params.resumes || []).forEach((r, idx) => {
+    const dateStr = r.createdAt || (r as any).uploadedAt;
+    if (!dateStr) return;
+    const score = r.analysisResult?.ats_score || r.analysisResult?.overall_score || 0;
+    items.push({
+      id: `resume_${r.id || idx}_${dateStr}`,
+      type: 'resume',
+      title: `Resume Version Saved (${r.fileName || `v${idx + 1}`})`,
+      description: score > 0 ? `ATS Match Score: ${score}/100 for target role` : 'Resume profile revision uploaded',
+      timestamp: dateStr,
+      displayDate: formatDisplayDate(dateStr),
+      score: score > 0 ? `${score}/100` : undefined,
+      statusBadge: 'Uploaded',
+      badgeColor: 'indigo',
+      actionRoute: 'resume-analyzer',
+      actionText: 'Audit Resume',
+    });
+  });
+
+  // Job Matches
+  (params.jobMatches || []).forEach((jm) => {
+    const dateStr = jm.analyzedAt || (jm as any).created_at;
+    if (!dateStr) return;
+    items.push({
+      id: `jobmatch_${jm.id}_${dateStr}`,
+      type: 'resume',
+      title: `Job Description Match: ${jm.jobTitle}${jm.companyName ? ` at ${jm.companyName}` : ''}`,
+      description: `Match score: ${jm.matchScore}% • ${jm.matchingSkills?.length || 0} matching skills • ${jm.missingSkills?.length || 0} missing skills`,
+      timestamp: dateStr,
+      displayDate: formatDisplayDate(dateStr),
+      score: `${jm.matchScore}%`,
+      statusBadge: `${jm.matchScore}% Match`,
+      badgeColor: jm.matchScore >= 75 ? 'emerald' : 'amber',
+      actionRoute: 'resume-analyzer',
+      actionText: 'Inspect Match',
+    });
+  });
+
+  // Mentor sessions
+  (params.mentorConversations || []).forEach((conv) => {
+    const dateStr = conv.updatedAt || conv.createdAt;
+    if (!dateStr) return;
+    items.push({
+      id: `mentor_${conv.id}_${dateStr}`,
+      type: 'mentor',
+      title: `AI Mentor Session: ${conv.title || 'Guidance Session'}`,
+      description: 'Personalized career strategy, interview tips, and feedback discussed with AI Mentor',
+      timestamp: dateStr,
+      displayDate: formatDisplayDate(dateStr),
+      statusBadge: 'Active',
+      badgeColor: 'purple',
+      actionRoute: 'mentor',
+      actionText: 'Open Mentor',
+    });
+  });
+
+  // Sort chronologically descending
+  return items.sort((a, b) => {
+    const tA = new Date(a.timestamp).getTime();
+    const tB = new Date(b.timestamp).getTime();
+    return tB - tA;
+  });
+}
+
+// ============================================================================
+// 11. UNIFIED CALCULATION ENTRY POINT
 // ============================================================================
 
 export function calculateProgressAnalytics(params: {
@@ -1133,6 +1331,8 @@ export function calculateProgressAnalytics(params: {
   mockInterviews?: MockInterviewReport[];
   resumes?: ResumeVersionItem[];
   latestResumeAnalysis?: { result: ResumeAnalysisResult; targetRole: string; analyzedAt: string } | null;
+  jobMatches?: JobMatchAnalysis[];
+  mentorConversations?: Array<{ id: string; title: string; createdAt: string; updatedAt?: string }>;
   roadmapTasks?: DailyRoadmapTask[];
   completedRoadmapIds?: string[];
   studyPlans?: StudyPlanData[];
@@ -1145,7 +1345,7 @@ export function calculateProgressAnalytics(params: {
   const coding = computeCodingProgressAnalytics(params.submissions, timeRange, studentId);
   const placement = computePlacementProgressAnalytics(params.placementSessions, timeRange);
   const interview = computeInterviewProgressAnalytics(params.mockInterviews, timeRange);
-  const resume = computeResumeProgressAnalytics(params.resumes, params.latestResumeAnalysis);
+  const resume = computeResumeProgressAnalytics(params.resumes, params.latestResumeAnalysis, params.jobMatches || []);
   const roadmap = computeRoadmapProgressAnalytics(params.roadmapTasks, params.completedRoadmapIds);
   const studyPlanner = computeStudyPlannerProgressAnalytics(params.studyPlans, params.dailyStudyTime);
 
@@ -1186,6 +1386,18 @@ export function calculateProgressAnalytics(params: {
     weekly: weeklyProgress,
   });
 
+  const activityTimeline = computeActivityTimeline({
+    submissions: params.submissions,
+    placementSessions: params.placementSessions,
+    mockInterviews: params.mockInterviews,
+    resumes: params.resumes,
+    latestResumeAnalysis: params.latestResumeAnalysis,
+    jobMatches: params.jobMatches,
+    mentorConversations: params.mentorConversations,
+    roadmapTasks: params.roadmapTasks,
+    completedRoadmapIds: params.completedRoadmapIds,
+  });
+
   const hasEnoughDataForCharts =
     coding.totalSubmissions >= 2 ||
     placement.totalAttempts >= 1 ||
@@ -1208,6 +1420,7 @@ export function calculateProgressAnalytics(params: {
     provenStrengths,
     areasToImprove,
     trendIndicators,
+    activityTimeline,
     calculatedAt: new Date().toISOString(),
   };
 }

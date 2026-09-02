@@ -582,20 +582,7 @@ export const notificationService = {
       if (companyNotif) createdList.push(companyNotif);
     }
 
-    // Trigger 8: Recently Unlocked Achievement
-    if (ctx.recentlyUnlockedBadgeTitle) {
-      const achNotif = await this.createNotification(effectiveUserId, {
-        type: 'achievement_unlocked',
-        category: 'ACHIEVEMENT',
-        priority: 'high',
-        title: '🏆 Achievement Unlocked!',
-        message: `Congratulations! You unlocked the "${ctx.recentlyUnlockedBadgeTitle}" achievement badge.`,
-        action_url: '/coding?tab=achievements',
-        action_label: 'View Achievements',
-        dedup_key: `achievement_${ctx.recentlyUnlockedBadgeTitle.replace(/\s+/g, '_')}`,
-      });
-      if (achNotif) createdList.push(achNotif);
-    }
+    // Note: Achievement notifications are handled exclusively via checkNewlyUnlockedAchievements on real status transitions (LOCKED/IN_PROGRESS -> UNLOCKED), avoiding false/duplicate alerts during polling or intelligence evaluation.
 
     return createdList;
   },

@@ -19,6 +19,10 @@ import { PreparationProgressBar } from '../components/companyPrep/PreparationPro
 import { WeakAndStrongAreas } from '../components/companyPrep/WeakAndStrongAreas';
 import { PreparationPlanList } from '../components/companyPrep/PreparationPlanList';
 import { CompanyTargetsList } from '../components/companyPrep/CompanyTargetsList';
+import { CompanySkillGapSection } from '../components/companyPrep/CompanySkillGapSection';
+import { CompanyChecklistSection } from '../components/companyPrep/CompanyChecklistSection';
+import { CompanyJobMatchCard } from '../components/companyPrep/CompanyJobMatchCard';
+import { CompanyPracticeQuestionsCard } from '../components/companyPrep/CompanyPracticeQuestionsCard';
 import {
   getStudentTargets,
   saveStudentTarget,
@@ -395,26 +399,59 @@ export const CompanyPreparationPage: React.FC<CompanyPreparationPageProps> = ({
       {/* 2. Overall Company Readiness Metric Hero Card */}
       <ReadinessScoreCard analysis={analysis} />
 
-      {/* 3. Target Company Overview & Hiring Process */}
+      {/* 3. Company Practice Launchpad (Coding, Mock Technical, HR, Screening) */}
+      <CompanyPracticeQuestionsCard
+        company={analysis.company}
+        targetRole={analysis.targetRole}
+        onNavigateToModule={handleNavigateToModule}
+      />
+
+      {/* 4. Authentic Skill Gap Matrix ("YOU HAVE" vs "NEEDS ATTENTION") */}
+      <CompanySkillGapSection
+        skillGap={analysis.skillGap}
+        companyName={analysis.company.name}
+        targetRole={analysis.targetRole}
+        hasSufficientData={analysis.hasSufficientData}
+        onNavigateToModule={handleNavigateToModule}
+      />
+
+      {/* 5. Company Preparation Checklist with Auto-Verification */}
+      <CompanyChecklistSection
+        checklist={analysis.checklist}
+        companyName={analysis.company.name}
+        studentId={studentId}
+        onNavigateToModule={handleNavigateToModule}
+        onRefresh={handleRefresh}
+      />
+
+      {/* 6. Job Description Match Analysis */}
+      <CompanyJobMatchCard
+        jobMatch={analysis.jobMatch}
+        companyName={analysis.company.name}
+        targetRole={analysis.targetRole}
+        onNavigateToModule={handleNavigateToModule}
+      />
+
+      {/* 7. Target Company Overview & Hiring Process */}
       <CompanyProfileCard
         company={analysis.company}
         targetRole={analysis.targetRole}
       />
 
-      {/* 4. Category-Wise Progress Bars (Resume, Coding, Aptitude, MCQs, Interview) */}
+      {/* 8. Category-Wise Progress Bars (Resume, Coding, Aptitude, MCQs, Interview) */}
       <PreparationProgressBar
         categories={analysis.categories}
         onNavigateToModule={handleNavigateToModule}
       />
 
-      {/* 5. Personalized Preparation Priorities */}
+      {/* 9. Personalized Preparation Priorities */}
       <PreparationPlanList
         priorities={analysis.priorities}
         hasSufficientData={analysis.hasSufficientData}
         onNavigateToModule={handleNavigateToModule}
       />
 
-      {/* 6. Skill Gap Analysis: Strong & Improving Areas */}
+      {/* 10. Strong & Improving Performance Areas */}
       <WeakAndStrongAreas
         strongAreas={analysis.strongAreas}
         improvingAreas={analysis.improvingAreas}
@@ -422,7 +459,7 @@ export const CompanyPreparationPage: React.FC<CompanyPreparationPageProps> = ({
         onNavigateToModule={handleNavigateToModule}
       />
 
-      {/* 7. My Saved Target Companies */}
+      {/* 11. My Saved Target Companies */}
       <CompanyTargetsList
         targets={savedTargets}
         activeTargetId={activeTargetId}

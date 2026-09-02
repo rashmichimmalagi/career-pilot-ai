@@ -17,14 +17,16 @@ export async function exportResumeToDocx(
   const children: Paragraph[] = [];
 
   // 1. Full Name Header
-  children.push(
-    new Paragraph({
-      text: resume.fullName || 'Candidate Name',
-      heading: HeadingLevel.TITLE,
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 100 },
-    })
-  );
+  if (resume.fullName && resume.fullName.trim()) {
+    children.push(
+      new Paragraph({
+        text: resume.fullName.trim(),
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 100 },
+      })
+    );
+  }
 
   // 2. Title & Contact Info
   const contactParts: string[] = [];

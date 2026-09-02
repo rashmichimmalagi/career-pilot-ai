@@ -54,7 +54,7 @@ const ModernTemplate: React.FC<{ data: StructuredResumeData; zoom: number }> = (
       {/* Header */}
       <header className="border-b-2 border-indigo-600 pb-5 mb-6 text-center">
         <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 uppercase">
-          {data.fullName || 'Candidate Name'}
+          {data.fullName || ''}
         </h1>
         {data.title && (
           <p className="text-sm font-semibold text-indigo-600 mt-1 uppercase tracking-wider">
@@ -294,7 +294,7 @@ const ClassicTemplate: React.FC<{ data: StructuredResumeData; zoom: number }> = 
       {/* Header */}
       <header className="border-b border-slate-800 pb-4 mb-5 text-center">
         <h1 className="text-2xl sm:text-3xl font-bold tracking-normal text-slate-900">
-          {data.fullName || 'Candidate Name'}
+          {data.fullName || ''}
         </h1>
         {data.title && (
           <p className="text-sm font-medium text-slate-700 italic mt-0.5 font-sans">
@@ -458,7 +458,7 @@ const MinimalTemplate: React.FC<{ data: StructuredResumeData; zoom: number }> = 
       {/* Header */}
       <header className="mb-6">
         <h1 className="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">
-          <span className="font-bold">{data.fullName?.split(' ')[0] || 'Candidate'}</span>{' '}
+          <span className="font-bold">{data.fullName?.split(' ')[0] || ''}</span>{' '}
           {data.fullName?.split(' ').slice(1).join(' ') || ''}
         </h1>
         {data.title && (
@@ -596,7 +596,7 @@ const ExecutiveTemplate: React.FC<{ data: StructuredResumeData; zoom: number }> 
       {/* Executive Header Banner */}
       <header className="bg-slate-900 text-white p-6 rounded-xl mb-6">
         <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-          {data.fullName || 'Candidate Name'}
+          {data.fullName || ''}
         </h1>
         {data.title && (
           <p className="text-sm font-semibold text-indigo-400 uppercase tracking-widest mt-1">

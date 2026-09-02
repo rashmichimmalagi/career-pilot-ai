@@ -7,6 +7,10 @@ import {
   WeakAreaItem,
   PreparationPriorityItem,
   StudentTargetCompany,
+  CompanySkillGapData,
+  CompanySkillGapItem,
+  CompanyChecklistItem,
+  CompanyJobMatchInfo,
 } from '../types/companyPrep';
 import { codingService } from './codingService';
 import { getPlacementHistory } from './placementStorage';
@@ -14,6 +18,8 @@ import { getStoredDailyTasks, getCompletedItemIds } from './roadmapStorage';
 import { getCompanyProfile } from '../data/companyProfiles';
 import { computeGapStatus } from './gapTrackerService';
 import { getPerformanceAnalyticsSummary } from './analyticsEngine';
+import { fetchJobMatchHistoryResult } from './jobMatchService';
+import { getCompanyChecklistCompleted } from './companyPrepStorage';
 
 /**
  * Deterministic Engine calculating Company Readiness & Authentic Skill Gap Analysis
@@ -26,11 +32,12 @@ export async function calculateCompanyReadiness(
 ): Promise<CompanyReadinessAnalysis> {
   const company = getCompanyProfile(companyName, targetRole);
 
-  // 1. Fetch centralized analytics summary and supporting logs
-  const [summary, codingSubmissions, placementSessions] = await Promise.all([
+  // 1. Fetch centralized analytics summary, job matches, and supporting logs
+  const [summary, codingSubmissions, placementSessions, jobMatchResult] = await Promise.all([
     getPerformanceAnalyticsSummary(studentId),
     codingService.getSubmissions(studentId),
     Promise.resolve(getPlacementHistory(studentId)),
+    fetchJobMatchHistoryResult(studentId),
   ]);
 
   const roadmapTasks = getStoredDailyTasks(studentId) || [];
@@ -1217,6 +1224,292 @@ export async function calculateCompanyReadiness(
     });
   }
 
+  // ================= 11. JOB DESCRIPTION MATCH INTEGRATION =================
+  const allJobMatches = jobMatchResult?.data || [];
+  const matchingJd = allJobMatches.find(
+    (jm) =>
+      (jm.companyName && jm.companyName.toLowerCase().includes(company.name.toLowerCase())) ||
+      (company.name.toLowerCase().includes((jm.companyName || '').toLowerCase())) ||
+      (jm.jobTitle && jm.jobTitle.toLowerCase().includes(targetRole.toLowerCase()))
+  ) || (allJobMatches.length > 0 ? allJobMatches[0] : null);
+
+  const jobMatchInfo: CompanyJobMatchInfo | null = matchingJd
+    ? {
+        id: matchingJd.id,
+        matchScore: matchingJd.matchScore,
+        matchingSkills: matchingJd.matchingSkills || [],
+        missingSkills: matchingJd.missingSkills || [],
+        keywordGaps: matchingJd.missingKeywords || [],
+        recommendations: matchingJd.recommendedImprovements || [],
+        analyzedAt: matchingJd.analyzedAt,
+        resumeName: matchingJd.resumeName,
+      }
+    : null;
+
+  // ================= 12. AUTHENTIC SKILL GAP MATRIX ("YOU HAVE" vs "NEEDS ATTENTION") =================
+  const youHave: CompanySkillGapItem[] = [];
+  const needsAttention: CompanySkillGapItem[] = [];
+
+  const requiredSkillList = company.relevantSkills && company.relevantSkills.length > 0
+    ? company.relevantSkills
+    : [
+        'Data Structures & Algorithms',
+        'Problem Solving',
+        'System Design',
+        'Clean Code',
+        'Database Systems (SQL / DBMS)',
+        'Object-Oriented Design',
+        'Web Architecture',
+        'Behavioral & STAR Communication',
+      ];
+
+  for (const skill of requiredSkillList) {
+    const sLower = skill.toLowerCase();
+    
+    const isDsa = sLower.includes('data structure') || sLower.includes('algorithm') || sLower.includes('dsa') || sLower.includes('array') || sLower.includes('tree') || sLower.includes('graph') || sLower.includes('dynamic programming');
+    const isCoreCs = sLower.includes('dbms') || sLower.includes('database') || sLower.includes('sql') || sLower.includes('os') || sLower.includes('operating') || sLower.includes('network') || sLower.includes('oop');
+    const isBehavioral = sLower.includes('behavioral') || sLower.includes('star') || sLower.includes('communication') || sLower.includes('leadership');
+    const isSystemDesign = sLower.includes('system design') || sLower.includes('architecture') || sLower.includes('scalability') || sLower.includes('microservices');
+
+    if (isDsa) {
+      if (codingAvailable && codingScore >= 60) {
+        youHave.push({
+          skill,
+          category: 'DSA',
+          status: 'possessed',
+          proficiencyLevel: codingScore >= 80 ? 'Proficient' : 'Intermediate',
+          evidence: `Verified with ${uniqueAccepted} solved problems in Coding Arena (${codingAccuracy}% Accuracy)`,
+          actionRoute: 'coding',
+          actionText: 'Practice More',
+          actionParams: { company: company.name, role: targetRole },
+        });
+      } else {
+        needsAttention.push({
+          skill,
+          category: 'DSA',
+          status: 'needs_attention',
+          proficiencyLevel: codingAvailable ? 'Needs Practice' : 'Unverified',
+          evidence: codingAvailable
+            ? `Current accuracy is ${codingAccuracy}% across ${uniqueAccepted} solved problems; ${company.name} requires 70%+ benchmark.`
+            : `0 coding problems solved yet; essential for ${company.name}'s technical assessment rounds.`,
+          actionRoute: 'coding',
+          actionText: 'Solve Problems →',
+          actionParams: {
+            company: company.name,
+            role: targetRole,
+            subject: 'DSA',
+            topic: companyKeyCodingTopics[0] || 'Arrays',
+            auto: true,
+          },
+        });
+      }
+    } else if (isCoreCs) {
+      if (techMcqAvailable && techMcqScore >= 60) {
+        youHave.push({
+          skill,
+          category: 'Core CS',
+          status: 'possessed',
+          proficiencyLevel: techMcqScore >= 80 ? 'Proficient' : 'Intermediate',
+          evidence: `Verified with ${summary.technicalMcq.totalQuestionsSolved} questions in Placement Practice (${summary.technicalMcq.accuracy}% Accuracy)`,
+          actionRoute: 'placement',
+          actionText: 'Practice More',
+          actionParams: { category: 'Technical', subject: 'DBMS' },
+        });
+      } else {
+        needsAttention.push({
+          skill,
+          category: 'Core CS',
+          status: 'needs_attention',
+          proficiencyLevel: techMcqAvailable ? 'Needs Practice' : 'Unverified',
+          evidence: techMcqAvailable
+            ? `Technical MCQ accuracy is ${summary.technicalMcq.accuracy}%; revision needed for ${company.name}'s screening.`
+            : `No core CS assessments completed yet. Practice OS, DBMS, and Networking questions.`,
+          actionRoute: 'placement',
+          actionText: 'Practice Core CS →',
+          actionParams: { category: 'Technical', subject: 'DBMS', company: company.name },
+        });
+      }
+    } else if (isBehavioral) {
+      if (hrAvailable && hrAvgScore >= 70) {
+        youHave.push({
+          skill,
+          category: 'Soft Skills / Behavioral',
+          status: 'possessed',
+          proficiencyLevel: 'Proficient',
+          evidence: `STAR method and cultural competencies verified in HR Mock Interview (${hrAvgScore}/100)`,
+          actionRoute: 'interview',
+          actionText: 'Review Rubrics',
+          actionParams: { type: 'hr', company: company.name },
+        });
+      } else {
+        needsAttention.push({
+          skill,
+          category: 'Soft Skills / Behavioral',
+          status: 'needs_attention',
+          proficiencyLevel: hrAvailable ? 'Needs Practice' : 'Unverified',
+          evidence: hrAvailable
+            ? `Average behavioral score is ${hrAvgScore}/100; align responses with ${company.name}'s values.`
+            : `No HR / Behavioral mock interview completed yet. Practice structured STAR delivery.`,
+          actionRoute: 'interview',
+          actionText: 'Take HR Round →',
+          actionParams: { type: 'hr', company: company.name },
+        });
+      }
+    } else if (isSystemDesign) {
+      if (interviewAvailable && interviewScore >= 70) {
+        youHave.push({
+          skill,
+          category: 'System Design',
+          status: 'possessed',
+          proficiencyLevel: 'Intermediate',
+          evidence: `Architectural breakdown validated in Technical Mock Interview (${latestInterviewScore}/100)`,
+          actionRoute: 'interview',
+          actionText: 'Take Mock Round',
+        });
+      } else {
+        needsAttention.push({
+          skill,
+          category: 'System Design',
+          status: 'needs_attention',
+          proficiencyLevel: 'Needs Practice',
+          evidence: `System Design and high-level architectural trade-offs are heavily weighted in ${company.name}'s on-site rounds.`,
+          actionRoute: 'interview',
+          actionText: 'Practice Design →',
+          actionParams: { subject: 'System Design', company: company.name },
+        });
+      }
+    } else {
+      const inJobMatchHave = jobMatchInfo?.matchingSkills.some((s) => s.toLowerCase().includes(sLower) || sLower.includes(s.toLowerCase()));
+      const inJobMatchMissing = jobMatchInfo?.missingSkills.some((s) => s.toLowerCase().includes(sLower) || sLower.includes(s.toLowerCase()));
+      const inResumeStrengths = resumeStrengths.some((s) => s.toLowerCase().includes(sLower) || sLower.includes(s.toLowerCase()));
+      const inResumeMissing = resumeMissingSkills.some((s) => s.toLowerCase().includes(sLower) || sLower.includes(s.toLowerCase()));
+
+      if ((resumeAvailable && atsScore >= 70 && !inResumeMissing && !inJobMatchMissing) || inJobMatchHave || inResumeStrengths) {
+        youHave.push({
+          skill,
+          category: 'Languages & Frameworks',
+          status: 'possessed',
+          proficiencyLevel: 'Proficient',
+          evidence: inJobMatchHave
+            ? `Confirmed in Job Description Match analysis (${jobMatchInfo?.matchScore}% match)`
+            : `Detected in ATS-parsed resume (${atsScore}/100 ATS Score)`,
+          actionRoute: 'resume-analyzer',
+          actionText: 'View Resume',
+        });
+      } else {
+        needsAttention.push({
+          skill,
+          category: 'Languages & Frameworks',
+          status: 'needs_attention',
+          proficiencyLevel: resumeAvailable ? 'Needs Practice' : 'Unverified',
+          evidence: inResumeMissing
+            ? `Flagged as missing keyword in Resume ATS evaluation for ${targetRole}.`
+            : inJobMatchMissing
+            ? `Identified as missing competency in Job Description match analysis.`
+            : `Not verified in resume or assessments. Add relevant project experience.`,
+          actionRoute: 'resume-analyzer',
+          actionText: 'Update Resume →',
+        });
+      }
+    }
+  }
+
+  const totalRequired = youHave.length + needsAttention.length;
+  const matchPercentage = totalRequired > 0 ? Math.round((youHave.length / totalRequired) * 100) : 0;
+
+  const skillGap: CompanySkillGapData = {
+    youHave,
+    needsAttention,
+    matchPercentage,
+    totalRequired,
+  };
+
+  // ================= 13. PREPARATION CHECKLIST WITH AUTO-VERIFICATION =================
+  const manualChecked = getCompanyChecklistCompleted(studentId, company.name);
+
+  const checklist: CompanyChecklistItem[] = [
+    {
+      id: 'chk-resume',
+      title: 'Resume ATS & Keyword Alignment',
+      description: `Resume parsed and scored for ${company.name}’s ${targetRole} screening criteria.`,
+      category: 'Resume',
+      isAutoVerified: resumeAvailable && atsScore >= 75,
+      isCompleted: (resumeAvailable && atsScore >= 75) || manualChecked.includes('chk-resume'),
+      verifiedEvidence: resumeAvailable ? `ATS Score: ${atsScore}/100 verified by parser` : undefined,
+      actionRoute: 'resume-analyzer',
+      actionText: resumeAvailable ? 'Refine Resume' : 'Upload Resume',
+    },
+    {
+      id: 'chk-skills',
+      title: 'Target Company Skill Gap Addressed',
+      description: `Core technical and domain requirements verified against ${company.name} profile.`,
+      category: 'Skills',
+      isAutoVerified: matchPercentage >= 70,
+      isCompleted: matchPercentage >= 70 || manualChecked.includes('chk-skills'),
+      verifiedEvidence: `${youHave.length}/${totalRequired} required skills verified (${matchPercentage}%)`,
+      actionRoute: 'resume-analyzer',
+      actionText: 'Review Skills',
+    },
+    {
+      id: 'chk-coding',
+      title: 'Coding Arena & DSA Benchmark',
+      description: `Solve at least 3 algorithmic problems on high-frequency ${company.name} topics.`,
+      category: 'Coding',
+      isAutoVerified: codingAvailable && uniqueAccepted >= 3,
+      isCompleted: (codingAvailable && uniqueAccepted >= 3) || manualChecked.includes('chk-coding'),
+      verifiedEvidence: codingAvailable ? `${uniqueAccepted} problems solved with Accepted status` : undefined,
+      actionRoute: 'coding',
+      actionText: 'Practice Coding',
+      actionParams: { company: company.name, role: targetRole },
+    },
+    {
+      id: 'chk-tech-interview',
+      title: 'Technical Mock Interview',
+      description: `Complete a live AI technical interview evaluating live problem solving and code trade-offs.`,
+      category: 'Technical Interview',
+      isAutoVerified: interviewAvailable && completedRounds >= 1 && latestInterviewScore >= 65,
+      isCompleted: (interviewAvailable && completedRounds >= 1 && latestInterviewScore >= 65) || manualChecked.includes('chk-tech-interview'),
+      verifiedEvidence: interviewAvailable ? `${completedRounds} round(s) completed (${latestInterviewScore}/100 rating)` : undefined,
+      actionRoute: 'interview',
+      actionText: 'Take Mock Round',
+      actionParams: { company: company.name, role: targetRole },
+    },
+    {
+      id: 'chk-hr-interview',
+      title: 'Behavioral & Leadership Principles',
+      description: `Complete an HR round demonstrating structured STAR communication.`,
+      category: 'Behavioral Interview',
+      isAutoVerified: hrAvailable && summary.hrInterview.totalInterviews >= 1 && hrAvgScore >= 70,
+      isCompleted: (hrAvailable && summary.hrInterview.totalInterviews >= 1 && hrAvgScore >= 70) || manualChecked.includes('chk-hr-interview'),
+      verifiedEvidence: hrAvailable ? `${summary.hrInterview.totalInterviews} HR round(s) completed (${hrAvgScore}/100 score)` : undefined,
+      actionRoute: 'interview',
+      actionText: 'Take HR Round',
+      actionParams: { type: 'hr', company: company.name },
+    },
+    {
+      id: 'chk-weak-areas',
+      title: 'Priority Weak Areas In Active Practice',
+      description: `Target the highest severity gaps identified in your preparation plan.`,
+      category: 'Weak Areas',
+      isAutoVerified: priorities.length > 0 && priorities.some((p) => p.status === 'IMPROVING' || p.status === 'RESOLVED'),
+      isCompleted: (priorities.length > 0 && priorities.some((p) => p.status === 'IMPROVING' || p.status === 'RESOLVED')) || manualChecked.includes('chk-weak-areas'),
+      verifiedEvidence: priorities.length > 0 ? `${priorities.filter((p) => p.status === 'IMPROVING' || p.status === 'RESOLVED').length} gap(s) addressed` : undefined,
+      actionRoute: 'coding',
+      actionText: 'Review Priorities',
+    },
+    {
+      id: 'chk-review',
+      title: 'Final Company Readiness Review',
+      description: `Reach 70%+ overall readiness across all 5 preparation pillars for ${company.name}.`,
+      category: 'Review',
+      isAutoVerified: overallScore >= 70,
+      isCompleted: overallScore >= 70 || manualChecked.includes('chk-review'),
+      verifiedEvidence: `Current Company Readiness: ${overallScore}/100`,
+      actionRoute: 'company-prep',
+      actionText: 'View Readiness',
+    },
+  ];
+
   const formulaExplanation = `Readiness = (Resume × ${Math.round(
     weights.resume * 100
   )}%) + (Coding × ${Math.round(weights.coding * 100)}%) + (Aptitude × ${Math.round(
@@ -1245,6 +1538,9 @@ export async function calculateCompanyReadiness(
     improvingAreas,
     weakAreas,
     priorities,
+    skillGap,
+    checklist,
+    jobMatch: jobMatchInfo,
     formulaExplanation,
     analyzedAt: new Date().toISOString(),
   };

@@ -305,6 +305,54 @@ export const AchievementsSection: React.FC<AchievementsSectionProps> = ({
               {summary.achievements.filter((a) => a.category === 'placement').length}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('interview')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              selectedCategory === 'interview'
+                ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <span>🎤</span>
+            <span>Interviews</span>
+            <span className="px-1.5 py-0.2 rounded-md bg-slate-200 dark:bg-slate-700 text-[10px]">
+              {summary.achievements.filter((a) => a.category === 'interview').length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('resume')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              selectedCategory === 'resume'
+                ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <span>📄</span>
+            <span>Resume & ATS</span>
+            <span className="px-1.5 py-0.2 rounded-md bg-slate-200 dark:bg-slate-700 text-[10px]">
+              {summary.achievements.filter((a) => a.category === 'resume').length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('career')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              selectedCategory === 'career'
+                ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <span>🚀</span>
+            <span>Readiness</span>
+            <span className="px-1.5 py-0.2 rounded-md bg-slate-200 dark:bg-slate-700 text-[10px]">
+              {summary.achievements.filter((a) => a.category === 'career').length}
+            </span>
+          </button>
         </div>
 
         {/* Status Sub-filter */}

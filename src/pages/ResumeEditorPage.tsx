@@ -43,7 +43,7 @@ export const ResumeEditorPage: React.FC<ResumeEditorPageProps> = ({
           '',
           'Software Developer'
         );
-        starterData.fullName = profile?.full_name || 'Candidate Name';
+        starterData.fullName = profile?.full_name || (user?.user_metadata?.full_name as string) || '';
         starterData.contactInfo.email = user?.email || '';
 
         const newStarter: ResumeVersionItem = {

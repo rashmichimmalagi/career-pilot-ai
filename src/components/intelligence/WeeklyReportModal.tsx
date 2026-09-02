@@ -114,10 +114,12 @@ export const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({
                   <span>Coding DSA</span>
                 </div>
                 <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                  {report.coding.solvedCount} Solved
+                  {(report.coding.uniqueQuestionsSolved ?? report.coding.solvedCount) || 0} Solved
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  {report.coding.attemptedCount} attempts ({report.coding.accuracyRate}% acc)
+                  {report.coding.totalSubmissions !== undefined
+                    ? `${report.coding.totalSubmissions} ${report.coding.totalSubmissions === 1 ? 'submission' : 'submissions'} across ${report.coding.uniqueQuestionsAttempted ?? report.coding.attemptedCount} ${(report.coding.uniqueQuestionsAttempted ?? report.coding.attemptedCount) === 1 ? 'question' : 'questions'}`
+                    : `${report.coding.attemptedCount} attempts (${report.coding.accuracyRate}% acc)`}
                 </div>
               </div>
 

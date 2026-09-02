@@ -215,8 +215,7 @@ function AppContent() {
     pendingQueueCount,
     isSyncing,
     syncError,
-    quoteSecondsLeft,
-    totalQuoteIntervalSeconds,
+    syncSummary,
     triggerSync,
     nextQuote,
   } = useNetworkInterruption({
@@ -532,8 +531,7 @@ function AppContent() {
         pendingQueueCount={pendingQueueCount}
         isSyncing={isSyncing}
         syncError={syncError}
-        quoteSecondsLeft={quoteSecondsLeft}
-        totalQuoteIntervalSeconds={totalQuoteIntervalSeconds}
+        syncSummary={syncSummary}
         onRetrySync={triggerSync}
         onNextQuote={nextQuote}
       />

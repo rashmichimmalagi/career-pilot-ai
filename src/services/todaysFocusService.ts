@@ -21,6 +21,7 @@ import { MockInterviewReport } from '../types/interview';
 import { ResumeAnalysisResult, ResumeVersionItem } from '../types/resume';
 import { PlacementTestSession } from '../types/placement';
 import { DailyRoadmapTask } from '../types/roadmap';
+import { getActiveStudentTarget } from './companyPrepStorage';
 
 const MANUAL_FOCUS_TASKS_KEY_PREFIX = 'careerpilot_focus_manual_completed_';
 
@@ -389,6 +390,29 @@ export function generateTodaysFocus(params: {
         isCompleted: isRoadmapDone,
       });
     }
+  }
+
+  // 6. Active Target Company Readiness Task
+  const activeTarget = getActiveStudentTarget(studentId);
+  if (activeTarget && tasks.length < 4) {
+    tasks.push({
+      id: `focus_company_${activeTarget.id}`,
+      title: `${activeTarget.companyName}: Target Readiness Review`,
+      category: 'interview',
+      taskType: 'interview',
+      estimatedMinutes: 20,
+      priority: 'high',
+      reason: `Recommended because ${activeTarget.companyName} is your active target company for ${activeTarget.targetRole || 'Software Development'}.`,
+      actionRoute: 'company-prep',
+      actionText: 'Check Readiness',
+      actionParams: { company: activeTarget.companyName, role: activeTarget.targetRole },
+      isVerifiable: true,
+      requiredCount: 1,
+      completedCount: 0,
+      progressText: 'Target Active',
+      completionCriteria: `Review skill gaps and complete preparation tasks for ${activeTarget.companyName}`,
+      isCompleted: false,
+    });
   }
 
   // Limit to 3-5 high leverage tasks

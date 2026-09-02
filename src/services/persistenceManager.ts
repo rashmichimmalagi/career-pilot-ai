@@ -1,37 +1,12 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { cloudSyncService, CloudSyncResult, LocalHarvestSummary } from './cloudSyncService';
+import { cloudSyncService } from './cloudSyncService';
 import { ResumeVersionItem } from '../types/resume';
-import { CodingSubmission } from '../types/coding';
 import { MockInterviewReport } from '../types/interview';
 import { PlacementTestSession } from '../types/placement';
 import { StudentTargetCompany } from '../types/companyPrep';
 import { DailyRoadmapTask } from '../types/roadmap';
-import { MentorMessage } from '../types/mentor';
-
-export interface OfflineMutation {
-  id: string;
-  userId: string;
-  type:
-    | 'save_resume'
-    | 'save_coding_submission'
-    | 'save_saved_question'
-    | 'remove_saved_question'
-    | 'save_mock_interview'
-    | 'save_placement_session'
-    | 'save_company_target'
-    | 'delete_company_target'
-    | 'save_roadmap_tasks'
-    | 'save_completed_roadmap_items'
-    | 'save_study_plan'
-    | 'save_study_time'
-    | 'save_mentor_messages'
-    | 'save_badges'
-    | 'save_streak'
-    | 'save_profile_field';
-  payload: any;
-  timestamp: string;
-  attempts: number;
-}
+import { OfflineMutation, QueueProcessResult, SyncAuditLog } from '../types/sync';
+import { classifySyncError, recordSyncAuditLog } from './syncAuditService';
 
 export interface PersistenceDiagnosticSummary {
   userId: string | null;
@@ -60,78 +35,63 @@ export interface PersistenceDiagnosticSummary {
     badges: number;
     mentorMessages: number;
   };
-  syncStatus: 'synced' | 'pending_sync' | 'offline' | 'unauthenticated' | 'error';
+  syncStatus: 'synced' | 'pending_sync' | 'error' | 'unauthenticated' | 'offline';
   lastError: string | null;
 }
 
 class PersistenceManagerClass {
-  private offlineQueueKeyPrefix = 'careerpilot_offline_queue_';
+  private isProcessingQueue = false;
   private lastHydratedTimestamp: string | null = null;
   private lastWriteTimestamp: string | null = null;
-  private isProcessingQueue = false;
   private lastError: string | null = null;
+  private offlineQueueKeyPrefix = 'careerpilot_offline_queue_';
 
-  constructor() {
-    // Setup automatic queue flush when device goes online
-    if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => {
-        this.processOfflineQueue();
-      });
-      // Periodic check every 60 seconds
-      setInterval(() => {
-        if (navigator.onLine) {
-          this.processOfflineQueue();
-        }
-      }, 60000);
+  /**
+   * Authoritative Hydration: Pulls all cloud records from Supabase and populates local caches
+   */
+  public async hydrateAll(userId: string): Promise<boolean> {
+    if (!userId || userId === 'guest') return false;
+    try {
+      const success = await cloudSyncService.hydrateCloudDataToLocal(userId);
+      this.lastHydratedTimestamp = new Date().toISOString();
+      return success;
+    } catch (err: any) {
+      console.warn('[PersistenceManager] hydrateAll warning:', err);
+      return false;
     }
   }
 
+  // ============================================================================
+  // 1. DUAL-STORE WRITE STRATEGY (Supabase First -> Fallback Local Cache Envelope)
+  // ============================================================================
+
   /**
-   * Safe getter for current authenticated user ID
+   * Universal User ID Resolver
    */
-  public async getEffectiveUserId(providedId?: string): Promise<string | null> {
-    if (providedId && providedId !== 'guest') return providedId;
-    if (!isSupabaseConfigured()) return null;
+  public async getEffectiveUserId(providedId?: string | null): Promise<string | null> {
+    if (providedId && providedId !== 'guest') {
+      return providedId;
+    }
+    if (!isSupabaseConfigured()) {
+      return null;
+    }
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.id) return session.user.id;
+      if (session?.user?.id) {
+        return session.user.id;
+      }
+    } catch (_) {}
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) {
+        return user.id;
+      }
     } catch (_) {}
     return null;
   }
 
-  // ============================================================================
-  // 1. HYDRATION ENGINE (Cloud -> Local Cache)
-  // Single Source of Truth: Supabase authoritatively populates local cache
-  // ============================================================================
-
-  public async hydrateAll(userId: string): Promise<boolean> {
-    if (!isSupabaseConfigured() || !userId || userId === 'guest') {
-      return false;
-    }
-
-    try {
-      // 1. Flush any pending offline mutations first so nothing is lost
-      await this.processOfflineQueue(userId);
-
-      // 2. Perform authoritative cloud pull
-      const success = await cloudSyncService.hydrateCloudDataToLocal(userId);
-      if (success) {
-        this.lastHydratedTimestamp = new Date().toISOString();
-      }
-      return success;
-    } catch (err: any) {
-      console.warn('[PersistenceManager] Hydration notice:', err?.message || err);
-      this.lastError = err?.message || 'Hydration failed';
-      return false;
-    }
-  }
-
-  // ============================================================================
-  // 2. WRITE-THROUGH ENGINES (User Action -> Cache -> Supabase -> Queue fallback)
-  // ============================================================================
-
   /**
-   * Helper: Write profile metadata (company targets, roadmap tasks, study plans, badges, mentor chats)
+   * Unified Profile Metadata Writer
    */
   public async writeProfileMetadata(
     userId: string,
@@ -139,61 +99,87 @@ class PersistenceManagerClass {
   ): Promise<boolean> {
     if (!userId || userId === 'guest') return false;
 
-    // A. Local Cache Update
+    // 1. Always update local storage extended cache for instant offline responsiveness
     try {
-      const currentRaw = localStorage.getItem(`careerpilot_extended_profile_${userId}`);
-      const currentObj = currentRaw ? JSON.parse(currentRaw) : {};
-      const updatedObj = { ...currentObj, ...metadataPartial, updatedAt: new Date().toISOString() };
-      localStorage.setItem(`careerpilot_extended_profile_${userId}`, JSON.stringify(updatedObj));
+      const extKey = `careerpilot_extended_profile_${userId}`;
+      const existingRaw = localStorage.getItem(extKey);
+      const existing = existingRaw ? JSON.parse(existingRaw) : {};
+      const merged = { ...existing, ...metadataPartial, last_updated_at: new Date().toISOString() };
+      localStorage.setItem(extKey, JSON.stringify(merged));
     } catch (_) {}
 
-    // B. Supabase Cloud Write
-    if (!isSupabaseConfigured()) return false;
+    if (!isSupabaseConfigured()) {
+      return true;
+    }
 
     try {
-      // Fetch existing profile metadata to merge safely
-      const { data: existingProfile } = await supabase
+      // 2. Fetch existing profile from Supabase
+      const { data: currentProfile } = await supabase
         .from('profiles')
-        .select('profile_data, career_goal')
+        .select('*')
         .eq('id', userId)
         .maybeSingle();
 
-      let currentProfileData = (existingProfile?.profile_data as Record<string, any>) || {};
-      if (existingProfile?.career_goal && existingProfile.career_goal.startsWith('__CP_DATA__')) {
-        try {
-          const raw = existingProfile.career_goal.replace('__CP_DATA__', '');
-          currentProfileData = { ...currentProfileData, ...JSON.parse(raw) };
-        } catch (_) {}
-      }
-
+      const existingData = (currentProfile?.profile_data as Record<string, any>) || {};
       const mergedProfileData = {
-        ...currentProfileData,
+        ...existingData,
         ...metadataPartial,
         last_updated_at: new Date().toISOString(),
       };
 
       const envelopeString = `__CP_DATA__${JSON.stringify(mergedProfileData)}`;
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          profile_data: mergedProfileData,
-          career_goal: envelopeString,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId);
+      if (currentProfile) {
+        const { error: updateErr } = await supabase
+          .from('profiles')
+          .update({
+            profile_data: mergedProfileData,
+            career_goal: envelopeString,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userId);
 
-      if (error) {
-        if (error.code === '42703' || error.message?.includes('profile_data')) {
-          await supabase
-            .from('profiles')
-            .update({
-              career_goal: envelopeString,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', userId);
-        } else {
-          throw error;
+        if (updateErr) {
+          if (updateErr.code === '42703' || updateErr.message?.includes('profile_data')) {
+            const { error: envErr } = await supabase
+              .from('profiles')
+              .update({
+                career_goal: envelopeString,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', userId);
+
+            if (envErr) throw envErr;
+          } else {
+            throw updateErr;
+          }
+        }
+      } else {
+        const { data: authUser } = await supabase.auth.getUser();
+        const insertPayload: any = {
+          id: userId,
+          email: authUser?.user?.email || 'student@careerpilot.ai',
+          full_name: authUser?.user?.user_metadata?.full_name || 'Student',
+          usn: authUser?.user?.user_metadata?.usn || '1CP21CS001',
+          college_name: authUser?.user?.user_metadata?.college_name || 'Engineering College',
+          department: authUser?.user?.user_metadata?.department || 'Computer Science and Engineering',
+          semester: authUser?.user?.user_metadata?.semester || '7th Semester',
+          graduation_year: authUser?.user?.user_metadata?.graduation_year || '2026',
+          career_goal: envelopeString,
+          profile_data: mergedProfileData,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        const { error: insertErr } = await supabase.from('profiles').insert(insertPayload);
+        if (insertErr) {
+          if (insertErr.code === '42703' || insertErr.message?.includes('profile_data')) {
+            delete insertPayload.profile_data;
+            const { error: retryErr } = await supabase.from('profiles').insert(insertPayload);
+            if (retryErr) throw retryErr;
+          } else {
+            throw insertErr;
+          }
         }
       }
 
@@ -308,7 +294,7 @@ class PersistenceManagerClass {
   }
 
   // ============================================================================
-  // 3. OFFLINE MUTATION QUEUE (Guaranteed Eventual Consistency)
+  // 2. OFFLINE MUTATION QUEUE (Guaranteed Eventual Consistency & Integrity)
   // ============================================================================
 
   private getQueueKey(userId: string): string {
@@ -327,49 +313,95 @@ class PersistenceManagerClass {
   public enqueueOfflineMutation(mutation: OfflineMutation): void {
     try {
       const current = this.getOfflineQueue(mutation.userId);
-      current.push(mutation);
+      const existingIdx = current.findIndex((m) => m.id === mutation.id);
+      if (existingIdx >= 0) {
+        current[existingIdx] = mutation;
+      } else {
+        current.push(mutation);
+      }
       localStorage.setItem(this.getQueueKey(mutation.userId), JSON.stringify(current));
     } catch (_) {}
   }
 
-  public async processOfflineQueue(targetUserId?: string): Promise<void> {
-    if (this.isProcessingQueue || !isSupabaseConfigured()) return;
+  /**
+   * Process offline queue with strict atomic confirmation:
+   * Items are removed ONLY when Supabase confirms success (no error returned).
+   * Failed items are retained in the queue with incremented retry count and structured error categories.
+   */
+  public async processOfflineQueue(targetUserId?: string): Promise<QueueProcessResult> {
+    const result: QueueProcessResult = {
+      totalProcessed: 0,
+      syncedCount: 0,
+      failedCount: 0,
+      remainingQueueCount: 0,
+      errors: [],
+      logs: [],
+    };
+
+    if (this.isProcessingQueue) {
+      return result;
+    }
+
+    if (!isSupabaseConfigured()) {
+      return result;
+    }
 
     // Step 1: Verify current authenticated Supabase session
     let activeUserId: string | null = null;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       activeUserId = session?.user?.id || null;
+      if (!activeUserId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        activeUserId = user?.id || null;
+      }
     } catch {
       activeUserId = null;
     }
 
     const userId = activeUserId || (await this.getEffectiveUserId(targetUserId));
-    if (!userId || userId === 'guest') return;
+    if (!userId || userId === 'guest') {
+      const authErr = classifySyncError('Active Supabase authentication session required for cloud sync.', {
+        operation: 'processOfflineQueue',
+      });
+      result.errors.push(authErr);
+      return result;
+    }
 
     this.isProcessingQueue = true;
     try {
+      // Collect queue from both active user key and guest/target key if migrating
       const queue = this.getOfflineQueue(userId);
-      if (queue.length === 0) {
-        this.isProcessingQueue = false;
-        return;
+      let guestQueue: OfflineMutation[] = [];
+      if (userId !== 'guest') {
+        guestQueue = this.getOfflineQueue('guest');
       }
 
-      const remaining: OfflineMutation[] = [];
-      for (const item of queue) {
-        // Enforce account isolation: only sync items that match the active authenticated user
-        if (activeUserId && item.userId && item.userId !== activeUserId) {
-          remaining.push(item);
-          continue;
-        }
+      const combinedQueue = [...queue, ...guestQueue];
+      if (combinedQueue.length === 0) {
+        this.isProcessingQueue = false;
+        return result;
+      }
 
-        const effectiveItemUserId = activeUserId || item.userId || userId;
+      result.totalProcessed = combinedQueue.length;
+      const remaining: OfflineMutation[] = [];
+
+      for (const item of combinedQueue) {
+        // Enforce account identity: for all DB operations, ensure we use the authenticated user ID
+        const effectiveItemUserId = activeUserId || userId;
         let mutationSucceeded = false;
+        let lastErrorRaw: any = null;
+        let targetTable = 'profiles';
 
         try {
           if (item.type === 'save_profile_field') {
+            targetTable = 'profiles';
             mutationSucceeded = await this.writeProfileMetadata(effectiveItemUserId, item.payload);
+            if (!mutationSucceeded) {
+              lastErrorRaw = 'Profile metadata write failed';
+            }
           } else if (item.type === 'save_coding_submission') {
+            targetTable = 'coding_submissions';
             const sub = item.payload;
             const payload = {
               id: sub.id,
@@ -391,17 +423,18 @@ class PersistenceManagerClass {
               memory_kb: Number(sub.memory_kb || sub.memory_used || 0),
               topic: String(sub.topic || sub.subject || 'DSA'),
               ai_feedback: sub.ai_feedback || {},
-              submitted_at: sub.created_at || new Date().toISOString(),
-              created_at: sub.created_at || new Date().toISOString(),
+              submitted_at: sub.created_at || sub.submitted_at || new Date().toISOString(),
+              created_at: sub.created_at || sub.submitted_at || new Date().toISOString(),
               updated_at: new Date().toISOString(),
             };
             const { error } = await supabase.from('coding_submissions').upsert(payload, { onConflict: 'id' });
             if (!error) {
               mutationSucceeded = true;
             } else {
-              this.lastError = error.message;
+              lastErrorRaw = error;
             }
           } else if (item.type === 'save_mock_interview') {
+            targetTable = 'mock_interviews';
             const intv = item.payload;
             const intvId = intv.id || (intv as any).interview_id || `intv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
             const rawType = (intv.interview_type || (intv as any).interviewType || intv.subject || 'technical').toLowerCase();
@@ -447,9 +480,10 @@ class PersistenceManagerClass {
             if (!error) {
               mutationSucceeded = true;
             } else {
-              this.lastError = error.message;
+              lastErrorRaw = error;
             }
           } else if (item.type === 'save_resume') {
+            targetTable = 'resumes';
             const resItem = item.payload;
             const payload = {
               id: resItem.id,
@@ -470,32 +504,112 @@ class PersistenceManagerClass {
             if (!error) {
               mutationSucceeded = true;
             } else {
-              this.lastError = error.message;
+              lastErrorRaw = error;
             }
           } else if (item.type === 'save_placement_session') {
+            targetTable = 'placement_sessions';
             const sess = item.payload;
             const payload = {
               id: sess.id,
               user_id: effectiveItemUserId,
               category: sess.category || 'aptitude',
               subject: sess.subject || 'Quantitative Aptitude',
+              topic: sess.topic || 'General',
               difficulty: sess.difficulty || 'Medium',
               score: typeof sess.score === 'number' ? sess.score : 0,
               accuracy: typeof sess.accuracy === 'number' ? sess.accuracy : 0,
-              total_questions: typeof sess.total_questions === 'number' ? sess.total_questions : 10,
-              correct_answers: typeof sess.correct_answers === 'number' ? sess.correct_answers : 0,
-              time_taken_seconds: typeof sess.time_taken_seconds === 'number' ? sess.time_taken_seconds : 300,
+              total_questions: typeof sess.total_questions === 'number' ? sess.total_questions : (sess.totalQuestions || 10),
+              correct_count: typeof sess.correct_count === 'number' ? sess.correct_count : (sess.correctCount || sess.correctAnswers || 0),
+              incorrect_count: typeof sess.incorrect_count === 'number' ? sess.incorrect_count : (sess.incorrectCount || sess.incorrectAnswers || 0),
+              skipped_count: typeof sess.skipped_count === 'number' ? sess.skipped_count : (sess.skippedCount || 0),
+              time_spent_seconds: typeof sess.time_spent_seconds === 'number' ? sess.time_spent_seconds : (sess.timeTakenSeconds || 300),
+              questions: sess.questions || [],
               answers: sess.answers || {},
-              created_at: sess.created_at || new Date().toISOString(),
-              completed_at: sess.completed_at || new Date().toISOString(),
+              session_data: sess.session_data || sess,
+              created_at: sess.created_at || (sess as any).createdAt || new Date().toISOString(),
+              completed_at: sess.completed_at || (sess as any).completedAt || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
             };
             const { error } = await supabase.from('placement_sessions').upsert(payload, { onConflict: 'id' });
             if (!error) {
               mutationSucceeded = true;
             } else {
-              this.lastError = error.message;
+              lastErrorRaw = error;
+            }
+          } else if (item.type === 'save_career_readiness') {
+            targetTable = 'career_readiness_history';
+            const crPayload = {
+              ...item.payload,
+              user_id: effectiveItemUserId,
+            };
+            const { error } = await supabase.from('career_readiness_history').upsert(crPayload, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              lastErrorRaw = error;
+            }
+          } else if (item.type === 'save_job_resume_match') {
+            targetTable = 'job_resume_matches';
+            const jrm = {
+              ...item.payload,
+              user_id: effectiveItemUserId,
+            };
+            const { error } = await supabase.from('job_resume_matches').upsert(jrm, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              lastErrorRaw = error;
+            }
+          } else if (item.type === 'save_mentor_conversation') {
+            targetTable = 'mentor_conversations';
+            const conv = {
+              ...item.payload,
+              user_id: effectiveItemUserId,
+            };
+            const { error } = await supabase.from('mentor_conversations').upsert(conv, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              lastErrorRaw = error;
+            }
+          } else if (item.type === 'save_mentor_message') {
+            targetTable = 'mentor_messages';
+            const msg = {
+              ...item.payload,
+              user_id: effectiveItemUserId,
+            };
+            const { error } = await supabase.from('mentor_messages').upsert(msg, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              lastErrorRaw = error;
+            }
+          } else if (item.type === 'save_notification') {
+            targetTable = 'notifications';
+            const notif = {
+              ...item.payload,
+              user_id: effectiveItemUserId,
+            };
+            const { error } = await supabase.from('notifications').upsert(notif, { onConflict: 'id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              lastErrorRaw = error;
+            }
+          } else if (item.type === 'save_notification_preferences') {
+            targetTable = 'notification_preferences';
+            const prefs = {
+              ...item.payload,
+              user_id: effectiveItemUserId,
+            };
+            const { error } = await supabase.from('notification_preferences').upsert(prefs, { onConflict: 'user_id' });
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              lastErrorRaw = error;
             }
           } else if (item.type === 'save_saved_question') {
+            targetTable = 'saved_coding_questions';
             const q = item.payload;
             const qProblemId = String(q.problem_id || q.question_id || q.id || `prob_${Date.now()}`);
             const recordId = `sq_${effectiveItemUserId}_${qProblemId}`;
@@ -516,30 +630,82 @@ class PersistenceManagerClass {
             if (!error) {
               mutationSucceeded = true;
             } else {
-              this.lastError = error.message;
+              lastErrorRaw = error;
+            }
+          } else if (item.type === 'remove_saved_question') {
+            targetTable = 'saved_coding_questions';
+            const q = item.payload;
+            const qProblemId = String(q.problem_id || q.question_id || q.id);
+            const recordId = `sq_${effectiveItemUserId}_${qProblemId}`;
+            const { error } = await supabase.from('saved_coding_questions').delete().eq('id', recordId).eq('user_id', effectiveItemUserId);
+            if (!error) {
+              mutationSucceeded = true;
+            } else {
+              lastErrorRaw = error;
             }
           } else {
-            // Default success for local-only metadata types
-            mutationSucceeded = true;
+            targetTable = 'profiles';
+            mutationSucceeded = await this.writeProfileMetadata(effectiveItemUserId, item.payload);
+            if (!mutationSucceeded) {
+              lastErrorRaw = 'Profile metadata update failed';
+            }
           }
         } catch (e: any) {
-          this.lastError = e?.message || 'Mutation failed';
+          lastErrorRaw = e;
           mutationSucceeded = false;
         }
 
-        if (!mutationSucceeded && item.attempts < 10) {
-          remaining.push({ ...item, attempts: item.attempts + 1 });
+        if (mutationSucceeded) {
+          // Success: Confirmed by Supabase. Item is omitted from remaining queue.
+          result.syncedCount++;
+        } else {
+          // Failure: Item MUST BE RETAINED in the queue.
+          result.failedCount++;
+          const classified = classifySyncError(lastErrorRaw, {
+            table: targetTable,
+            operation: item.type,
+            recordId: item.id,
+          });
+
+          result.errors.push(classified);
+          this.lastError = classified.userMessage;
+
+          const auditLog: SyncAuditLog = {
+            operation: item.type,
+            table: targetTable,
+            recordId: item.id,
+            userId: effectiveItemUserId,
+            errorCategory: classified.category,
+            rawMessage: typeof lastErrorRaw === 'string' ? lastErrorRaw : lastErrorRaw?.message || JSON.stringify(lastErrorRaw),
+            timestamp: new Date().toISOString(),
+            retryCount: item.attempts + 1,
+          };
+
+          recordSyncAuditLog(auditLog);
+          result.logs.push(auditLog);
+
+          remaining.push({
+            ...item,
+            attempts: item.attempts + 1,
+            lastErrorCategory: classified.category,
+            lastErrorMessage: classified.userMessage,
+          });
         }
       }
 
+      result.remainingQueueCount = remaining.length;
       localStorage.setItem(this.getQueueKey(userId), JSON.stringify(remaining));
+      if (userId !== 'guest') {
+        localStorage.removeItem(this.getQueueKey('guest'));
+      }
+      return result;
     } finally {
       this.isProcessingQueue = false;
     }
   }
 
   // ============================================================================
-  // 4. DIAGNOSTIC REPORTING & HEALTH CHECK
+  // 3. DIAGNOSTIC REPORTING & HEALTH CHECK
   // ============================================================================
 
   public async getConsistencyDiagnostic(userId: string | null): Promise<PersistenceDiagnosticSummary> {

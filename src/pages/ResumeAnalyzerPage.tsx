@@ -53,7 +53,7 @@ import { UploadResumeModal } from '../components/resume/UploadResumeModal';
 import { ResumeViewerModal } from '../components/resume/ResumeViewerModal';
 import { ResumeBuilderFlow } from '../components/resume/ResumeBuilderFlow';
 import { LiveResumeEditor } from '../components/resume/LiveResumeEditor';
-import { openResumePrintPage } from '../utils/resumePrint';
+import { openResumePrintPage, printResumeDocument } from '../utils/resumePrint';
 
 interface ResumeAnalyzerPageProps {
   onNavigate: (page: string) => void;
@@ -101,6 +101,7 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
   const [isLoadingResumes, setIsLoadingResumes] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewingResume, setViewingResume] = useState<ResumeVersionItem | null>(null);
+  const [viewingResumeInitialMode, setViewingResumeInitialMode] = useState<'view' | 'edit'>('view');
 
   // Active Analysis State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -208,13 +209,23 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
             setFlowState('analyzed');
           }
         }
+      } else {
+        // Explicitly handle no active resume
+        setActiveResumeId(null);
+        if (flowState === 'analyzed' || flowState === 'improved_view') {
+          setAnalysisResult(null);
+          setExtractedResumeText('');
+          setImprovedResumeData(null);
+          setComparisonData(null);
+          setFlowState('idle');
+        }
       }
     } catch (err) {
       console.warn('Failed to load user resumes:', err);
     } finally {
       setIsLoadingResumes(false);
     }
-  }, [effectiveUserId]);
+  }, [effectiveUserId, flowState]);
 
   useEffect(() => {
     loadUserResumes();
@@ -707,7 +718,7 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
    * 6. View Resume in Dedicated Viewer Modal
    */
   const handleViewResume = (resume: ResumeVersionItem) => {
-    console.log('[Resume Viewer] Opening resume:', {
+    console.log('[Resume Viewer] Opening resume in view mode:', {
       id: resume.id,
       fileName: resume.fileName || resume.versionLabel,
       isAiImproved: resume.isAiImproved,
@@ -725,7 +736,21 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
       setAnalysisResult(resume.analysisResult || null);
     }
 
-    // Always open dedicated ResumeViewerModal for the exact clicked resume record
+    setViewingResumeInitialMode('view');
+    setViewingResume(resume);
+  };
+
+  const handleEditResumeInViewer = (resume: ResumeVersionItem) => {
+    console.log('[Resume Viewer] Opening resume in edit mode:', {
+      id: resume.id,
+      fileName: resume.fileName || resume.versionLabel,
+    });
+
+    setActiveResumeId(resume.id);
+    setExtractedResumeText(resume.resumeText || '');
+    setTargetRole(resume.targetRole || 'Software Developer');
+
+    setViewingResumeInitialMode('edit');
     setViewingResume(resume);
   };
 
@@ -734,35 +759,21 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
    */
   const handleDeleteResume = async (resumeToDelete: ResumeVersionItem) => {
     try {
+      const wasActiveDeleted = resumeToDelete.isCurrent || activeResumeId === resumeToDelete.id;
+
       await resumeService.deleteResume(effectiveUserId, resumeToDelete.id, resumeToDelete.storagePath);
       
       const freshResumes = await resumeService.getUserResumes(effectiveUserId);
       setResumes(freshResumes);
 
-      // If active resume was deleted, reset view or switch to current
-      if (activeResumeId === resumeToDelete.id) {
-        const newCurrent = freshResumes.find((r) => r.isCurrent);
-        if (newCurrent) {
-          setActiveResumeId(newCurrent.id);
-          setAnalysisResult(newCurrent.analysisResult || null);
-          setExtractedResumeText(newCurrent.resumeText || '');
-          if (newCurrent.improvedData && newCurrent.comparisonData) {
-            setImprovedResumeData(newCurrent.improvedData);
-            setComparisonData(newCurrent.comparisonData);
-            setFlowState('improved_view');
-          } else if (newCurrent.analysisResult) {
-            setFlowState('analyzed');
-          } else {
-            setFlowState('idle');
-          }
-        } else {
-          setActiveResumeId(null);
-          setAnalysisResult(null);
-          setExtractedResumeText('');
-          setImprovedResumeData(null);
-          setComparisonData(null);
-          setFlowState('idle');
-        }
+      // If active resume was deleted, strictly reset to no active resume
+      if (wasActiveDeleted) {
+        setActiveResumeId(null);
+        setAnalysisResult(null);
+        setExtractedResumeText('');
+        setImprovedResumeData(null);
+        setComparisonData(null);
+        setFlowState('idle');
       }
 
       showToast('Resume Deleted', `"${resumeToDelete.fileName || resumeToDelete.versionLabel}" has been removed.`, 'info');
@@ -913,13 +924,9 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
           onSelectResumeToAnalyze={handleSelectResumeToAnalyze}
           onViewResume={handleViewResume}
           onPrintResume={(resume) => {
-            openResumePrintPage(resume);
+            printResumeDocument(resume);
           }}
-          onEditResume={(resume) => {
-            setActiveResumeId(resume.id);
-            setFlowState('editor');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
+          onEditResume={handleEditResumeInViewer}
           onMakeCurrent={handleMakeCurrent}
           onDeleteResume={handleDeleteResume}
           onTriggerUpload={scrollToUpload}
@@ -1807,14 +1814,13 @@ export const ResumeAnalyzerPage: React.FC<ResumeAnalyzerPageProps> = ({ onNaviga
           isOpen={!!viewingResume}
           onClose={() => setViewingResume(null)}
           resume={viewingResume}
+          initialMode={viewingResumeInitialMode}
+          onRefreshResumes={loadUserResumes}
           onPrint={(resume) => {
-            openResumePrintPage(resume);
+            printResumeDocument(resume);
           }}
           onEdit={(resume) => {
-            setViewingResume(null);
-            setActiveResumeId(resume.id);
-            setFlowState('editor');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            setViewingResumeInitialMode('edit');
           }}
           onMakeCurrent={async (resume) => {
             await handleMakeCurrent(resume);

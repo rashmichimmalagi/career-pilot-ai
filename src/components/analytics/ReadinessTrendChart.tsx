@@ -88,10 +88,10 @@ export const ReadinessTrendChart: React.FC<ReadinessTrendChartProps> = ({
           </div>
           <div className="max-w-sm space-y-1">
             <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
-              Complete more activities to see your progress trend
+              Not enough history yet
             </h4>
             <p className="text-xs text-slate-500">
-              Your career readiness graph requires at least 2 activity sessions across coding, aptitude, interviews, or resume audits to plot authentic trajectory lines.
+              Your career readiness graph requires at least 2 practice sessions across coding, aptitude, interviews, or resume audits to plot authentic historical trend points.
             </p>
           </div>
         </div>

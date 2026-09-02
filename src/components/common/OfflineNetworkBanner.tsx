@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Minimize2,
   Maximize2,
-  Sparkles,
   Database,
   X,
   Code2,
@@ -27,8 +26,7 @@ interface OfflineNetworkBannerProps {
   pendingQueueCount: number;
   isSyncing: boolean;
   syncError: string | null;
-  quoteSecondsLeft?: number;
-  totalQuoteIntervalSeconds?: number;
+  syncSummary?: string | null;
   onRetrySync: () => void;
   onNextQuote: () => void;
 }
@@ -40,8 +38,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
   pendingQueueCount,
   isSyncing,
   syncError,
-  quoteSecondsLeft = 5,
-  totalQuoteIntervalSeconds = 5,
+  syncSummary,
   onRetrySync,
   onNextQuote,
 }) => {
@@ -57,9 +54,6 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
   if (isExplicitlyDismissed && isOnline) {
     return null;
   }
-
-  // Calculate percentage of remaining time for the 5-second countdown progress bar
-  const progressPercent = Math.max(0, Math.min(100, (quoteSecondsLeft / totalQuoteIntervalSeconds) * 100));
 
   // Category Icon Resolver
   const renderCategoryIcon = () => {
@@ -93,7 +87,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
       className="fixed bottom-4 right-4 z-50 max-w-md w-[calc(100vw-2rem)] sm:w-96 transition-all duration-300 font-sans"
     >
       {/* ========================================================================= */}
-      {/* 1. OFFLINE STATE BANNER */}
+      {/* 1. OFFLINE STATE BANNER (🔴) */}
       {/* ========================================================================= */}
       {!isOnline && (
         <div className="rounded-2xl border border-rose-500/40 bg-slate-900/95 text-white shadow-2xl backdrop-blur-xl p-4 sm:p-5 space-y-3.5 ring-1 ring-rose-500/20">
@@ -113,7 +107,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 font-medium">
-                  Connection interrupted.
+                  Connection lost.
                 </p>
               </div>
             </div>
@@ -148,7 +142,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
             <>
               {/* Context Explanation */}
               <p className="text-xs text-slate-300 leading-relaxed">
-                You can continue practicing problems and reviewing materials. Everything will automatically synchronize when your internet connection is restored.
+                Your recent changes are safely queued and will sync when the connection returns. You can continue practicing problems and reviewing materials.
               </p>
 
               {pendingQueueCount > 0 && (
@@ -158,41 +152,25 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
                 </div>
               )}
 
-              {/* Motivational & Developer Tip Rotating Panel (5s Continuous Cycle) */}
+              {/* Developer Tip Panel (Static display, manual next button, zero auto-rotation) */}
               <div className="pt-2 border-t border-slate-800 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
                     {renderCategoryIcon()}
-                    <span className="truncate max-w-[170px]">{currentQuote.categoryLabel}</span>
+                    <span className="truncate max-w-[190px]">{currentQuote.categoryLabel}</span>
                   </span>
                   
-                  <div className="flex items-center gap-2">
-                    {/* Subtle 5s Countdown Indicator */}
-                    <span className="text-[10px] text-slate-400 font-mono font-medium">
-                      {quoteSecondsLeft}s
-                    </span>
-
-                    <button
-                      onClick={onNextQuote}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer bg-slate-800/60 hover:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700/50"
-                      title="Next developer tip"
-                      aria-label="Next developer tip"
-                    >
-                      <span>Next Tip</span>
-                      <ChevronRight className="w-3 h-3" />
-                    </button>
-                  </div>
+                  <button
+                    onClick={onNextQuote}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer bg-slate-800/60 hover:bg-slate-800 px-2.5 py-1 rounded-md border border-slate-700/50"
+                    title="Next developer tip"
+                    aria-label="Next developer tip"
+                  >
+                    <span>Next Tip →</span>
+                  </button>
                 </div>
 
-                {/* Progress bar across the 5-second tip interval */}
-                <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
-                  <div
-                    className="bg-gradient-to-r from-indigo-500 via-cyan-400 to-purple-400 h-full transition-all duration-1000 ease-linear rounded-full"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-
-                {/* Tip Content */}
+                {/* Tip Content - Stays indefinitely */}
                 <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-950/40 via-purple-950/20 to-slate-900/60 border border-indigo-500/20 text-xs text-slate-200 leading-relaxed">
                   "{currentQuote.quote}"
                 </div>
@@ -203,38 +181,38 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 2. RECONNECTION & SYNCING STATE BANNER */}
+      {/* 2. RECONNECTION & SYNCING STATE BANNER (🟡) */}
       {/* ========================================================================= */}
       {isOnline && (syncState === 'reconnecting' || syncState === 'syncing') && (
-        <div className="rounded-2xl border border-indigo-500/40 bg-slate-900/95 text-white shadow-2xl backdrop-blur-xl p-4 space-y-2.5 ring-1 ring-indigo-500/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <div className="rounded-2xl border border-amber-500/40 bg-slate-900/95 text-white shadow-2xl backdrop-blur-xl p-4 space-y-2.5 ring-1 ring-amber-500/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
+              <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
               </div>
               <div>
-                <span className="text-xs font-black tracking-wider uppercase text-indigo-400 flex items-center gap-1">
-                  <span>🟢 CONNECTION RESTORED</span>
+                <span className="text-xs font-black tracking-wider uppercase text-amber-400 flex items-center gap-1">
+                  <span>🟡 SYNCING DATA</span>
                 </span>
                 <p className="text-[11px] text-slate-300">
-                  {syncState === 'reconnecting' ? 'Reconnecting to CareerPilot...' : 'Synchronizing your recent progress...'}
+                  {syncState === 'reconnecting' ? 'Reconnecting to CareerPilot...' : 'Connection restored. Syncing your pending changes...'}
                 </p>
               </div>
             </div>
 
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 animate-pulse">
+            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">
               Syncing
             </span>
           </div>
 
           <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-            <div className="bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 h-full w-2/3 animate-pulse" />
+            <div className="bg-gradient-to-r from-amber-500 via-yellow-400 to-indigo-400 h-full w-3/4 animate-pulse" />
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* 3. SYNCED SUCCESS BANNER */}
+      {/* 3. SYNCED SUCCESS BANNER (🟢) */}
       {/* ========================================================================= */}
       {isOnline && syncState === 'synced' && (
         <div className="rounded-2xl border border-emerald-500/40 bg-slate-900/95 text-white shadow-2xl backdrop-blur-xl p-4 space-y-2 ring-1 ring-emerald-500/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -248,14 +226,14 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
                   🟢 CONNECTION RESTORED
                 </span>
                 <p className="text-[11px] text-slate-200 font-semibold">
-                  All changes synced
+                  {syncSummary || 'All changes synced successfully.'}
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                All changes synced ✓
+                Synced ✓
               </span>
               <button
                 onClick={() => setIsExplicitlyDismissed(true)}
@@ -274,21 +252,21 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 4. SYNC PARTIAL OR FAILED BANNER */}
+      {/* 4. SYNC ATTENTION NEEDED / PARTIAL OR FAILED BANNER (🟠) */}
       {/* ========================================================================= */}
       {isOnline && (syncState === 'sync_failed' || syncState === 'sync_partial') && (
-        <div className="rounded-2xl border border-amber-500/40 bg-slate-900/95 text-white shadow-2xl backdrop-blur-xl p-4 space-y-3 ring-1 ring-amber-500/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <div className="rounded-2xl border border-orange-500/40 bg-slate-900/95 text-white shadow-2xl backdrop-blur-xl p-4 space-y-3 ring-1 ring-orange-500/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30">
                 <AlertTriangle className="w-4 h-4" />
               </div>
               <div>
-                <span className="text-xs font-black tracking-wider uppercase text-amber-400">
-                  ⚠️ SYNC ATTENTION NEEDED
+                <span className="text-xs font-black tracking-wider uppercase text-orange-400">
+                  🟠 SYNC ATTENTION NEEDED
                 </span>
                 <p className="text-[11px] text-slate-300">
-                  Connection restored, but some changes are still waiting to sync.
+                  {syncSummary || 'Connection restored, but some changes are still waiting to sync.'}
                 </p>
               </div>
             </div>
@@ -309,7 +287,10 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
             </p>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-1">
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span className="text-[10px] text-slate-400">
+              {pendingQueueCount > 0 ? `${pendingQueueCount} change${pendingQueueCount > 1 ? 's' : ''} queued` : 'Data preserved locally'}
+            </span>
             <button
               onClick={onRetrySync}
               disabled={isSyncing}
