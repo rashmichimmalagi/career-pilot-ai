@@ -1337,49 +1337,39 @@ export function checkNewlyUnlockedAchievements(
   const summary = calculateAchievements(submissions, userId, context);
   const nowIso = new Date().toISOString();
 
-  const notifiedKey = `careerpilot_notified_achievements_${userId}`;
-  let notifiedIds: string[] = [];
-  try {
-    notifiedIds = JSON.parse(localStorage.getItem(notifiedKey) || '[]');
-  } catch (_) {
-    notifiedIds = [];
-  }
-
   const newlyUnlocked: Achievement[] = [];
   for (const ach of summary.achievements) {
     const wasPermanentlyUnlocked = Boolean(permanentBadges[ach.id]);
-    const isNowQualified = ach.unlocked;
+    const isStrictlyUnlocked = ach.unlocked && ach.progress >= ach.maxProgress;
 
-    // Transition condition: Only newly unlocked if it was NOT unlocked before and is NOW qualified
-    if (isNowQualified && !wasPermanentlyUnlocked) {
+    // Transition condition: Only newly unlocked if it was NOT unlocked before and is NOW strictly UNLOCKED
+    if (isStrictlyUnlocked && !wasPermanentlyUnlocked) {
       savePermanentUnlockedBadge(userId, ach.id, nowIso);
       newlyUnlocked.push({
         ...ach,
         unlockedAt: nowIso,
       });
 
-      if (!notifiedIds.includes(ach.id)) {
-        notifiedIds.push(ach.id);
-        if (userId && userId !== 'guest') {
-          notificationService.createNotification(userId, {
-            type: 'system',
+      if (userId && userId !== 'guest') {
+        notificationService
+          .createNotification(userId, {
+            type: 'achievement',
             category: 'ACHIEVEMENT',
+            priority: 'high',
             title: '🏆 Achievement Unlocked!',
             message: `Congratulations! You unlocked the "${ach.name}" achievement badge.`,
             action_url: '/coding?tab=achievements',
             action_label: 'View Achievements',
             dedup_key: `achievement_${ach.id}`,
-          }).catch(() => {});
-        }
+            metadata: {
+              achievement_id: ach.id,
+              achievement_name: ach.name,
+              category: ach.category,
+            },
+          })
+          .catch(() => {});
       }
     }
-  }
-
-  // Update notified in persistent storage
-  if (notifiedIds.length > 0) {
-    try {
-      localStorage.setItem(notifiedKey, JSON.stringify(notifiedIds));
-    } catch (_) {}
   }
 
   return newlyUnlocked;

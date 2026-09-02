@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Compass, ShieldAlert, Key, Loader2, ArrowLeft, Eye, EyeOff, Mail, ArrowRight, Clock } from 'lucide-react';
+import { BackButton } from '../components/common/BackButton';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isUserEmailVerified } from '../lib/supabase';
 import { profileService } from '../services/profileService';
@@ -441,25 +442,24 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, onOpenSetupGuide
       {/* Background glow effects */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[350px] bg-indigo-500/15 dark:bg-indigo-600/10 blur-[120px] rounded-full pointer-events-none" />
 
-      {/* Back button */}
-      <button
-        onClick={() => {
-          if (authView === 'email') {
-            setAuthView('main');
-            resetFormState();
-          } else {
-            if (window.history.length > 2) {
-              window.history.back();
+      {/* Top-left Back button */}
+      <div className="absolute top-5 sm:top-6 left-4 sm:left-5 md:left-6 z-20">
+        <BackButton
+          id="auth-back-button"
+          onClick={() => {
+            if (authView === 'email') {
+              setAuthView('main');
+              resetFormState();
             } else {
-              onNavigate('welcome');
+              if (window.history.length > 2) {
+                window.history.back();
+              } else {
+                onNavigate('welcome');
+              }
             }
-          }
-        }}
-        className="absolute top-6 left-6 flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors bg-white/90 dark:bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm cursor-pointer"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        <span>{authView === 'email' ? 'All Sign In Options' : 'Back'}</span>
-      </button>
+          }}
+        />
+      </div>
 
       {/* Main Auth Card */}
       <div className="w-full max-w-md bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 shadow-xl dark:shadow-2xl backdrop-blur-xl relative z-10 space-y-6 transition-colors duration-300">

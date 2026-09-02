@@ -24,6 +24,7 @@ import {
   Lock
 } from 'lucide-react';
 import { BackgroundBubbles } from '../components/common/BackgroundBubbles';
+import { BackButton } from '../components/common/BackButton';
 import { useAuth } from '../context/AuthContext';
 
 interface LandingPageProps {
@@ -165,21 +166,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
       {/* Background Floating Bubbles */}
       <BackgroundBubbles />
 
-      {/* ================= HERO SECTION ================= */}
-      <section className="relative pt-6 sm:pt-7 md:pt-8 pb-16 md:pb-24 overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          
-          {/* Top Back Navigation Button */}
-          <div className="mb-6 sm:mb-8 flex items-center justify-start">
-            <button
-              onClick={() => onNavigate('welcome')}
-              className="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all bg-white/90 dark:bg-slate-900/90 hover:bg-white dark:hover:bg-slate-900 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs hover:shadow-sm hover:border-indigo-500/30 cursor-pointer group"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-              <span>Back</span>
-            </button>
-          </div>
+      {/* Top-Left Back Navigation Button (Positioned close to the viewport left edge, below navbar) */}
+      <div className="absolute top-5 sm:top-6 left-4 sm:left-5 md:left-6 z-30">
+        <BackButton
+          id="landing-back-button"
+          onClick={() => onNavigate('welcome')}
+        />
+      </div>
 
+      {/* ================= HERO SECTION ================= */}
+      <section className="relative pt-16 sm:pt-20 md:pt-20 pb-16 md:pb-24 overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
             
             {/* Hero Left Content */}

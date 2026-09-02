@@ -1503,7 +1503,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
         md += `## PROFESSIONAL EXPERIENCE\n`;
         validExp.forEach((e) => {
           const dateSpan = e.duration || (e.startDate && e.endDate ? `${e.startDate} – ${e.endDate}` : e.startDate || '');
-          md += `### ${e.role || 'Software Engineer'} | ${e.company || ''}${e.location ? ` | ${e.location}` : ''}${dateSpan ? ` (${dateSpan})` : ''}\n`;
+          md += `### ${e.role || ''} | ${e.company || ''}${e.location ? ` | ${e.location}` : ''}${dateSpan ? ` (${dateSpan})` : ''}\n`;
           if (e.description && e.description.trim()) {
             md += `${e.description.trim()}\n`;
           }
@@ -1547,7 +1547,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           const dateSpan = ed.durationOrYear || (ed.startDate && ed.endDate ? `${ed.startDate} – ${ed.endDate}` : ed.startDate || '');
           const gpaStr = ed.gpaOrScore ? ` | GPA: ${ed.gpaOrScore}` : '';
           const fieldStr = ed.field ? ` in ${ed.field}` : '';
-          md += `### ${ed.degree || 'Bachelor of Science'}${fieldStr}, ${ed.institution || ''}${dateSpan ? ` (${dateSpan})` : ''}${gpaStr}\n`;
+          md += `### ${ed.degree || ''}${fieldStr}, ${ed.institution || ''}${dateSpan ? ` (${dateSpan})` : ''}${gpaStr}\n`;
           if (ed.details && ed.details.trim()) {
             md += `- ${ed.details.trim()}\n`;
           }
@@ -1780,7 +1780,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           const parts = line.split(/[|–\-,]/).map((p) => p.trim()).filter(Boolean);
           currentExp = {
             id: `exp-${experienceList.length + 1}`,
-            role: parts[0] || targetRole || 'Software Engineer',
+            role: parts[0] || targetRole || '',
             company: parts[1] || '',
             location: parts[2] || '',
             duration: line.match(/(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})\s*[-–]\s*(?:present|\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d{4})/i)?.[0] || '',

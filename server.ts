@@ -37,9 +37,9 @@ function getGemini(): { client: GoogleGenAI | null; error: string | null } {
 }
 
 const SUPPORTED_MODELS = [
-  'gemini-3.1-flash-lite',
-  'gemini-flash-latest',
   'gemini-3.7-flash',
+  'gemini-flash-latest',
+  'gemini-3.1-flash-lite',
 ];
 
 const modelCooldownMap = new Map<string, number>();
@@ -95,7 +95,7 @@ async function generateContentWithResilience(
   options: GenerateResilienceOptions = {}
 ): Promise<{ response: any; usedModel: string }> {
   const label = options.label || 'Gemini Service';
-  const perAttemptTimeout = options.timeoutMs ?? 7500;
+  const perAttemptTimeout = options.timeoutMs ?? 20000;
   let lastError: any = null;
 
   // Filter out models currently in cooldown due to quota exhaustion, or try all if all in cooldown
@@ -169,30 +169,55 @@ async function generateContentWithResilience(
     }
   }
 
-  // If schema was supplied and all standard model calls failed, attempt gemini-3.1-flash-lite with simplified JSON mimeType
+  // If schema was supplied and all standard model calls failed, attempt gemini-3.7-flash then gemini-3.1-flash-lite with simplified JSON mimeType
   if (options.config?.responseSchema) {
     try {
-      console.info(`[${label}] Retrying with gemini-3.1-flash-lite using simplified JSON mimeType...`);
+      console.info(`[${label}] Retrying with gemini-3.7-flash using simplified JSON mimeType...`);
       const simplifiedConfig = {
         ...options.config,
         responseSchema: undefined,
         responseMimeType: 'application/json',
       };
-      delete simplifiedConfig.thinkingConfig;
+      if (simplifiedConfig.thinkingConfig) {
+        simplifiedConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+      }
       const response = await withTimeout(
         ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
+          model: 'gemini-3.7-flash',
           contents,
           config: simplifiedConfig,
         }),
         perAttemptTimeout,
-        'Fallback model gemini-3.1-flash-lite timed out'
+        `Fallback model gemini-3.7-flash timed out after ${perAttemptTimeout / 1000}s`
       );
       if (response) {
-        return { response, usedModel: 'gemini-3.1-flash-lite (schema-fallback)' };
+        return { response, usedModel: 'gemini-3.7-flash (schema-fallback)' };
       }
     } catch (e: any) {
       lastError = e;
+      try {
+        console.info(`[${label}] Retrying with gemini-3.1-flash-lite using simplified JSON mimeType...`);
+        const liteConfig = {
+          ...options.config,
+          responseSchema: undefined,
+          responseMimeType: 'application/json',
+        };
+        delete liteConfig.thinkingConfig;
+        const responseLite = await withTimeout(
+          ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite',
+            contents,
+            config: liteConfig,
+          }),
+          perAttemptTimeout,
+          `Fallback model gemini-3.1-flash-lite timed out after ${perAttemptTimeout / 1000}s`
+        );
+        if (responseLite) {
+          return { response: responseLite, usedModel: 'gemini-3.1-flash-lite (schema-fallback)' };
+        }
+      } catch (e2: any) {
+        lastError = e2;
+      }
     }
   }
 
@@ -5783,7 +5808,9 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
             responseMimeType: 'application/json',
             responseSchema: plannerResponseSchema,
             temperature: 0.1, // Minimal temperature to prevent hallucination
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           },
+          timeoutMs: 25000,
         });
 
         const rawText = (response?.text || '').trim();
@@ -6286,214 +6313,6 @@ ${JSON.stringify(sanitizedSummary, null, 2)}
       },
     ];
   }
-
-  // ==========================================
-  // SEND CAREER EMAIL ENDPOINT (Phase 1: Test Email)
-  // Secure server-side handler for student emails
-  // ==========================================
-  const sendCareerEmailHandler = async (req: express.Request, res: express.Response) => {
-    res.setHeader('Content-Type', 'application/json');
-
-    if (req.method === 'OPTIONS') {
-      return res.status(200).send('ok');
-    }
-
-    if (req.method !== 'POST') {
-      return res.status(405).json({
-        success: false,
-        error: `Method Not Allowed: ${req.method}. Email endpoint requires HTTP POST.`,
-      });
-    }
-
-    try {
-      // 1. Authenticate Supabase token from Authorization header
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({
-          success: false,
-          error: 'Unauthorized: Authentication token is required.',
-        });
-      }
-
-      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://liqaeoxwjhsalfdqdwcr.supabase.co';
-      const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxpcWFlb3h3amhzYWxmZHFkd2NyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MjAwMDAwMDAwMH0.signature';
-
-      let studentEmail = '';
-      let studentName = 'Student';
-
-      try {
-        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-          auth: { persistSession: false },
-        });
-
-        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-        if (user && user.email) {
-          studentEmail = user.email.trim();
-          studentName =
-            user.user_metadata?.full_name ||
-            user.user_metadata?.name ||
-            user.user_metadata?.user_name ||
-            'Student';
-        }
-      } catch (authErr) {
-        console.warn('[send-career-email] Supabase getUser warning:', authErr);
-      }
-
-      // If Supabase API failed to reach auth server or timed out, decode JWT payload directly
-      if (!studentEmail && token.includes('.')) {
-        try {
-          const parts = token.split('.');
-          if (parts.length >= 2) {
-            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-            if (payload && payload.email) {
-              studentEmail = String(payload.email).trim();
-              studentName = payload.user_metadata?.full_name || payload.user_metadata?.name || 'Student';
-            }
-          }
-        } catch (jwtErr) {
-          console.warn('[send-career-email] JWT parse fallback warning:', jwtErr);
-        }
-      }
-
-      if (!studentEmail) {
-        return res.status(401).json({
-          success: false,
-          error: 'Unauthorized: Unable to verify authenticated student session.',
-        });
-      }
-
-      console.log(`[send-career-email] Request from authenticated student: ${studentName} (${studentEmail})`);
-
-      // 3. Verify RESEND_API_KEY secret
-      const resendApiKey = process.env.RESEND_API_KEY;
-      if (!resendApiKey || resendApiKey.trim() === '') {
-        return res.status(503).json({
-          success: false,
-          error: 'RESEND_API_KEY secret is not configured in server environment or Supabase Edge Function secrets. Please set RESEND_API_KEY.',
-        });
-      }
-
-      const defaultFrom = 'CareerPilot AI <onboarding@resend.dev>';
-      const fromEmail = process.env.RESEND_FROM_EMAIL?.trim() || defaultFrom;
-      const subject = 'CareerPilot AI — Email Test';
-      const plainText = 'Your CareerPilot email notifications are working successfully.';
-
-      const htmlBody = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${subject}</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; padding: 40px 16px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" style="max-width: 560px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-          <tr>
-            <td style="padding: 32px 32px 24px 32px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); text-align: left;">
-              <table role="presentation" cellspacing="0" cellpadding="0">
-                <tr>
-                  <td style="font-size: 24px; line-height: 1;">🚀</td>
-                  <td style="padding-left: 12px; font-size: 20px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px;">
-                    CareerPilot AI
-                  </td>
-                </tr>
-              </table>
-              <p style="margin: 12px 0 0 0; font-size: 13px; color: #e0e7ff; font-weight: 500;">
-                Placement & Career Copilot for Engineering Students
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 32px;">
-              <h1 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 700; color: #0f172a;">
-                Email Verification Test
-              </h1>
-              <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #334155;">
-                Hello <strong>${studentName}</strong>,
-              </p>
-              <div style="background-color: #f1f5f9; border-left: 4px solid #4f46e5; padding: 16px; border-radius: 8px; margin-bottom: 24px;">
-                <p style="margin: 0; font-size: 14px; font-weight: 600; color: #1e293b;">
-                  Your CareerPilot email notifications are working successfully.
-                </p>
-              </div>
-              <p style="margin: 0 0 8px 0; font-size: 13px; line-height: 1.5; color: #64748b;">
-                This test confirms that your authenticated account (<strong>${studentEmail}</strong>) is properly linked and ready to receive placement alerts, weekly readiness summaries, and practice reminders.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 24px 32px; background-color: #f8fafc; border-top: 1px solid #f1f5f9; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                Sent securely via CareerPilot AI Authenticated Notification System
-              </p>
-              <p style="margin: 4px 0 0 0; font-size: 11px; color: #cbd5e1;">
-                Account: ${studentEmail}
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-      `.trim();
-
-      // 4. Dispatch Email via Resend API
-      const resendResponse = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: fromEmail,
-          to: [studentEmail],
-          subject: subject,
-          text: plainText,
-          html: htmlBody,
-        }),
-      });
-
-      const resendData = (await resendResponse.json()) as any;
-
-      if (!resendResponse.ok) {
-        console.error('[send-career-email] Resend API error:', resendData);
-        let errMsg = resendData?.message || resendData?.error?.message || resendData?.name || 'Failed to send email via Resend.';
-        if (resendResponse.status === 403 && typeof errMsg === 'string' && errMsg.includes('only send testing emails')) {
-          errMsg = `Resend Domain Restriction: ${errMsg} (When testing with onboarding@resend.dev, emails can only be sent to the Resend account owner's address. To send to any student address, verify a custom domain at resend.com/domains).`;
-        } else if (resendResponse.status === 401) {
-          errMsg = `Resend Authentication Failed: ${errMsg}. Please verify that the RESEND_API_KEY secret in Supabase Edge Functions is correct.`;
-        }
-
-        return res.status(resendResponse.status >= 400 && resendResponse.status < 600 ? resendResponse.status : 502).json({
-          success: false,
-          error: errMsg,
-          details: resendData,
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Email Sent Successfully',
-        emailId: resendData?.id,
-        recipient: studentEmail,
-      });
-    } catch (err: any) {
-      console.error('[send-career-email] Unexpected error:', err);
-      return res.status(500).json({
-        success: false,
-        error: err?.message || 'Internal server error while processing email notification.',
-      });
-    }
-  };
-
-  app.all('/api/send-career-email', sendCareerEmailHandler);
-  app.all('/api/send-career-email/', sendCareerEmailHandler);
 
   // Job Description ↔ Resume Match Analyzer API
   const KNOWN_MATCH_SKILLS = [

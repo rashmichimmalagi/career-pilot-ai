@@ -1021,7 +1021,7 @@ export async function getTodayStudyPlan(
 
       // Call Server-Side AI API with Timeout & Fallback
       let generatedPlan: StudyPlanData | null = null;
-      const timeoutMs = options?.timeoutMs || 7000;
+      const timeoutMs = options?.timeoutMs || 25000;
 
       try {
         const res = await fetchWithTimeout('/api/study-planner/generate', {

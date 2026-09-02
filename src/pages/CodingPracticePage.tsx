@@ -305,22 +305,32 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
     }
   }, [activeProblem]);
 
+  // URL query parameter listener for tab switching
+  useEffect(() => {
+    const handleUrlTab = () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const tabParam = searchParams.get('tab');
+      if (tabParam === 'achievements' || tabParam === 'history' || tabParam === 'arena') {
+        setPageTab(tabParam as any);
+        if (tabParam === 'achievements') {
+          setTimeout(() => {
+            const el = document.getElementById('coding-achievements-section');
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+          }, 200);
+        }
+      }
+    };
+
+    handleUrlTab();
+    window.addEventListener('popstate', handleUrlTab);
+    return () => window.removeEventListener('popstate', handleUrlTab);
+  }, []);
+
   // URL query parameter listener for automatic context & auto-generation from Roadmap & Company Prep
   useEffect(() => {
     if (autoTriggeredRef.current) return;
 
     const searchParams = new URLSearchParams(window.location.search);
-    const tabParam = searchParams.get('tab');
-    if (tabParam === 'achievements' || tabParam === 'history' || tabParam === 'arena') {
-      setPageTab(tabParam as any);
-      if (tabParam === 'achievements') {
-        setTimeout(() => {
-          const el = document.getElementById('coding-achievements-section');
-          if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }, 200);
-      }
-    }
-
     const subjectParam = searchParams.get('subject');
     const topicParam = searchParams.get('topic');
     const diffParam = searchParams.get('difficulty') as CodingDifficulty;

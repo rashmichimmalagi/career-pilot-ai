@@ -41,7 +41,6 @@ import { PreparationTopSection } from '../components/dashboard/PreparationTopSec
 import { ModuleProgressGrid } from '../components/dashboard/ModuleProgressGrid';
 import { PerformanceInsightsSection } from '../components/dashboard/PerformanceInsightsSection';
 import { RecentActivitySection } from '../components/dashboard/RecentActivitySection';
-import { SendTestEmailCard } from '../components/common/SendTestEmailCard';
 
 // React Error Boundary for isolated error handling
 interface ErrorBoundaryProps {
@@ -449,11 +448,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 />
               </section>
             )}
-
-            {/* 10. EMAIL NOTIFICATIONS */}
-            <section aria-label="Notifications System" className="pt-2">
-              <SendTestEmailCard />
-            </section>
           </DashboardErrorBoundary>
         ) : (
           <div className="p-12 rounded-3xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/40 text-center space-y-5 shadow-sm">

@@ -355,6 +355,7 @@ export const notificationService = {
 
   /**
    * 8. Create a single notification with deduplication & preference enforcement
+   * Supabase is the single authoritative source of truth.
    */
   async createNotification(
     userId: string,
@@ -371,6 +372,8 @@ export const notificationService = {
     }
   ): Promise<AppNotification | null> {
     const effectiveUserId = await this.getEffectiveUserId(userId);
+    if (!effectiveUserId || effectiveUserId === 'guest') return null;
+
     const prefs = await this.fetchPreferences(effectiveUserId);
 
     // 1. Check if notifications or specific category are disabled
@@ -384,19 +387,43 @@ export const notificationService = {
     if (item.category === 'ACHIEVEMENT' && !prefs.achievement_notifications) return null;
     if (item.category === 'PROGRESS' && !prefs.progress_updates) return null;
 
-    // 2. Deduplication check via key
+    const localCacheKey = `${NOTIFICATION_CACHE_PREFIX}${effectiveUserId}`;
+
+    // 2. Cloud-authoritative deduplication check via Supabase
     if (item.dedup_key) {
-      const dedupStorageKey = `${NOTIFICATION_DEDUP_PREFIX}${effectiveUserId}_${item.dedup_key}`;
+      if (isSupabaseConfigured()) {
+        try {
+          const { data: existing, error: dedupErr } = await supabase
+            .from('notifications')
+            .select('id, created_at, is_read')
+            .eq('user_id', effectiveUserId)
+            .eq('dedup_key', item.dedup_key)
+            .limit(1);
+
+          if (!dedupErr && Array.isArray(existing) && existing.length > 0) {
+            // Already created and persisted in cloud — strictly prevent duplicate
+            return null;
+          }
+        } catch (checkErr) {
+          console.warn('[NotificationService] Dedup check notice:', checkErr);
+        }
+      }
+
+      // Fast synchronous check against local cache
       try {
-        const lastCreated = localStorage.getItem(dedupStorageKey);
-        if (lastCreated) {
-          // Prevent duplicate if already created
+        const cached: AppNotification[] = JSON.parse(localStorage.getItem(localCacheKey) || '[]');
+        if (cached.some((n) => n.dedup_key === item.dedup_key)) {
           return null;
         }
       } catch (_) {}
     }
 
-    const newId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    // Deterministic ID if dedup_key is present to guarantee DB idempotency
+    const safeDedup = item.dedup_key ? item.dedup_key.replace(/[^a-zA-Z0-9_]/g, '_') : null;
+    const cleanUid = effectiveUserId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
+    const newId = safeDedup
+      ? `notif_${cleanUid}_${safeDedup}`
+      : `notif_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const nowIso = new Date().toISOString();
 
     const notification: AppNotification = {
@@ -417,40 +444,44 @@ export const notificationService = {
       cloudSynced: false,
     };
 
-    // 3. Save to Supabase (Source of Truth)
+    // 3. Save to Supabase (Authoritative Cloud Source of Truth)
     if (isSupabaseConfigured() && effectiveUserId !== 'guest') {
       try {
         const { data, error } = await supabase
           .from('notifications')
-          .insert({
-            id: newId,
-            user_id: effectiveUserId,
-            type: item.type,
-            title: item.title,
-            message: item.message,
-            category: item.category,
-            priority: item.priority || 'info',
-            is_read: false,
-            action_url: item.action_url || null,
-            action_label: item.action_label || null,
-            dedup_key: item.dedup_key || null,
-            metadata: item.metadata || null,
-            created_at: nowIso,
-          })
+          .upsert(
+            {
+              id: newId,
+              user_id: effectiveUserId,
+              type: item.type,
+              title: item.title,
+              message: item.message,
+              category: item.category,
+              priority: item.priority || 'info',
+              is_read: false,
+              action_url: item.action_url || null,
+              action_label: item.action_label || null,
+              dedup_key: item.dedup_key || null,
+              metadata: item.metadata || null,
+              created_at: nowIso,
+            },
+            { onConflict: 'id' }
+          )
           .select()
           .maybeSingle();
 
         if (!error && data) {
           notification.cloudSynced = true;
+        } else if (error) {
+          console.warn('[NotificationService] Supabase insert notification notice:', error.message);
         }
       } catch (err) {
-        console.warn('[NotificationService] Supabase insert notification notice:', err);
+        console.warn('[NotificationService] Supabase insert notification exception:', err);
       }
     }
 
-    // 4. Update local cache
+    // 4. Update local cache mirror
     try {
-      const localCacheKey = `${NOTIFICATION_CACHE_PREFIX}${effectiveUserId}`;
       const cached: AppNotification[] = JSON.parse(localStorage.getItem(localCacheKey) || '[]');
       const updated = [notification, ...cached.filter((n) => n.id !== newId)].slice(0, 50);
       localStorage.setItem(localCacheKey, JSON.stringify(updated));

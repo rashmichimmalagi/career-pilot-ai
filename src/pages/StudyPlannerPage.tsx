@@ -149,7 +149,7 @@ export const StudyPlannerPage: React.FC<StudyPlannerPageProps> = ({ onNavigate }
         studentId,
         profile,
         true, // forceRefresh
-        { signal: controller.signal, timeoutMs: 7000 }
+        { signal: controller.signal, timeoutMs: 25000 }
       );
 
       if (!controller.signal.aborted) {

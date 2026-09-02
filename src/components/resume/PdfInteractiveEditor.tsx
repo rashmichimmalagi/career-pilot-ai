@@ -295,53 +295,8 @@ export const PdfInteractiveEditor: React.FC<PdfInteractiveEditorProps> = ({
     setEditingInputText(overlay.currentText);
   };
 
-  const handleCommitInlineEdit = (overlayId: string) => {
-    setOverlays((prev) =>
-      prev.map((o) => {
-        if (o.id === overlayId) {
-          const isChanged = editingInputText !== o.originalText;
-          return {
-            ...o,
-            currentText: editingInputText,
-            isModified: isChanged,
-          };
-        }
-        return o;
-      })
-    );
-    setEditingOverlayId(null);
-    setHasEdits(true);
-
-    // Sync edited text into structuredData / resumeText
-    syncOverlaysToStructuredData();
-  };
-
-  const handleCancelInlineEdit = () => {
-    setEditingOverlayId(null);
-    setEditingInputText('');
-  };
-
-  const handleRevertItem = (overlayId: string) => {
-    setOverlays((prev) =>
-      prev.map((o) => {
-        if (o.id === overlayId) {
-          return {
-            ...o,
-            currentText: o.originalText,
-            isModified: false,
-          };
-        }
-        return o;
-      })
-    );
-    setEditingOverlayId(null);
-  };
-
-  // ---------------------------------------------------------------------------
-  // 4. Sync Overlays to StructuredData & ResumeText
-  // ---------------------------------------------------------------------------
-  const syncOverlaysToStructuredData = useCallback(() => {
-    setOverlays((currentOverlays) => {
+  const syncOverlaysToStructuredData = useCallback(
+    (currentOverlays: TextOverlayItem[]) => {
       const fullModifiedText = currentOverlays
         .filter((o) => o.pageIndex === currentPage)
         .map((o) => o.currentText)
@@ -360,9 +315,51 @@ export const PdfInteractiveEditor: React.FC<PdfInteractiveEditorProps> = ({
           onDataChange(parsed);
         }
       }
-      return currentOverlays;
+    },
+    [currentPage, resume, onDataChange]
+  );
+
+  const handleCommitInlineEdit = (overlayId: string) => {
+    const nextOverlays = overlays.map((o) => {
+      if (o.id === overlayId) {
+        const isChanged = editingInputText !== o.originalText;
+        return {
+          ...o,
+          currentText: editingInputText,
+          isModified: isChanged,
+        };
+      }
+      return o;
     });
-  }, [currentPage, resume, onDataChange]);
+
+    setOverlays(nextOverlays);
+    setEditingOverlayId(null);
+    setHasEdits(true);
+
+    // Sync edited text into structuredData / resumeText outside state updater
+    syncOverlaysToStructuredData(nextOverlays);
+  };
+
+  const handleCancelInlineEdit = () => {
+    setEditingOverlayId(null);
+    setEditingInputText('');
+  };
+
+  const handleRevertItem = (overlayId: string) => {
+    const nextOverlays = overlays.map((o) => {
+      if (o.id === overlayId) {
+        return {
+          ...o,
+          currentText: o.originalText,
+          isModified: false,
+        };
+      }
+      return o;
+    });
+    setOverlays(nextOverlays);
+    setEditingOverlayId(null);
+    syncOverlaysToStructuredData(nextOverlays);
+  };
 
   // Current page active overlays
   const currentPageOverlays = useMemo(

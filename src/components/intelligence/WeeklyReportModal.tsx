@@ -2,18 +2,14 @@ import React from 'react';
 import {
   Calendar,
   Sparkles,
-  TrendingUp,
-  AlertTriangle,
   Award,
-  CheckCircle2,
+  AlertTriangle,
   X,
-  Printer,
   ArrowRight,
   Code2,
   Brain,
   Cpu,
   FileText,
-  Map,
 } from 'lucide-react';
 import { WeeklyCareerReport } from '../../types/intelligence';
 
@@ -44,10 +40,6 @@ export const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({
     }
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
       <div
@@ -71,13 +63,6 @@ export const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrint}
-              className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
-              title="Print / Save PDF"
-            >
-              <Printer className="w-4 h-4" />
-            </button>
             <button
               onClick={onClose}
               className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"

@@ -14,6 +14,8 @@ export function useNotifications() {
   const [error, setError] = useState<string | null>(null);
   const isMounted = useRef(true);
 
+  const lastEvalTimeRef = useRef<number>(0);
+
   // 1. Fetch notifications & preferences for authenticated user only
   const loadData = useCallback(async () => {
     if (!userId) {
@@ -38,35 +40,41 @@ export function useNotifications() {
         setLoading(false);
       }
 
-      // If authenticated, run smart trigger evaluation in background for this specific user
-      fetchCareerIntelligence(userId)
-        .then(async (intel) => {
-          if (intel && isMounted.current) {
-            const missingSkills: string[] = [];
-            if (intel.adaptive?.weakTopics) {
-              missingSkills.push(...intel.adaptive.weakTopics.map((t) => t.topic));
-            }
-            const weakness = intel.interviewWeakness?.weakAreas?.[0]?.area || null;
+      // Throttled background evaluation (max once per 3 minutes per session)
+      const now = Date.now();
+      if (now - lastEvalTimeRef.current > 180000) {
+        lastEvalTimeRef.current = now;
+        fetchCareerIntelligence(userId)
+          .then(async (intel) => {
+            if (intel && isMounted.current) {
+              const missingSkills: string[] = [];
+              if (intel.adaptive?.weakTopics) {
+                missingSkills.push(...intel.adaptive.weakTopics.map((t) => t.topic));
+              }
+              const weakness = intel.interviewWeakness?.weakAreas?.[0]?.area || null;
 
-            await notificationService.evaluateAndGenerateSmartNotifications(userId, {
-              studentId: userId,
-              readinessScore: intel.readiness?.overallScore ?? null,
-              mockInterviewsCount: intel.interviewWeakness?.totalInterviews ?? 0,
-              interviewWeaknessArea: weakness,
-              hasResume: intel.readiness?.dimensions?.resume?.isAvailable ?? false,
-              resumeMissingSkills: missingSkills,
-              unlockedAchievementsCount: intel.achievements?.unlockedCount ?? 0,
-              recentlyUnlockedBadgeTitle: intel.achievements?.recentlyUnlocked?.[0]?.title ?? null,
-            });
+              const created = await notificationService.evaluateAndGenerateSmartNotifications(userId, {
+                studentId: userId,
+                readinessScore: intel.readiness?.overallScore ?? null,
+                mockInterviewsCount: intel.interviewWeakness?.totalInterviews ?? 0,
+                interviewWeaknessArea: weakness,
+                hasResume: intel.readiness?.dimensions?.resume?.isAvailable ?? false,
+                resumeMissingSkills: missingSkills,
+                unlockedAchievementsCount: intel.achievements?.unlockedCount ?? 0,
+                recentlyUnlockedBadgeTitle: intel.achievements?.recentlyUnlocked?.[0]?.title ?? null,
+              });
 
-            // Refresh notifications after trigger check
-            const updated = await notificationService.fetchNotifications(userId);
-            if (isMounted.current) {
-              setNotifications(updated);
+              // Refresh notifications only if new smart notifications were generated
+              if (created && created.length > 0) {
+                const updated = await notificationService.fetchNotifications(userId);
+                if (isMounted.current) {
+                  setNotifications(updated);
+                }
+              }
             }
-          }
-        })
-        .catch(() => {});
+          })
+          .catch(() => {});
+      }
     } catch (err: any) {
       if (isMounted.current) {
         setError(err?.message || 'Unable to load notifications.');

@@ -289,13 +289,16 @@ export const ResumeViewerModal: React.FC<ResumeViewerModalProps> = ({
     (updater: (prev: StructuredResumeData) => StructuredResumeData) => {
       setStructuredData((prev) => {
         const next = updater(prev);
-        setHistory((currHist) => {
-          const newHist = currHist.slice(0, historyIndex + 1);
-          return [...newHist, next];
-        });
-        setHistoryIndex((prevIdx) => prevIdx + 1);
-        setHasUnsavedChanges(true);
-        setSaveStatusText('Unsaved changes');
+        // Use timeout or separate tick for history to prevent state mutation inside updater
+        setTimeout(() => {
+          setHistory((currHist) => {
+            const newHist = currHist.slice(0, historyIndex + 1);
+            return [...newHist, next];
+          });
+          setHistoryIndex((prevIdx) => prevIdx + 1);
+          setHasUnsavedChanges(true);
+          setSaveStatusText('Unsaved changes');
+        }, 0);
         return next;
       });
     },

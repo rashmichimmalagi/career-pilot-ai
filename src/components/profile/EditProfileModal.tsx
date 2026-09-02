@@ -24,7 +24,6 @@ import { useAuth } from '../../context/AuthContext';
 import { profileService } from '../../services/profileService';
 import { Profile } from '../../types/database';
 import { supabase } from '../../lib/supabase';
-import { SendTestEmailCard } from '../common/SendTestEmailCard';
 
 interface EditProfileModalProps {
   isOpen: boolean;
@@ -955,10 +954,6 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                   </div>
                 </div>
               )}
-              {/* Email Notifications Section (Coming Soon) */}
-              <div className="pt-2">
-                <SendTestEmailCard variant="card" />
-              </div>
             </div>
           </form>
         </div>

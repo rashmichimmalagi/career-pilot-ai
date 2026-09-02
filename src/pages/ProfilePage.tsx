@@ -36,7 +36,6 @@ import { EditProfileModal } from '../components/profile/EditProfileModal';
 import { EditAcademicModal } from '../components/profile/EditAcademicModal';
 import { EditPlacementFocusModal } from '../components/profile/EditPlacementFocusModal';
 import { EditPreparationProfileModal } from '../components/profile/EditPreparationProfileModal';
-import { SendTestEmailCard } from '../components/common/SendTestEmailCard';
 
 interface ProfilePageProps {
   onNavigate: (page: string) => void;
@@ -791,9 +790,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate }) => {
                 </div>
               </div>
             </div>
-
-            {/* Email Notifications Placeholder */}
-            <SendTestEmailCard />
           </div>
         )}
 
