@@ -18,6 +18,7 @@ import { interviewStorage } from '../services/interviewStorage';
 import { codingService } from '../services/codingService';
 import { fetchPlacementHistory } from '../services/placementStorage';
 import { persistenceManager } from '../services/persistenceManager';
+import { resumeService } from '../services/resumeService';
 import { Profile } from '../types/database';
 import { Toast, ToastData } from '../components/common/Toast';
 
@@ -240,6 +241,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } else if (event === 'SIGNED_OUT') {
         sessionStorage.removeItem('notified_session_token');
+        resumeService.clearInFlightAnalyses();
         setProfile(null);
       } else if (newSession?.user) {
         await fetchProfileForUser(newSession.user.id);
@@ -362,6 +364,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     try {
       sessionStorage.removeItem('notified_session_token');
+      resumeService.clearInFlightAnalyses();
       await signOutUser();
       setUser(null);
       setSession(null);

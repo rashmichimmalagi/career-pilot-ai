@@ -1,7 +1,8 @@
 // Supabase Edge Function: analyze-resume
-// Deploy command: supabase functions deploy analyze-resume --no-verify-jwt
+// Deploy command: supabase functions deploy analyze-resume
 
 import { GoogleGenAI, Type } from 'npm:@google/genai@^2.4.0';
+import { createClient } from 'npm:@supabase/supabase-js@^2.49.1';
 
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -17,7 +18,7 @@ const SUPPORTED_MODELS = [
 ];
 
 Deno.serve(async (req: Request) => {
-  console.log('analyze-resume request method:', req.method);
+  console.log('[analyze-resume Edge Function] Request method:', req.method);
 
   // 1. CRITICAL: Handle CORS Preflight FIRST before authentication, body parsing, or AI
   if (req.method === 'OPTIONS') {
@@ -29,10 +30,11 @@ Deno.serve(async (req: Request) => {
 
   // 2. Reject non-POST HTTP methods with 405 and CORS headers
   if (req.method !== 'POST') {
-    console.error(`analyze-resume Method not allowed: ${req.method}`);
+    console.error(`[analyze-resume] Method not allowed: ${req.method}`);
     return new Response(
       JSON.stringify({
         error: `Method Not Allowed: ${req.method}. Resume analysis endpoint requires HTTP POST.`,
+        code: 'METHOD_NOT_ALLOWED',
       }),
       {
         status: 405,
@@ -44,9 +46,44 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  console.log('analyze-resume POST received');
-
   try {
+    // 3. Authenticate User via Supabase JWT (if Supabase configuration is present)
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || '';
+    let authenticatedUserId: string | null = null;
+
+    if (supabaseUrl && supabaseAnonKey && authHeader) {
+      try {
+        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+          global: { headers: { Authorization: authHeader } },
+          auth: { persistSession: false },
+        });
+
+        const token = authHeader.replace(/^Bearer\s+/i, '');
+        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+        if (authError || !user) {
+          console.warn('[analyze-resume] JWT verification failed:', authError?.message || 'No user found');
+          return new Response(
+            JSON.stringify({
+              error: 'Unauthorized: Invalid or expired authentication session. Please sign in again.',
+              code: 'UNAUTHORIZED',
+            }),
+            {
+              status: 401,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        authenticatedUserId = user.id;
+        console.log('[analyze-resume] Verified authenticated user:', authenticatedUserId);
+      } catch (authEx: any) {
+        console.warn('[analyze-resume] Auth validation error:', authEx?.message || authEx);
+      }
+    }
+
     let body: any;
     try {
       body = await req.json();
@@ -54,6 +91,7 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           error: 'Invalid JSON request payload.',
+          code: 'BAD_REQUEST',
         }),
         {
           status: 400,
@@ -62,13 +100,47 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { resumeText, targetRole } = body || {};
+    const { resumeText, targetRole, userId, storagePath } = body || {};
 
-    // 3. Validate Inputs
+    // 4. Multi-User Isolation Check: If frontend provided a userId, verify against JWT
+    if (authenticatedUserId && userId && userId !== authenticatedUserId) {
+      console.warn('[analyze-resume] User ID mismatch detected. Frontend:', userId, 'JWT:', authenticatedUserId);
+      return new Response(
+        JSON.stringify({
+          error: 'Forbidden: You cannot perform resume operations on behalf of another user.',
+          code: 'FORBIDDEN_USER_MISMATCH',
+        }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // 5. Storage Path Ownership Check
+    if (authenticatedUserId && storagePath && typeof storagePath === 'string') {
+      const pathPrefix = `${authenticatedUserId}/`;
+      if (!storagePath.startsWith(pathPrefix)) {
+        console.warn('[analyze-resume] Storage path ownership violation:', storagePath, 'expected prefix:', pathPrefix);
+        return new Response(
+          JSON.stringify({
+            error: 'Forbidden: You can only access resume files stored in your own user directory.',
+            code: 'FORBIDDEN_STORAGE_ACCESS',
+          }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
+    // 6. Validate Inputs
     if (!resumeText || typeof resumeText !== 'string' || resumeText.trim().length < 15) {
       return new Response(
         JSON.stringify({
-          error: 'Resume text is required and must contain readable content.',
+          error: 'Resume text is required and must contain readable content (at least 15 characters).',
+          code: 'INVALID_RESUME_TEXT',
         }),
         {
           status: 400,
@@ -77,19 +149,20 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    console.log('resume text length:', resumeText.length);
+    console.log('[analyze-resume] Resume text length:', resumeText.length);
 
     const role = targetRole && typeof targetRole === 'string' && targetRole.trim().length > 0
       ? targetRole.trim()
       : 'Software Developer';
 
-    // 4. Initialize Gemini AI Client from Server Environment
+    // 7. Initialize Gemini AI Client from Server Environment
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     if (!apiKey) {
-      console.error('analyze-resume GEMINI_API_KEY secret is missing.');
+      console.error('[analyze-resume] GEMINI_API_KEY secret is missing.');
       return new Response(
         JSON.stringify({
           error: 'Resume analysis service is temporarily unavailable (Missing AI configuration).',
+          code: 'MISSING_AI_CONFIG',
         }),
         {
           status: 503,
@@ -196,13 +269,14 @@ Provide the complete ATS and placement analysis for "${role}" strictly in the re
     }
 
     if (!rawResponse) {
-      console.error('analyze-resume AI generation failed:', lastError?.message || lastError);
+      console.error('[analyze-resume] AI generation failed across all models:', lastError?.message || lastError);
       return new Response(
         JSON.stringify({
-          error: 'AI analysis is temporarily unavailable. Please try again.',
+          error: 'AI analysis service is temporarily busy. Please try again in a few moments.',
+          code: 'AI_GENERATION_FAILED',
         }),
         {
-          status: 500,
+          status: 503,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
@@ -214,17 +288,22 @@ Provide the complete ATS and placement analysis for "${role}" strictly in the re
     const parsedData = JSON.parse(text);
 
     return new Response(
-      JSON.stringify(parsedData),
+      JSON.stringify({
+        success: true,
+        data: parsedData,
+        userId: authenticatedUserId,
+      }),
       {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
   } catch (err: any) {
-    console.error('analyze-resume Unexpected error:', err?.message || err);
+    console.error('[analyze-resume] Unexpected error:', err?.message || err);
     return new Response(
       JSON.stringify({
         error: 'Unable to generate a valid resume analysis. Please try again.',
+        code: 'INTERNAL_ERROR',
       }),
       {
         status: 500,

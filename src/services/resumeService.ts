@@ -36,6 +36,13 @@ const inFlightAnalysisPromises = new Map<string, Promise<ResumeAnalysisResult>>(
 
 export const resumeService = {
   /**
+   * Clear in-flight analyses cache (e.g. upon user sign-out or session switch)
+   */
+  clearInFlightAnalyses(): void {
+    inFlightAnalysisPromises.clear();
+  },
+
+  /**
    * Initial Resume Analysis against Target Role with Deduplication & Extended Timeout
    */
   async analyzeResume(payload: ResumeAnalysisPayload): Promise<ResumeAnalysisResult> {
@@ -46,9 +53,21 @@ export const resumeService = {
     }
 
     const targetRole = payload.targetRole || 'Software Developer';
-    const dedupeKey = `${targetRole.trim().toLowerCase()}_${payload.resumeText.slice(0, 100)}_${payload.resumeText.length}`;
 
-    // Return existing in-flight promise if one is already running
+    // 1. Authoritative resolution of active session & user ID
+    let accessToken: string | null = null;
+    let authUserId: string | null = null;
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        accessToken = sessionData?.session?.access_token || null;
+        authUserId = sessionData?.session?.user?.id || null;
+      } catch (_) {}
+    }
+
+    const dedupeKey = `${authUserId || 'guest'}_${targetRole.trim().toLowerCase()}_${payload.resumeText.slice(0, 100)}_${payload.resumeText.length}`;
+
+    // Return existing in-flight promise if one is already running for this user
     const existing = inFlightAnalysisPromises.get(dedupeKey);
     if (existing) {
       console.log('[Resume Analyzer] Reusing in-flight analysis request for dedupeKey:', dedupeKey);
@@ -56,15 +75,25 @@ export const resumeService = {
     }
 
     const analysisPromise = (async () => {
-      // Primary: Call Express backend endpoint with 45s timeout
+      let primaryApiError: string | null = null;
+
+      // Primary: Call Express backend endpoint with 45s timeout & active JWT
       try {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (accessToken) {
+          headers['Authorization'] = `Bearer ${accessToken}`;
+        }
+
         const response = await fetchWithTimeout('/api/analyze-resume', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           timeoutMs: 45000,
           body: JSON.stringify({
             resumeText: payload.resumeText,
             targetRole,
+            userId: authUserId || undefined,
           }),
         });
 
@@ -81,30 +110,72 @@ export const resumeService = {
             }
           }
         } else {
-          console.warn('[Resume Analyzer] Express endpoint returned status:', response.status);
+          let errJson: any = null;
+          try {
+            errJson = await response.json();
+          } catch (_) {}
+          primaryApiError = errJson?.error || errJson?.message || `HTTP ${response.status}`;
+          console.warn('[Resume Analyzer] Express endpoint returned status:', response.status, primaryApiError);
         }
-      } catch (apiErr) {
+      } catch (apiErr: any) {
+        primaryApiError = apiErr?.message || 'Network/timeout failure';
         console.warn('[Resume Analyzer] Express /api/analyze-resume endpoint call failed, falling back to edge function:', apiErr);
       }
 
-      // Fallback: Supabase Edge Function
+      // Fallback: Supabase Edge Function with JWT & user context
+      const invokeHeaders: Record<string, string> = {};
+      if (accessToken) {
+        invokeHeaders['Authorization'] = `Bearer ${accessToken}`;
+      }
+
       const { data, error } = await supabase.functions.invoke('analyze-resume', {
+        headers: invokeHeaders,
         body: {
           resumeText: payload.resumeText,
           targetRole,
+          userId: authUserId || undefined,
         },
       });
 
       if (error) {
-        console.error('[Resume Analyzer] Edge Function invocation error:', error);
+        let detailedMessage = '';
+        let statusCode: number | undefined;
+        try {
+          if ((error as any).context) {
+            statusCode = (error as any).context.status;
+            const errBody = await (error as any).context.json();
+            detailedMessage = errBody?.error || errBody?.message || '';
+          }
+        } catch (_) {}
+
+        console.error('[Resume Analyzer] Edge Function error diagnostic:', {
+          name: error.name,
+          message: error.message,
+          statusCode,
+          detailedMessage,
+          primaryApiError,
+        });
+
+        if (detailedMessage) {
+          throw new Error(detailedMessage);
+        }
+        if (statusCode === 401 || statusCode === 403) {
+          throw new Error('Authentication session expired or unauthorized. Please sign in again.');
+        }
+        if (statusCode === 503) {
+          throw new Error('Resume analysis AI service is temporarily busy. Please try again in a moment.');
+        }
+
         let errorMessage = error.message || '';
         if (
           errorMessage.includes('Failed to send a request') ||
           errorMessage.includes('CORS') ||
-          errorMessage.includes('fetch')
+          errorMessage.includes('fetch') ||
+          errorMessage.includes('non-2xx')
         ) {
-          errorMessage =
-            'Resume analysis service connection issue. Please ensure server is running.';
+          errorMessage = primaryApiError
+            ? `Resume analysis failed (${primaryApiError}). Please try again.`
+            : 'Resume analysis service is temporarily busy. Please try again.';
         }
         throw new Error(
           errorMessage || 'Resume analysis service is temporarily unavailable. Please try again.'
@@ -112,7 +183,7 @@ export const resumeService = {
       }
 
       if (!data) {
-        throw new Error('Unable to generate a valid resume analysis.');
+        throw new Error('Unable to generate a valid resume analysis. Please try again.');
       }
 
       const result: ResumeAnalysisResult = data.data || data;
@@ -603,16 +674,25 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
    * Get all resumes for authenticated student directly from database
    */
   async getUserResumes(userId: string): Promise<ResumeVersionItem[]> {
-    const effectiveUserId = userId || 'guest';
+    let effectiveUserId = userId || 'guest';
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          effectiveUserId = sessionData.session.user.id;
+        }
+      } catch (_) {}
+    }
+
     let databaseItems: ResumeVersionItem[] = [];
 
     // 1. Try Supabase
-    if (isSupabaseConfigured() && userId && userId !== 'guest') {
+    if (isSupabaseConfigured() && effectiveUserId && effectiveUserId !== 'guest') {
       try {
         const { data, error } = await supabase
           .from('resumes')
           .select('*')
-          .eq('user_id', userId)
+          .eq('user_id', effectiveUserId)
           .order('version', { ascending: false });
 
         if (!error && Array.isArray(data)) {
@@ -645,7 +725,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
 
           // Sync database items to local storage cache for instant access
           try {
-            const storageKey = `careerpilot_resumes_${userId}`;
+            const storageKey = `careerpilot_resumes_${effectiveUserId}`;
             localStorage.setItem(storageKey, JSON.stringify(databaseItems));
           } catch (_) {}
 
@@ -676,15 +756,23 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
    */
   async getResumeById(userId: string, resumeId: string): Promise<ResumeVersionItem | null> {
     if (!resumeId) return null;
-    const effectiveUserId = userId || 'guest';
+    let effectiveUserId = userId || 'guest';
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          effectiveUserId = sessionData.session.user.id;
+        }
+      } catch (_) {}
+    }
 
-    if (isSupabaseConfigured() && userId && userId !== 'guest') {
+    if (isSupabaseConfigured() && effectiveUserId && effectiveUserId !== 'guest') {
       try {
         const { data, error } = await supabase
           .from('resumes')
           .select('*')
           .eq('id', resumeId)
-          .eq('user_id', userId)
+          .eq('user_id', effectiveUserId)
           .maybeSingle();
 
         if (!error && data) {
@@ -727,24 +815,34 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
    * Stores strictly the verified columns of public.resumes and bundles extended metadata in analysis_result JSONB
    */
   async saveResumeVersion(resume: ResumeVersionItem): Promise<ResumeVersionItem> {
-    const effectiveUserId = resume.userId || 'guest';
+    let effectiveUserId = resume.userId || 'guest';
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          effectiveUserId = sessionData.session.user.id;
+        }
+      } catch (_) {}
+    }
+
     const now = new Date().toISOString();
     const updatedResume: ResumeVersionItem = {
       ...resume,
+      userId: effectiveUserId,
       resumeType: resume.resumeType || (resume.isAiImproved ? 'ai_generated' : 'uploaded'),
       updatedAt: now,
       createdAt: resume.createdAt || now,
     };
 
     // 1. Try Supabase
-    if (isSupabaseConfigured() && resume.userId && resume.userId !== 'guest') {
+    if (isSupabaseConfigured() && effectiveUserId && effectiveUserId !== 'guest') {
       try {
         // If this resume is set as current, atomically unmark other resumes for this user
         if (updatedResume.isCurrent) {
           await supabase
             .from('resumes')
             .update({ is_current: false })
-            .eq('user_id', resume.userId)
+            .eq('user_id', effectiveUserId)
             .neq('id', resume.id);
         }
 
@@ -775,7 +873,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
         // Strictly valid columns in public.resumes
         const dbRow = {
           id: updatedResume.id,
-          user_id: updatedResume.userId,
+          user_id: effectiveUserId,
           file_name: updatedResume.fileName || updatedResume.versionLabel || 'resume.pdf',
           target_role: updatedResume.targetRole || 'Software Developer',
           resume_text: updatedResume.resumeText || '',
@@ -835,10 +933,20 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     resumeId: string,
     analysis: ResumeAnalysisResult
   ): Promise<void> {
+    let effectiveUserId = userId || 'guest';
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          effectiveUserId = sessionData.session.user.id;
+        }
+      } catch (_) {}
+    }
+
     const now = new Date().toISOString();
     const atsScore = Number(analysis.overall_score ?? analysis.ats_score ?? 0) || 0;
 
-    if (isSupabaseConfigured() && userId && userId !== 'guest') {
+    if (isSupabaseConfigured() && effectiveUserId && effectiveUserId !== 'guest') {
       try {
         await supabase
           .from('resumes')
@@ -848,7 +956,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
             updated_at: now,
           })
           .eq('id', resumeId)
-          .eq('user_id', userId);
+          .eq('user_id', effectiveUserId);
       } catch (err) {
         console.warn('[Resume Service] Error saving analysis to Supabase:', err);
       }
@@ -856,7 +964,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
 
     // Update local cache
     try {
-      const storageKey = `careerpilot_resumes_${userId || 'guest'}`;
+      const storageKey = `careerpilot_resumes_${effectiveUserId}`;
       const raw = localStorage.getItem(storageKey);
       if (raw) {
         const list: ResumeVersionItem[] = JSON.parse(raw);
@@ -876,23 +984,31 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
    * Set a specific resume version as Current (Atomically updates all records)
    */
   async setCurrentResume(userId: string, resumeId: string): Promise<void> {
-    const effectiveUserId = userId || 'guest';
+    let effectiveUserId = userId || 'guest';
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          effectiveUserId = sessionData.session.user.id;
+        }
+      } catch (_) {}
+    }
 
     // 1. Try Supabase
-    if (isSupabaseConfigured() && userId && userId !== 'guest') {
+    if (isSupabaseConfigured() && effectiveUserId && effectiveUserId !== 'guest') {
       try {
         // Step 1: Set all user's resumes to is_current = false
         await supabase
           .from('resumes')
           .update({ is_current: false })
-          .eq('user_id', userId);
+          .eq('user_id', effectiveUserId);
 
         // Step 2: Set target resume to is_current = true
         await supabase
           .from('resumes')
           .update({ is_current: true })
           .eq('id', resumeId)
-          .eq('user_id', userId);
+          .eq('user_id', effectiveUserId);
       } catch (err) {
         console.warn('[Resume Service] Supabase setCurrentResume error:', err);
       }
@@ -919,7 +1035,15 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
    * Delete a specific resume version (Storage + Database Record + Local IndexedDB)
    */
   async deleteResume(userId: string, resumeId: string, storagePath?: string): Promise<void> {
-    const effectiveUserId = userId || 'guest';
+    let effectiveUserId = userId || 'guest';
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          effectiveUserId = sessionData.session.user.id;
+        }
+      } catch (_) {}
+    }
 
     // 1. Delete local binary blob from IndexedDB
     try {
@@ -929,14 +1053,14 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
     }
 
     // 2. Try Supabase
-    if (isSupabaseConfigured() && userId && userId !== 'guest') {
+    if (isSupabaseConfigured() && effectiveUserId && effectiveUserId !== 'guest') {
       try {
         // Step A: Check if this was the current resume
         const { data: targetData } = await supabase
           .from('resumes')
           .select('is_current, storage_path')
           .eq('id', resumeId)
-          .eq('user_id', userId)
+          .eq('user_id', effectiveUserId)
           .maybeSingle();
 
         const wasCurrent = Boolean(targetData?.is_current);
@@ -956,7 +1080,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
           .from('resumes')
           .delete()
           .eq('id', resumeId)
-          .eq('user_id', userId);
+          .eq('user_id', effectiveUserId);
 
         if (error) {
           console.warn('[Resume Service] Supabase delete error:', error.message);
@@ -1004,13 +1128,24 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
       console.warn('[Resume Service] Error saving original file to IndexedDB:', err);
     }
 
-    if (!isSupabaseConfigured() || !userId || userId === 'guest') {
+    // 2. Authoritative verification of user identity from Supabase Auth session
+    let effectiveUserId = userId;
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.id) {
+          effectiveUserId = sessionData.session.user.id;
+        }
+      } catch (_) {}
+    }
+
+    if (!isSupabaseConfigured() || !effectiveUserId || effectiveUserId === 'guest') {
       return {};
     }
 
     try {
       const cleanFileName = (file.name || 'resume.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `${userId}/${resumeId}_${cleanFileName}`;
+      const storagePath = `${effectiveUserId}/${resumeId}_${cleanFileName}`;
 
       const { data, error } = await supabase.storage
         .from('resumes')
@@ -1024,7 +1159,7 @@ ${(structured.certifications || []).concat(structured.achievements || []).map((i
         console.warn('[Resume Service] Supabase storage upload warning:', {
           message: error.message,
           storagePath,
-          userId,
+          userId: effectiveUserId,
           fileSize: file.size,
           fileType: file.type,
         });
