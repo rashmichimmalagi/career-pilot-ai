@@ -30,6 +30,15 @@ const NOTIFICATION_PREFS_PREFIX = 'careerpilot_notif_prefs_';
 const NOTIFICATION_DEDUP_PREFIX = 'careerpilot_notif_dedup_';
 
 export const notificationService = {
+  _achievementCleaner: null as ((notifs: AppNotification[], userId: string) => Promise<AppNotification[]>) | null,
+
+  /**
+   * Register authoritative achievement cleaner to validate and purge invalid notifications
+   */
+  registerAchievementCleaner(fn: (notifs: AppNotification[], userId: string) => Promise<AppNotification[]>): void {
+    this._achievementCleaner = fn;
+  },
+
   /**
    * Helper to get effective authenticated user ID
    */
@@ -61,6 +70,7 @@ export const notificationService = {
     }
 
     const localCacheKey = `${NOTIFICATION_CACHE_PREFIX}${effectiveUserId}`;
+    let rawList: AppNotification[] = [];
 
     if (isSupabaseConfigured() && effectiveUserId !== 'guest') {
       try {
@@ -72,7 +82,7 @@ export const notificationService = {
           .limit(50);
 
         if (!error && Array.isArray(data)) {
-          const formatted: AppNotification[] = data.map((row: any) => ({
+          rawList = data.map((row: any) => ({
             id: row.id,
             user_id: row.user_id,
             type: row.type || 'general',
@@ -89,13 +99,6 @@ export const notificationService = {
             metadata: row.metadata || undefined,
             cloudSynced: true,
           }));
-
-          // Cache in local storage for fast initial render & offline
-          try {
-            localStorage.setItem(localCacheKey, JSON.stringify(formatted));
-          } catch (_) {}
-
-          return formatted;
         } else if (error) {
           console.warn('[NotificationService] Supabase fetch notice:', error.message);
         }
@@ -104,15 +107,65 @@ export const notificationService = {
       }
     }
 
-    // Fallback to local cache
-    try {
-      const cached = localStorage.getItem(localCacheKey);
-      if (cached) {
-        return JSON.parse(cached);
+    // Fallback to local cache if no cloud items retrieved
+    if (rawList.length === 0) {
+      try {
+        const cached = localStorage.getItem(localCacheKey);
+        if (cached) {
+          rawList = JSON.parse(cached);
+        }
+      } catch (_) {}
+    }
+
+    // General deduplication pass (by ID and dedup_key)
+    const seenIds = new Set<string>();
+    const seenDedup = new Set<string>();
+    const duplicateIdsToDelete: string[] = [];
+    const dedupedList: AppNotification[] = [];
+
+    for (const notif of rawList) {
+      if (seenIds.has(notif.id)) {
+        duplicateIdsToDelete.push(notif.id);
+        continue;
       }
+      if (notif.dedup_key && seenDedup.has(notif.dedup_key)) {
+        duplicateIdsToDelete.push(notif.id);
+        continue;
+      }
+
+      seenIds.add(notif.id);
+      if (notif.dedup_key) seenDedup.add(notif.dedup_key);
+      dedupedList.push(notif);
+    }
+
+    // Purge duplicate rows from Supabase in background
+    if (duplicateIdsToDelete.length > 0 && isSupabaseConfigured()) {
+      (async () => {
+        try {
+          await supabase
+            .from('notifications')
+            .delete()
+            .in('id', duplicateIdsToDelete);
+        } catch (_) {}
+      })();
+    }
+
+    // Authoritative achievement cleaner pass (removes notifications for incomplete achievements & cleans storage)
+    let formatted = dedupedList;
+    if (this._achievementCleaner && formatted.length > 0) {
+      try {
+        formatted = await this._achievementCleaner(formatted, effectiveUserId);
+      } catch (cleanErr) {
+        console.warn('[NotificationService] Achievement clean error:', cleanErr);
+      }
+    }
+
+    // Cache in local storage
+    try {
+      localStorage.setItem(localCacheKey, JSON.stringify(formatted));
     } catch (_) {}
 
-    return [];
+    return formatted;
   },
 
   /**
@@ -391,6 +444,12 @@ export const notificationService = {
 
     // 2. Cloud-authoritative deduplication check via Supabase
     if (item.dedup_key) {
+      // Fast synchronous check against local dedup flag
+      const dedupStorageKey = `${NOTIFICATION_DEDUP_PREFIX}${effectiveUserId}_${item.dedup_key}`;
+      if (localStorage.getItem(dedupStorageKey)) {
+        return null;
+      }
+
       if (isSupabaseConfigured()) {
         try {
           const { data: existing, error: dedupErr } = await supabase
@@ -422,7 +481,7 @@ export const notificationService = {
     const safeDedup = item.dedup_key ? item.dedup_key.replace(/[^a-zA-Z0-9_]/g, '_') : null;
     const cleanUid = effectiveUserId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
     const newId = safeDedup
-      ? `notif_${cleanUid}_${safeDedup}`
+      ? (safeDedup.startsWith('achievement_unlock_') ? `notif_${safeDedup}` : `notif_${cleanUid}_${safeDedup}`)
       : `notif_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const nowIso = new Date().toISOString();
 

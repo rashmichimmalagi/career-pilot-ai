@@ -76,8 +76,32 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ onNa
     return null;
   }
 
+  const deduplicatedNotifications = React.useMemo(() => {
+    const seenIds = new Set<string>();
+    const seenDedup = new Set<string>();
+    const seenAchKeys = new Set<string>();
+    const result: AppNotification[] = [];
+
+    for (const notif of notifications) {
+      if (seenIds.has(notif.id)) continue;
+      if (notif.dedup_key && seenDedup.has(notif.dedup_key)) continue;
+
+      if (notif.category === 'ACHIEVEMENT' || notif.type === 'achievement') {
+        const achKey = notif.dedup_key || notif.title + '_' + notif.message;
+        if (seenAchKeys.has(achKey)) continue;
+        seenAchKeys.add(achKey);
+      }
+
+      seenIds.add(notif.id);
+      if (notif.dedup_key) seenDedup.add(notif.dedup_key);
+      result.push(notif);
+    }
+
+    return result;
+  }, [notifications]);
+
   const filteredNotifications =
-    activeTab === 'unread' ? notifications.filter((n) => !n.is_read) : notifications;
+    activeTab === 'unread' ? deduplicatedNotifications.filter((n) => !n.is_read) : deduplicatedNotifications;
 
   const handleNotificationClick = (notification: AppNotification) => {
     if (!notification.is_read) {

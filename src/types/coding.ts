@@ -308,6 +308,8 @@ export type AchievementCategory =
   | 'company'
   | 'improvement';
 
+export type AchievementStatus = 'LOCKED' | 'IN_PROGRESS' | 'UNLOCKED';
+
 export interface Achievement {
   id: string;
   name: string;
@@ -321,6 +323,8 @@ export interface Achievement {
   progressLabel: string;
   unlockedAt?: string;
   unlockMessage?: string;
+  status?: AchievementStatus;
+  percentage?: number;
 }
 
 export interface UserAchievementsSummary {
