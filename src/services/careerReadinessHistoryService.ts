@@ -34,8 +34,24 @@ function getDayString(isoString: string | Date): string {
 export class CareerReadinessHistoryService {
   private localKeyPrefix = 'careerpilot_readiness_history_';
 
+  // In-memory cache to prevent redundant writes on every render/recalculation
+  private lastSavedCache = new Map<
+    string,
+    {
+      date: string;
+      score: number;
+      codingScore: number;
+      resumeScore: number;
+      aptitudeScore: number;
+      interviewScore: number;
+      roadmapScore: number;
+      timestamp: number;
+    }
+  >();
+
   /**
-   * Save a snapshot of the current career readiness score
+   * Save a snapshot of the current career readiness score ONLY when scores change
+   * or a new day's snapshot is required, preventing duplicate insertions on renders.
    */
   public async recordReadinessSnapshot(
     userId: string,
@@ -46,17 +62,70 @@ export class CareerReadinessHistoryService {
     }
 
     const todayStr = getDayString(new Date());
+    const overallScore = readiness.overallScore;
+    const codingScore = readiness.dimensions.coding.score;
+    const resumeScore = readiness.dimensions.resume.score;
+    const aptitudeScore = readiness.dimensions.placement.score;
+    const interviewScore = readiness.dimensions.interview.score;
+    const roadmapScore = readiness.dimensions.roadmap.score;
+
+    // 1. Fast in-memory check: if already recorded for today with identical scores, skip immediately
+    const cached = this.lastSavedCache.get(userId);
+    if (
+      cached &&
+      cached.date === todayStr &&
+      cached.score === overallScore &&
+      cached.codingScore === codingScore &&
+      cached.resumeScore === resumeScore &&
+      cached.aptitudeScore === aptitudeScore &&
+      cached.interviewScore === interviewScore &&
+      cached.roadmapScore === roadmapScore
+    ) {
+      return;
+    }
+
+    // 2. Check local storage cache to avoid re-writing on fresh component mounts if scores haven't changed
+    try {
+      const raw = localStorage.getItem(`${this.localKeyPrefix}${userId}`);
+      const list: any[] = raw ? JSON.parse(raw) : [];
+      const existingToday = list.find((item) => getDayString(item.created_at) === todayStr);
+
+      if (
+        existingToday &&
+        Number(existingToday.score) === overallScore &&
+        Number(existingToday.coding_score) === codingScore &&
+        Number(existingToday.resume_score) === resumeScore &&
+        Number(existingToday.aptitude_score) === aptitudeScore &&
+        Number(existingToday.technical_interview_score) === interviewScore &&
+        Number(existingToday.roadmap_score) === roadmapScore
+      ) {
+        // Cache matches current state; update in-memory record and skip insertion
+        this.lastSavedCache.set(userId, {
+          date: todayStr,
+          score: overallScore,
+          codingScore,
+          resumeScore,
+          aptitudeScore,
+          interviewScore,
+          roadmapScore,
+          timestamp: Date.now(),
+        });
+        return;
+      }
+    } catch (_) {}
+
+    // Deterministic snapshot ID per user and day
     const snapshotId = `readiness_${userId}_${todayStr}`;
 
     const payload = {
       id: snapshotId,
       user_id: userId,
-      score: readiness.overallScore,
-      coding_score: readiness.dimensions.coding.score,
-      resume_score: readiness.dimensions.resume.score,
-      aptitude_score: readiness.dimensions.placement.score,
-      technical_interview_score: readiness.dimensions.interview.score,
-      roadmap_score: readiness.dimensions.roadmap.score,
+      score: overallScore,
+      coding_score: codingScore,
+      resume_score: resumeScore,
+      aptitude_score: aptitudeScore,
+      technical_interview_score: interviewScore,
+      roadmap_score: roadmapScore,
       status_category: readiness.statusCategory,
       breakdown: {
         dimensions: readiness.dimensions,
@@ -65,7 +134,19 @@ export class CareerReadinessHistoryService {
       created_at: new Date().toISOString(),
     };
 
-    // 1. Write to local cache
+    // Update in-memory cache
+    this.lastSavedCache.set(userId, {
+      date: todayStr,
+      score: overallScore,
+      codingScore,
+      resumeScore,
+      aptitudeScore,
+      interviewScore,
+      roadmapScore,
+      timestamp: Date.now(),
+    });
+
+    // 3. Write to local cache (deduplicating by date)
     try {
       const raw = localStorage.getItem(`${this.localKeyPrefix}${userId}`);
       const list: any[] = raw ? JSON.parse(raw) : [];
@@ -78,15 +159,18 @@ export class CareerReadinessHistoryService {
       localStorage.setItem(`${this.localKeyPrefix}${userId}`, JSON.stringify(list.slice(-60)));
     } catch (_) {}
 
-    // 2. Persist to Supabase if configured
+    // 4. Persist to Supabase if configured (idempotent upsert by deterministic ID)
+    const mutationId = `mut_cr_${snapshotId}`;
+
     if (isSupabaseConfigured()) {
       try {
         const { error } = await supabase
           .from('career_readiness_history')
           .upsert(payload, { onConflict: 'id' });
+
         if (error) {
           persistenceManager.enqueueOfflineMutation({
-            id: `mut_cr_${snapshotId}_${Date.now()}`,
+            id: mutationId,
             userId,
             type: 'save_career_readiness',
             payload,
@@ -97,7 +181,7 @@ export class CareerReadinessHistoryService {
       } catch (err) {
         console.warn('[CareerReadinessHistory] Supabase write notice, enqueued:', err);
         persistenceManager.enqueueOfflineMutation({
-          id: `mut_cr_${snapshotId}_${Date.now()}`,
+          id: mutationId,
           userId,
           type: 'save_career_readiness',
           payload,
@@ -107,7 +191,7 @@ export class CareerReadinessHistoryService {
       }
     } else {
       persistenceManager.enqueueOfflineMutation({
-        id: `mut_cr_${snapshotId}_${Date.now()}`,
+        id: mutationId,
         userId,
         type: 'save_career_readiness',
         payload,
@@ -119,6 +203,7 @@ export class CareerReadinessHistoryService {
 
   /**
    * Fetch persisted historical snapshots from Supabase (with local cache fallback)
+   * Deduplicates by calendar date so identical or multiple snapshots on the same day never duplicate.
    */
   public async getPersistedHistory(userId: string): Promise<CareerReadinessTrendPoint[]> {
     if (!userId || userId === 'guest') {
@@ -132,20 +217,29 @@ export class CareerReadinessHistoryService {
           .select('*')
           .eq('user_id', userId)
           .order('created_at', { ascending: true })
-          .limit(90);
+          .limit(180);
 
         if (!error && Array.isArray(data) && data.length > 0) {
-          return data.map((row) => ({
-            date: getDayString(row.created_at),
-            displayDate: formatDateDisplay(row.created_at),
-            score: Number(row.score) || 0,
-            codingScore: Number(row.coding_score) || 0,
-            resumeScore: Number(row.resume_score) || 0,
-            aptitudeScore: Number(row.aptitude_score) || 0,
-            interviewScore: Number(row.technical_interview_score) || 0,
-            roadmapScore: Number(row.roadmap_score) || 0,
-            statusCategory: row.status_category || 'Making Progress',
-          }));
+          // Deduplicate by calendar day, keeping the most recent snapshot per day
+          const dayMap = new Map<string, CareerReadinessTrendPoint>();
+          for (const row of data) {
+            const dateStr = getDayString(row.created_at);
+            if (!dateStr) continue;
+
+            dayMap.set(dateStr, {
+              date: dateStr,
+              displayDate: formatDateDisplay(row.created_at),
+              score: Number(row.score) || 0,
+              codingScore: Number(row.coding_score) || 0,
+              resumeScore: Number(row.resume_score) || 0,
+              aptitudeScore: Number(row.aptitude_score) || 0,
+              interviewScore: Number(row.technical_interview_score) || 0,
+              roadmapScore: Number(row.roadmap_score) || 0,
+              statusCategory: row.status_category || 'Making Progress',
+            });
+          }
+
+          return Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
         }
       } catch (err) {
         console.warn('[CareerReadinessHistory] Error reading from Supabase:', err);
@@ -158,17 +252,25 @@ export class CareerReadinessHistoryService {
       if (raw) {
         const list: any[] = JSON.parse(raw);
         if (Array.isArray(list) && list.length > 0) {
-          return list.map((row) => ({
-            date: getDayString(row.created_at),
-            displayDate: formatDateDisplay(row.created_at),
-            score: Number(row.score) || 0,
-            codingScore: Number(row.coding_score) || 0,
-            resumeScore: Number(row.resume_score) || 0,
-            aptitudeScore: Number(row.aptitude_score) || 0,
-            interviewScore: Number(row.technical_interview_score) || 0,
-            roadmapScore: Number(row.roadmap_score) || 0,
-            statusCategory: row.status_category || 'Making Progress',
-          }));
+          const dayMap = new Map<string, CareerReadinessTrendPoint>();
+          for (const row of list) {
+            const dateStr = getDayString(row.created_at);
+            if (!dateStr) continue;
+
+            dayMap.set(dateStr, {
+              date: dateStr,
+              displayDate: formatDateDisplay(row.created_at),
+              score: Number(row.score) || 0,
+              codingScore: Number(row.coding_score) || 0,
+              resumeScore: Number(row.resume_score) || 0,
+              aptitudeScore: Number(row.aptitude_score) || 0,
+              interviewScore: Number(row.technical_interview_score) || 0,
+              roadmapScore: Number(row.roadmap_score) || 0,
+              statusCategory: row.status_category || 'Making Progress',
+            });
+          }
+
+          return Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
         }
       }
     } catch (_) {}
