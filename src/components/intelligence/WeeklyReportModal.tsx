@@ -46,7 +46,7 @@ export const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({
         id="weekly-career-report-modal"
         className="bg-white dark:bg-slate-900 w-full max-w-3xl max-h-[90vh] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-y-auto flex flex-col"
       >
-        {/* Header */}
+        {/* Modal Header: Calendar icon, Title, Period, and Close (X) button */}
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md z-10">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
@@ -64,6 +64,7 @@ export const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              id="weekly-report-close-btn"
               onClick={onClose}
               className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
               title="Close"
