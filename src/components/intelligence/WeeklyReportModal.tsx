@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Calendar,
   Sparkles,
@@ -26,6 +27,26 @@ export const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({
   onClose,
   onNavigate,
 }) => {
+  // Lock background scroll and listen for Escape key when modal is open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen || !report) return null;
 
   const formatDate = (dStr: string) => {
@@ -40,11 +61,22 @@ export const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+  const modalContent = (
+    <div
+      id="weekly-career-report-backdrop"
+      className="fixed inset-0 top-0 left-0 right-0 bottom-0 m-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+      style={{ margin: 0, top: 0, left: 0, right: 0, bottom: 0 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
         id="weekly-career-report-modal"
-        className="bg-white dark:bg-slate-900 w-full max-w-3xl max-h-[90vh] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-y-auto flex flex-col"
+        className="bg-white dark:bg-slate-900 w-full max-w-3xl max-h-[90vh] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-y-auto flex flex-col m-0"
+        style={{ margin: 0 }}
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header: Calendar icon, Title, Period, and Close (X) button */}
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md z-10">
@@ -252,4 +284,10 @@ export const WeeklyReportModal: React.FC<WeeklyReportModalProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modalContent, document.body);
+  }
+
+  return modalContent;
 };

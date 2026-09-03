@@ -6,7 +6,7 @@
  */
 
 export const DEVELOPER_CONFIG = {
-  name: 'Rashmi Chimmalagi',
+  name: 'Rashmi M Chimmalagi',
   role: 'Student Developer / Full Stack Developer',
   projectName: 'CareerPilot AI',
   tagline: 'AI-Powered Career & Placement Copilot for Engineering Students',

@@ -16,7 +16,6 @@ import {
   ExternalLink,
   MessageSquare,
   Activity,
-  Heart,
   BookOpen,
   HelpCircle,
   BrainCircuit,
@@ -303,8 +302,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({ onNavigate }) => {
           <div className="lg:col-span-5 glass-panel p-6 sm:p-8 rounded-3xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/5 via-purple-500/5 to-cyan-500/5 dark:from-indigo-950/40 dark:via-purple-950/20 dark:to-slate-900/60 backdrop-blur-xl shadow-xl flex flex-col justify-between space-y-6">
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider">
-                  <Heart className="w-3.5 h-3.5 text-rose-500" />
+                <div className="inline-flex items-center px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider">
                   <span>Developed By</span>
                 </div>
                 <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
