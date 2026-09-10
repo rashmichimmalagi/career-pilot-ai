@@ -177,6 +177,16 @@ export function getStructuredResumeData(resume: ResumeVersionItem): StructuredRe
 /**
  * Directly prints a PDF Blob or URL via native browser print dialog
  */
+function notifyPrintToast(title: string, subtitle?: string, type: 'info' | 'warning' | 'error' | 'success' = 'warning') {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('careerpilot:toast', {
+        detail: { title, subtitle, type },
+      })
+    );
+  }
+}
+
 export async function printPdfBlobOrUrl(pdfBlobOrUrl: Blob | string, title: string = 'Resume'): Promise<void> {
   let objectUrl = '';
   let url = '';
@@ -189,7 +199,7 @@ export async function printPdfBlobOrUrl(pdfBlobOrUrl: Blob | string, title: stri
   }
 
   if (!url) {
-    alert('No active resume available for printing.');
+    notifyPrintToast('Print Notice', 'No active resume available for printing.', 'warning');
     return;
   }
 
@@ -253,7 +263,7 @@ export async function printPdfBlobOrUrl(pdfBlobOrUrl: Blob | string, title: stri
  */
 export async function printResumeDocument(resume: ResumeVersionItem | null | undefined): Promise<void> {
   if (!resume) {
-    alert('No active resume available for printing.');
+    notifyPrintToast('Print Notice', 'No active resume available for printing.', 'warning');
     return;
   }
 
@@ -296,7 +306,7 @@ export async function printResumeDocument(resume: ResumeVersionItem | null | und
     console.error('[resumePrint] Error retrieving original PDF for print:', err);
   }
 
-  alert('No active resume available for printing.');
+  notifyPrintToast('Print Notice', 'No active resume file available for printing.', 'warning');
 }
 
 /**
@@ -307,7 +317,7 @@ export async function printEditedResume(
   fileName: string = 'Edited_Resume.pdf'
 ): Promise<void> {
   if (!structuredData) {
-    alert('No active resume available for printing.');
+    notifyPrintToast('Print Notice', 'No active resume data available for printing.', 'warning');
     return;
   }
 
@@ -322,7 +332,7 @@ export async function printEditedResume(
     console.error('[resumePrint] Error generating edited resume PDF for print:', err);
   }
 
-  alert('Unable to print edited resume.');
+  notifyPrintToast('Print Error', 'Unable to generate edited resume PDF for printing.', 'error');
 }
 
 /**
@@ -330,7 +340,7 @@ export async function printEditedResume(
  */
 export function openResumePrintPage(resumeOrId: ResumeVersionItem | string | null | undefined) {
   if (!resumeOrId) {
-    alert('No active resume available for printing.');
+    notifyPrintToast('Print Notice', 'No active resume available for printing.', 'warning');
     return;
   }
 

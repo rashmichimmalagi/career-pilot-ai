@@ -102,6 +102,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearTimeout(timer);
   }, [toast]);
 
+  // Global event listener for non-React utilities (e.g. resumePrint, offline handlers)
+  useEffect(() => {
+    const handleGlobalToast = (e: Event) => {
+      const ce = e as CustomEvent<{
+        title: string;
+        subtitle?: string;
+        type?: 'success' | 'info' | 'warning' | 'error';
+        action?: { label: string; onClick: () => void };
+        duration?: number;
+      }>;
+      if (ce.detail && ce.detail.title) {
+        showToast(
+          ce.detail.title,
+          ce.detail.subtitle,
+          ce.detail.type || 'info',
+          ce.detail.action,
+          ce.detail.duration
+        );
+      }
+    };
+
+    window.addEventListener('careerpilot:toast', handleGlobalToast);
+    return () => {
+      window.removeEventListener('careerpilot:toast', handleGlobalToast);
+    };
+  }, [showToast]);
+
   const fetchProfileForUser = useCallback(async (userId: string) => {
     setProfileLoading(true);
     try {

@@ -139,12 +139,13 @@ export const notificationService = {
     }
 
     // Purge duplicate rows from Supabase in background
-    if (duplicateIdsToDelete.length > 0 && isSupabaseConfigured()) {
+    if (duplicateIdsToDelete.length > 0 && isSupabaseConfigured() && effectiveUserId !== 'guest') {
       (async () => {
         try {
           await supabase
             .from('notifications')
             .delete()
+            .eq('user_id', effectiveUserId)
             .in('id', duplicateIdsToDelete);
         } catch (_) {}
       })();
@@ -543,6 +544,9 @@ export const notificationService = {
         if (!error && data) {
           notification.cloudSynced = true;
         } else if (error) {
+          if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+            return null;
+          }
           console.warn('[NotificationService] Supabase insert notification notice:', error.message);
         }
       } catch (err) {

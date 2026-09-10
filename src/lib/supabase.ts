@@ -266,3 +266,15 @@ export const signOutUser = async () => {
     throw error;
   }
 };
+
+/**
+ * Get the current Supabase session access token for authenticated API calls
+ */
+export const getSupabaseAccessToken = async (): Promise<string | null> => {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token || null;
+  } catch {
+    return null;
+  }
+};

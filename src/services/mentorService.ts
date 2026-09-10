@@ -17,6 +17,10 @@ import { calculateStreaks } from './achievementService';
 import { resolveStudentCodingLanguage, getDailyStudyTime } from './studyPlannerService';
 import { mentorStorageService } from './mentorStorageService';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import {
+  analyzeAssistantQueryIntent,
+  buildScopedStudentContext,
+} from './aiAssistantIntentService';
 
 export const MENTOR_QUICK_ACTIONS: MentorQuickAction[] = [
   {
@@ -461,6 +465,15 @@ export async function saveAssistantMessage(
   return mentorStorageService.saveAssistantMessage(studentId, message);
 }
 
+export async function editAssistantUserMessage(
+  studentId: string | undefined,
+  messageId: string,
+  newText: string,
+  downstreamIds: string[] = []
+): Promise<{ success: boolean; error?: string }> {
+  return mentorStorageService.editAssistantUserMessage(studentId, messageId, newText, downstreamIds);
+}
+
 /**
  * Generates intelligent default action links based on user message and context
  */
@@ -595,6 +608,117 @@ function synthesizeLocalMentorReply(
   ctx: MentorStudentContext,
   quickAction?: string
 ): { reply: string; suggestedFollowUps: string[] } {
+  const intent = analyzeAssistantQueryIntent(userPrompt);
+
+  // If GENERAL question without explicit quick action, do NOT dump personal preparation metrics
+  if (intent.intentType === 'GENERAL' && !quickAction) {
+    const lower = userPrompt.toLowerCase();
+    if (lower.includes('linux') && lower.includes('process')) {
+      return {
+        reply: `### Understanding Processes in Linux
+
+In Linux, a **process** is an instance of an executing program. Every process has its own virtual address space, memory pages, file descriptor table, and execution context.
+
+#### Core Process Concepts:
+1. **PID (Process ID)**: A unique identifier assigned by the kernel. The root ancestor of user-space processes is \`systemd\` (PID 1).
+2. **Process States**:
+   * **Running (\`R\`)**: Executing or ready in CPU run-queue.
+   * **Interruptible Sleep (\`S\`)**: Blocked on I/O or waiting for an event.
+   * **Uninterruptible Sleep (\`D\`)**: Waiting on direct hardware/disk I/O.
+   * **Stopped (\`T\`)**: Suspended via \`SIGSTOP\` or \`Ctrl+Z\`.
+   * **Zombie (\`Z\`)**: Execution finished, but exit code not yet collected by parent via \`wait()\`.
+3. **Creation Lifecycle**:
+   * \`fork()\`: Duplicates the calling process using copy-on-write memory.
+   * \`execve()\`: Replaces the current process image with a new executable.`,
+        suggestedFollowUps: [
+          'What is the difference between a process and a thread?',
+          'How does fork() and exec() work in Linux?',
+          'How do you identify and clean up zombie processes?',
+        ],
+      };
+    }
+
+    if (lower.includes('normalization') || lower.includes('dbms')) {
+      return {
+        reply: `### Database Normalization in DBMS
+
+**Normalization** is the design technique used in relational database management systems to organize tables, minimize redundancy, and prevent data anomalies (insertion, deletion, update).
+
+#### Normal Forms:
+* **1NF**: Column values must be atomic; no repeating groups.
+* **2NF**: In 1NF + no partial functional dependencies on composite keys.
+* **3NF**: In 2NF + no transitive dependencies.
+* **BCNF**: In 3NF + every determinant is a super key.`,
+        suggestedFollowUps: [
+          'What is the difference between 3NF and BCNF?',
+          'When should a production database be denormalized?',
+          'Explain ACID properties with real-world examples.',
+        ],
+      };
+    }
+
+    if (lower.includes('project') || lower.includes('ideas')) {
+      return {
+        reply: `### Full Stack Development Project Ideas
+
+1. **Real-Time Collaborative Document Canvas**
+   * **Stack**: React, Node.js, WebSockets, Redis, PostgreSQL
+   * **Engineering**: CRDTs/OT, room-based presence, version history.
+
+2. **Distributed Asynchronous Task Engine**
+   * **Stack**: Next.js, Express, BullMQ, Redis, PostgreSQL
+   * **Engineering**: Rate limiting, retry backoff, worker concurrency dashboard.
+
+3. **Event-Driven E-Commerce API & Storefront**
+   * **Stack**: React, Node.js, RabbitMQ/Kafka, PostgreSQL, Stripe
+   * **Engineering**: Idempotent order processing, webhook state machines.
+
+4. **API Gateway & Reverse Proxy with Rate Limiting**
+   * **Stack**: TypeScript, Express / Go, Redis, React Dashboard
+   * **Engineering**: Token Bucket rate limiting, latency telemetry.`,
+        suggestedFollowUps: [
+          'How do you handle real-time concurrency in collaborative apps?',
+          'What are best practices for securing API webhooks?',
+          'Which project should I build based on my current skills?',
+        ],
+      };
+    }
+
+    if (lower.includes('react')) {
+      return {
+        reply: `### What is React?
+
+**React** is an open-source JavaScript library developed by Meta for building dynamic, declarative, component-driven user interfaces.
+
+#### Core Principles:
+* **Component-Based Architecture**: UI is divided into reusable, isolated components managing their own state.
+* **Virtual DOM & Reconciliation**: React maintains an in-memory diff of the DOM, batching minimal DOM manipulations for peak performance.
+* **Declarative Paradigm**: You define how the UI should look for any given state, and React handles rendering.
+* **One-Way Data Flow**: Data flows predictably down from parent components to children via props.`,
+        suggestedFollowUps: [
+          'What are React Hooks and how do they work?',
+          'What is the difference between Virtual DOM and Real DOM?',
+          'What are React Server Components?',
+        ],
+      };
+    }
+
+    return {
+      reply: `### Technical Overview: ${userPrompt}
+
+In software engineering, breaking down technical topics into foundational mechanics, trade-offs, and production considerations provides the deepest clarity:
+
+1. **Core Mechanism**: Identify the primary contract, inputs, transformations, and output.
+2. **Complexity & Trade-offs**: Consider time complexity ($O(n)$), space complexity ($O(1)$), and resource constraints.
+3. **Reliability & Edge Cases**: Evaluate error boundaries, failure modes, concurrent access, and input validation.`,
+      suggestedFollowUps: [
+        'Can you provide a code example for this?',
+        'What are common interview questions on this topic?',
+        'What are the performance trade-offs?',
+      ],
+    };
+  }
+
   const name = ctx.studentName || 'there';
   const role = ctx.targetRole || 'Software Developer';
   const company = ctx.targetCompany || 'Top Tech Companies';

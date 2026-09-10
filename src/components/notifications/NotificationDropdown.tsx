@@ -87,7 +87,12 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ onNa
       if (notif.dedup_key && seenDedup.has(notif.dedup_key)) continue;
 
       if (notif.category === 'ACHIEVEMENT' || notif.type === 'achievement') {
-        const achKey = notif.dedup_key || notif.title + '_' + notif.message;
+        const achId =
+          notif.metadata?.achievement_id ||
+          (notif.dedup_key
+            ? notif.dedup_key.replace(/^achievement_unlock_[^_]+_/, '').replace(/^achievement_/, '')
+            : null);
+        const achKey = achId ? `ach_${achId}` : notif.dedup_key || notif.title + '_' + notif.message;
         if (seenAchKeys.has(achKey)) continue;
         seenAchKeys.add(achKey);
       }

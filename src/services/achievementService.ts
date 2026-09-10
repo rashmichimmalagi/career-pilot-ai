@@ -1371,9 +1371,11 @@ export async function checkNewlyUnlockedAchievements(
     }
 
     // 3. Database Idempotency Check in Supabase
-    const dedupKey = `achievement_unlock_${userId}_${ach.id}`;
+    // Standard dedup_key format: achievement_${ach.id}
+    const dedupKey = `achievement_${ach.id}`;
+    const legacyDedupKey = `achievement_unlock_${userId}_${ach.id}`;
     const safeUid = userId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
-    const deterministicId = `notif_ach_${safeUid}_${ach.id}`;
+    const deterministicId = `notif_${safeUid}_${dedupKey}`;
 
     if (isSupabaseConfigured()) {
       try {
@@ -1381,7 +1383,7 @@ export async function checkNewlyUnlockedAchievements(
           .from('notifications')
           .select('id')
           .eq('user_id', userId)
-          .or(`dedup_key.eq.${dedupKey},id.eq.${deterministicId}`)
+          .or(`dedup_key.eq.${dedupKey},dedup_key.eq.${legacyDedupKey},id.eq.${deterministicId}`)
           .limit(1);
 
         if (!checkErr && existingNotifs && existingNotifs.length > 0) {
@@ -1575,11 +1577,12 @@ export async function sanitizeAndCleanAchievementNotifications(
     }
 
     // 4. Asynchronously purge invalid / duplicate notifications from Supabase
-    if (invalidNotificationIds.length > 0 && isSupabaseConfigured()) {
+    if (invalidNotificationIds.length > 0 && isSupabaseConfigured() && userId !== 'guest') {
       try {
         await supabase
           .from('notifications')
           .delete()
+          .eq('user_id', userId)
           .in('id', invalidNotificationIds);
       } catch (purgeErr) {
         console.warn('[AchievementService] Error purging invalid notifications from Supabase:', purgeErr);

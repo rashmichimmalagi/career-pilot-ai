@@ -7,6 +7,7 @@ import {
   Maximize2,
   Minimize2,
   ArrowUpRight,
+  Pencil,
 } from 'lucide-react';
 import { MarkdownRenderer } from '../common/MarkdownRenderer';
 import { useAuth } from '../../context/AuthContext';
@@ -16,10 +17,11 @@ import {
 } from '../../types/mentor';
 import {
   getAggregatedStudentContext,
-  sendMentorMessage,
   fetchAssistantMessages,
   saveAssistantMessage,
+  editAssistantUserMessage,
 } from '../../services/mentorService';
+import { sendAssistantMessage } from '../../services/assistantService';
 
 interface FloatingAskAIProps {
   onNavigate: (route: string) => void;
@@ -37,6 +39,9 @@ export const FloatingAskAI: React.FC<FloatingAskAIProps> = ({
   const [loading, setLoading] = useState(false);
   const [studentContext, setStudentContext] = useState<MentorStudentContext | null>(null);
   const [messages, setMessages] = useState<MentorMessage[]>([]);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState<string>('');
+  const [savingEdit, setSavingEdit] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -94,13 +99,13 @@ export const FloatingAskAI: React.FC<FloatingAskAIProps> = ({
             id: `welcome-${Date.now()}`,
             conversationId: `assistant_${user.id}`,
             sender: 'assistant',
-            text: `Hello ${ctx.studentName}! 👋 I'm your CareerPilot AI Assistant.\n\nI have access to your live preparation metrics (Targeting **${role}** at **${company}**, Placement Readiness **${readiness}**). How can I assist your placement journey today?`,
+            text: `Hello ${ctx.studentName || 'there'}! 👋 I'm your CareerPilot AI Assistant.\n\nI can answer any technical concepts, explain algorithms, provide project ideas, or assist with your placement preparation. How can I help you today?`,
             timestamp: new Date().toISOString(),
             suggestedFollowUps: [
-              'What should I practice today?',
-              'Analyze my placement readiness',
-              'How can I improve my resume score?',
-              'Give me a 7-day study plan',
+              'Give me Full Stack Development project ideas',
+              'What is a process in Linux?',
+              'Analyze my preparation',
+              'What are my weak areas?',
             ],
             syncStatus: 'synced',
           };
@@ -192,8 +197,8 @@ export const FloatingAskAI: React.FC<FloatingAskAIProps> = ({
         text: m.text,
       }));
 
-      // 2. CALL SECURE GEMINI BACKEND
-      const res = await sendMentorMessage(ctx, historyPayload);
+      // 2. CALL INTENT-AWARE CAREERPILOT AI ASSISTANT ENDPOINT
+      const res = await sendAssistantMessage(text, historyPayload, ctx);
 
       // 3. RECEIVE ASSISTANT RESPONSE
       const aiMsg: MentorMessage = {
@@ -231,6 +236,121 @@ export const FloatingAskAI: React.FC<FloatingAskAIProps> = ({
       };
       setMessages((prev) => [...prev, errMsg]);
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStartEdit = (msg: MentorMessage) => {
+    // Only allow editing own user messages when not currently loading
+    if (msg.sender !== 'user' || loading || savingEdit) return;
+    setEditingMessageId(msg.id);
+    setEditingText(msg.text);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingText('');
+  };
+
+  const handleSaveEdit = async (messageId: string) => {
+    const trimmed = editingText.trim();
+    if (!trimmed || savingEdit) return;
+
+    const targetIndex = messages.findIndex((m) => m.id === messageId);
+    if (targetIndex === -1) {
+      handleCancelEdit();
+      return;
+    }
+
+    const targetMsg = messages[targetIndex];
+    if (targetMsg.sender !== 'user') {
+      handleCancelEdit();
+      return;
+    }
+
+    // If text unchanged, exit edit mode without triggering unnecessary re-queries
+    if (trimmed === targetMsg.text) {
+      handleCancelEdit();
+      return;
+    }
+
+    setSavingEdit(true);
+
+    // Collect all downstream messages that came AFTER the edited user message
+    // To maintain strict chronological conversation consistency, downstream responses are invalidated
+    const downstreamMessages = messages.slice(targetIndex + 1);
+    const downstreamIds = downstreamMessages.map((m) => m.id);
+    const precedingMessages = messages.slice(0, targetIndex);
+
+    const updatedUserMsg: MentorMessage = {
+      ...targetMsg,
+      text: trimmed,
+      syncStatus: 'synced',
+    };
+
+    // 1. Update UI immediately to reflect edited message and drop stale downstream
+    setMessages([...precedingMessages, updatedUserMsg]);
+    setEditingMessageId(null);
+    setEditingText('');
+    setLoading(true);
+
+    // 2. Persist edited message in Supabase and purge downstream messages
+    if (user?.id && user.id !== 'guest') {
+      try {
+        await editAssistantUserMessage(user.id, messageId, trimmed, downstreamIds);
+      } catch (err) {
+        console.warn('[FloatingAskAI] Notice updating edited message in Supabase:', err);
+      }
+    }
+
+    // 3. Generate NEW AI response based on the edited message and valid preceding history
+    try {
+      const ctx =
+        studentContext ||
+        (await getAggregatedStudentContext(user?.id || 'guest', profile));
+
+      const historyPayload = [...precedingMessages, updatedUserMsg].map((m) => ({
+        sender: m.sender === 'user' ? ('user' as const) : ('mentor' as const),
+        text: m.text,
+      }));
+
+      const res = await sendAssistantMessage(trimmed, historyPayload, ctx);
+
+      const aiMsg: MentorMessage = {
+        id: `ai-${Date.now()}`,
+        conversationId: `assistant_${user?.id || 'guest'}`,
+        sender: 'assistant',
+        text: res.reply,
+        timestamp: new Date().toISOString(),
+        actionLinks: res.actionLinks,
+        suggestedFollowUps: res.suggestedFollowUps,
+        syncStatus: 'pending',
+      };
+
+      // 4. Save new AI response in Supabase
+      if (user?.id && user.id !== 'guest') {
+        try {
+          await saveAssistantMessage(user.id, aiMsg);
+          aiMsg.syncStatus = 'synced';
+        } catch (err) {
+          console.warn('[FloatingAskAI] Notice saving AI message to Supabase:', err);
+        }
+      }
+
+      setMessages([...precedingMessages, updatedUserMsg, aiMsg]);
+    } catch (err) {
+      console.error('[FloatingAskAI] Error generating AI response for edited message:', err);
+      const errMsg: MentorMessage = {
+        id: `ai-err-${Date.now()}`,
+        conversationId: `assistant_${user?.id || 'guest'}`,
+        sender: 'assistant',
+        text: 'I encountered an issue generating a response for your edited message. Please try asking again or refresh.',
+        timestamp: new Date().toISOString(),
+        syncStatus: 'synced',
+      };
+      setMessages([...precedingMessages, updatedUserMsg, errMsg]);
+    } finally {
+      setSavingEdit(false);
       setLoading(false);
     }
   };
@@ -335,74 +455,154 @@ export const FloatingAskAI: React.FC<FloatingAskAIProps> = ({
             {/* Conversation Feed */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 font-sans text-xs sm:text-sm">
               <div className={isExpanded ? 'max-w-3xl mx-auto w-full space-y-4' : 'space-y-4'}>
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
-                  >
-                    <div
-                      className={`rounded-2xl p-3.5 sm:p-4 leading-relaxed shadow-2xs ${
-                        isExpanded ? 'max-w-[80%]' : 'max-w-[88%]'
-                      } ${
-                        msg.sender === 'user'
-                          ? 'bg-indigo-600 text-white rounded-br-xs'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200/70 dark:border-slate-700/60 rounded-bl-xs'
-                      }`}
-                    >
-                      {msg.sender === 'assistant' ? (
-                        <MarkdownRenderer content={msg.text} />
-                      ) : (
-                        <p className="whitespace-pre-wrap font-medium">{msg.text}</p>
-                      )}
+                {messages.map((msg) => {
+                  const isUser = msg.sender === 'user';
+                  const isEditing = editingMessageId === msg.id;
 
-                      {/* Action Links */}
-                      {msg.actionLinks && msg.actionLinks.length > 0 && (
-                        <div className="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
-                          <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                            Recommended Action:
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {msg.actionLinks.map((link, idx) => (
+                  return (
+                    <div
+                      key={msg.id}
+                      id={`assistant-msg-${msg.id}`}
+                      className={`group/msg flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+                    >
+                      <div
+                        className={`rounded-2xl p-3.5 sm:p-4 leading-relaxed shadow-2xs transition-all ${
+                          isExpanded ? 'max-w-[80%]' : 'max-w-[88%]'
+                        } ${
+                          isUser
+                            ? 'bg-indigo-600 text-white rounded-br-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200/70 dark:border-slate-700/60 rounded-bl-xs'
+                        }`}
+                      >
+                        {isUser && isEditing ? (
+                          <div className="space-y-2.5 min-w-[220px] sm:min-w-[280px]">
+                            <textarea
+                              id={`assistant-edit-textarea-${msg.id}`}
+                              value={editingText}
+                              onChange={(e) => setEditingText(e.target.value)}
+                              disabled={savingEdit}
+                              rows={Math.min(6, Math.max(2, editingText.split('\n').length))}
+                              aria-label="Edit message"
+                              className="w-full px-3 py-2 text-xs sm:text-sm bg-indigo-700/90 text-white placeholder-indigo-200 border border-indigo-400/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/50 resize-none font-medium"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  handleSaveEdit(msg.id);
+                                } else if (e.key === 'Escape') {
+                                  e.preventDefault();
+                                  handleCancelEdit();
+                                }
+                              }}
+                            />
+                            <div className="flex items-center justify-end gap-2">
                               <button
-                                key={idx}
                                 type="button"
-                                onClick={() => {
-                                  setIsOpen(false);
-                                  setIsExpanded(false);
-                                  onNavigate(link.route);
-                                }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer"
+                                id={`assistant-cancel-edit-btn-${msg.id}`}
+                                onClick={handleCancelEdit}
+                                disabled={savingEdit}
+                                aria-label="Cancel editing"
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 text-white/90 transition-colors disabled:opacity-50 cursor-pointer"
                               >
-                                <span>{link.label}</span>
-                                <ArrowUpRight className="w-3 h-3" />
+                                Cancel
                               </button>
-                            ))}
+                              <button
+                                type="button"
+                                id={`assistant-save-edit-btn-${msg.id}`}
+                                onClick={() => handleSaveEdit(msg.id)}
+                                disabled={!editingText.trim() || savingEdit}
+                                aria-label="Save edited message"
+                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-white text-indigo-700 hover:bg-indigo-50 shadow-xs transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                {savingEdit ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin text-indigo-700" />
+                                    <span>Saving...</span>
+                                  </>
+                                ) : (
+                                  <span>Save</span>
+                                )}
+                              </button>
+                            </div>
                           </div>
+                        ) : (
+                          <>
+                            {msg.sender === 'assistant' ? (
+                              <MarkdownRenderer content={msg.text} />
+                            ) : (
+                              <p className="whitespace-pre-wrap font-medium">{msg.text}</p>
+                            )}
+
+                            {/* Action Links */}
+                            {msg.actionLinks && msg.actionLinks.length > 0 && (
+                              <div className="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
+                                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                  Recommended Action:
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {msg.actionLinks.map((link, idx) => (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      onClick={() => {
+                                        setIsOpen(false);
+                                        setIsExpanded(false);
+                                        onNavigate(link.route);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer"
+                                    >
+                                      <span>{link.label}</span>
+                                      <ArrowUpRight className="w-3 h-3" />
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      {/* Suggested Followups */}
+                      {msg.suggestedFollowUps && msg.suggestedFollowUps.length > 0 && (
+                        <div className="mt-2.5 flex flex-wrap gap-1.5 max-w-[95%]">
+                          {msg.suggestedFollowUps.slice(0, 4).map((fu, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => handleSendMessage(fu)}
+                              className="px-2.5 py-1 rounded-full text-[11px] bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer text-left"
+                            >
+                              💬 {fu}
+                            </button>
+                          ))}
                         </div>
                       )}
-                    </div>
 
-                    {/* Suggested Followups */}
-                    {msg.suggestedFollowUps && msg.suggestedFollowUps.length > 0 && (
-                      <div className="mt-2.5 flex flex-wrap gap-1.5 max-w-[95%]">
-                        {msg.suggestedFollowUps.slice(0, 4).map((fu, idx) => (
+                      {/* Message Footer: Timestamp and User Edit Icon */}
+                      <div className={`flex items-center gap-2 mt-1 px-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <span className="text-[10px] text-slate-400">
+                          {formatTime(msg.timestamp)}
+                        </span>
+
+                        {/* Edit Icon: ONLY for current authenticated user's messages */}
+                        {isUser && !isEditing && (
                           <button
-                            key={idx}
                             type="button"
-                            onClick={() => handleSendMessage(fu)}
-                            className="px-2.5 py-1 rounded-full text-[11px] bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer text-left"
+                            id={`assistant-edit-btn-${msg.id}`}
+                            onClick={() => handleStartEdit(msg)}
+                            disabled={loading || savingEdit}
+                            title="Edit message"
+                            aria-label="Edit message"
+                            className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer py-0.5 px-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
                           >
-                            💬 {fu}
+                            <Pencil className="w-3 h-3" />
+                            <span className="text-[10px] font-medium hidden sm:inline">Edit</span>
                           </button>
-                        ))}
+                        )}
                       </div>
-                    )}
-
-                    <span className="text-[10px] text-slate-400 mt-1 px-1">
-                      {formatTime(msg.timestamp)}
-                    </span>
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
 
                 {loading && (
                   <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 w-fit">

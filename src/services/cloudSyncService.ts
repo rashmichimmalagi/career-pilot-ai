@@ -290,22 +290,25 @@ export const cloudSyncService = {
         });
       summary.completedRoadmapItemIds = Array.from(completedSet);
 
-      // 9. Badges & Streaks
-      allKeys
-        .filter((k) => k.startsWith('careerpilot_unlocked_badges_'))
-        .forEach((k) => {
-          try {
-            const raw = localStorage.getItem(k);
-            if (raw) {
-              const list = JSON.parse(raw);
-              if (Array.isArray(list)) {
-                list.forEach((b) => {
-                  if (typeof b === 'string' && !summary.badges.includes(b)) summary.badges.push(b);
-                });
-              }
+      // 9. Badges & Streaks (Scoped strictly to targetUserId to preserve multi-user isolation)
+      if (targetUserId && targetUserId !== 'guest') {
+        const userBadgeKey = `careerpilot_unlocked_badges_${targetUserId}`;
+        try {
+          const raw = localStorage.getItem(userBadgeKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              parsed.forEach((b) => {
+                if (typeof b === 'string' && !summary.badges.includes(b)) summary.badges.push(b);
+              });
+            } else if (parsed && typeof parsed === 'object') {
+              Object.keys(parsed).forEach((b) => {
+                if (!summary.badges.includes(b)) summary.badges.push(b);
+              });
             }
-          } catch (_) {}
-        });
+          }
+        } catch (_) {}
+      }
 
       allKeys
         .filter((k) => k.startsWith('careerpilot_longest_streak_') || k.startsWith('careerpilot_current_streak_'))

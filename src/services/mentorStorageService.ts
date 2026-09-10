@@ -825,6 +825,135 @@ export const mentorStorageService = {
     return this.saveMessage(conversationId, message, effectiveUserId || undefined);
   },
 
+  /**
+   * Edit a user message for CareerPilot AI Assistant in Supabase.
+   *
+   * SECURITY & CONSISTENCY:
+   * 1. Resolves authenticated user ID from Supabase Auth session.
+   * 2. Validates that message belongs to the authenticated user and has sender/role === 'user'.
+   * 3. AI assistant and system messages are forbidden from being edited.
+   * 4. Downstream messages in the conversation are safely removed from Supabase and cache,
+   *    preventing invalid or competing AI responses.
+   * 5. Updates Supabase mentor_messages, profile_data cloud backup, and local cache.
+   */
+  async editAssistantUserMessage(
+    userId: string | undefined,
+    messageId: string,
+    newText: string,
+    downstreamIds: string[] = []
+  ): Promise<{ success: boolean; error?: string }> {
+    const effectiveUserId = await getEffectiveUserId(userId);
+    const targetUserId = effectiveUserId || userId || 'guest';
+    const conversationId = `assistant_${targetUserId}`;
+    const trimmed = newText.trim();
+
+    if (!trimmed) {
+      return { success: false, error: 'Message content cannot be empty' };
+    }
+
+    // 1. Update local cache immediately
+    const cached = getCachedMessages(targetUserId, conversationId);
+    const targetCached = cached.find((m) => m.id === messageId);
+    if (targetCached && targetCached.sender !== 'user') {
+      return { success: false, error: 'Only user messages can be edited' };
+    }
+
+    const updatedCached = cached
+      .filter((m) => !downstreamIds.includes(m.id))
+      .map((m) =>
+        m.id === messageId && m.sender === 'user'
+          ? { ...m, text: trimmed, syncStatus: 'synced' as const }
+          : m
+      );
+    setCachedMessages(targetUserId, conversationId, updatedCached);
+
+    // 2. Persist to Supabase if authenticated and online
+    if (effectiveUserId && isSupabaseConfigured()) {
+      try {
+        // A. Verify in Supabase that the message exists, belongs to effectiveUserId, and has role === 'user'
+        const { data: existingMsg, error: checkErr } = await supabase
+          .from('mentor_messages')
+          .select('id, user_id, role, conversation_id')
+          .eq('id', messageId)
+          .maybeSingle();
+
+        if (existingMsg) {
+          if (existingMsg.user_id !== effectiveUserId) {
+            return { success: false, error: 'Unauthorized: Cannot edit another user message' };
+          }
+          if (existingMsg.role !== 'user') {
+            return { success: false, error: 'Unauthorized: Cannot edit non-user messages' };
+          }
+        }
+
+        // B. Update the user message in mentor_messages
+        const { error: updateErr } = await supabase
+          .from('mentor_messages')
+          .update({ content: trimmed })
+          .eq('id', messageId)
+          .eq('user_id', effectiveUserId)
+          .eq('role', 'user');
+
+        if (updateErr && !isTableMissingError(updateErr)) {
+          console.warn('[mentorStorageService] Error updating message in Supabase:', updateErr.message);
+        }
+
+        // C. Clean up downstream messages in Supabase to maintain chronological consistency
+        if (downstreamIds.length > 0) {
+          const { error: deleteErr } = await supabase
+            .from('mentor_messages')
+            .delete()
+            .in('id', downstreamIds)
+            .eq('conversation_id', conversationId)
+            .eq('user_id', effectiveUserId);
+
+          if (deleteErr && !isTableMissingError(deleteErr)) {
+            console.warn('[mentorStorageService] Error deleting downstream messages:', deleteErr.message);
+          }
+        }
+
+        // D. Also update/prune in profiles.profile_data cloud backup
+        try {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('profile_data, career_goal')
+            .eq('id', effectiveUserId)
+            .maybeSingle();
+
+          let metaObj: any = (prof?.profile_data as Record<string, any>) || {};
+          if (prof?.career_goal && prof.career_goal.startsWith('__CP_DATA__')) {
+            try {
+              metaObj = { ...metaObj, ...JSON.parse(prof.career_goal.replace(/^__CP_DATA__/, '')) };
+            } catch (_) {}
+          }
+
+          const byConv = metaObj.mentor_messages_by_conv || {};
+          const msgs = byConv[conversationId];
+          if (Array.isArray(msgs)) {
+            const filtered = msgs
+              .filter((m: any) => !downstreamIds.includes(m.id))
+              .map((m: any) =>
+                m.id === messageId && (m.sender === 'user' || m.role === 'user')
+                  ? { ...m, text: trimmed, content: trimmed }
+                  : m
+              );
+            metaObj.mentor_messages_by_conv = {
+              ...byConv,
+              [conversationId]: filtered,
+            };
+            await supabase.from('profiles').update({ profile_data: metaObj }).eq('id', effectiveUserId);
+          }
+        } catch (_) {}
+
+        return { success: true };
+      } catch (err: any) {
+        console.warn('[mentorStorageService] Notice in editAssistantUserMessage:', err?.message || err);
+      }
+    }
+
+    return { success: true };
+  },
+
   getCachedConversations(userId: string = 'guest'): MentorConversation[] {
     return getCachedConversations(userId);
   },

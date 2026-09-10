@@ -7,10 +7,38 @@ import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_CODING_QUESTION_BANK, getQuestionsForTopic, createTopicTailoredFallback } from './src/data/codingQuestionBank';
 import { resolveTopicConcept, validateProblemSemantics } from './src/data/codingTopicContracts';
 import { CodingVerificationEngine } from './src/services/codingVerificationEngine';
+import {
+  analyzeAssistantQueryIntent,
+  buildScopedStudentContext,
+  QueryIntentResult,
+  ScopedStudentContext,
+} from './src/services/aiAssistantIntentService';
 
 dotenv.config();
 
 const PORT = 3000;
+
+// Supabase client instance on the server for token verification & user isolation
+const serverSupabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://liqaeoxwjhsalfdqdwcr.supabase.co';
+const serverSupabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+const serverSupabase = serverSupabaseAnonKey ? createClient(serverSupabaseUrl, serverSupabaseAnonKey) : null;
+
+async function getAuthenticatedUser(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ') || !serverSupabase) {
+    return null;
+  }
+  const token = authHeader.substring(7).trim();
+  if (!token) return null;
+
+  try {
+    const { data: { user }, error } = await serverSupabase.auth.getUser(token);
+    if (error || !user) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
 
 // Lazy initialization of Gemini Client
 let geminiClient: GoogleGenAI | null = null;
@@ -5601,6 +5629,581 @@ Feel free to ask for a custom daily plan, resume bullet revisions, or target com
   app.all('/api/mentor/chat', careerMentorChatHandler);
   app.all('/api/mentor/chat/', careerMentorChatHandler);
 
+  // -------------------------------------------------------------
+  // CareerPilot AI Assistant Endpoint (/api/assistant/chat)
+  // Dedicated, Intent-Aware, General-First Conversational Assistant
+  // -------------------------------------------------------------
+  function generateIntentAwareFallbackServer(
+    query: string,
+    intent: QueryIntentResult,
+    context: ScopedStudentContext | null
+  ) {
+    const lower = query.toLowerCase();
+
+    // General Questions: Direct general knowledge answers without personal metrics
+    if (intent.intentType === 'GENERAL') {
+      if (lower.includes('linux') && lower.includes('process')) {
+        return {
+          reply: `### Understanding Processes in Linux
+
+In Linux, a **process** is an instance of an executing program. Every process has its own virtual address space, memory pages, file descriptor table, and execution context.
+
+#### Core Process Concepts:
+1. **PID (Process ID)**: A unique identifier assigned by the kernel. The root ancestor of user-space processes is \`systemd\` (PID 1).
+2. **Process States**:
+   * **Running (\`R\`)**: Executing or ready in CPU run-queue.
+   * **Interruptible Sleep (\`S\`)**: Blocked on I/O or waiting for an event.
+   * **Uninterruptible Sleep (\`D\`)**: Waiting on direct hardware/disk I/O.
+   * **Stopped (\`T\`)**: Suspended via \`SIGSTOP\` or \`Ctrl+Z\`.
+   * **Zombie (\`Z\`)**: Execution finished, but exit code not yet collected by parent via \`wait()\`.
+3. **Creation Lifecycle**:
+   * \`fork()\`: Duplicates the calling process using copy-on-write memory.
+   * \`execve()\`: Replaces the current process image with a new executable.
+
+#### Standard Commands:
+* \`ps aux\` / \`top\` / \`htop\` — Inspect running processes.
+* \`kill -15 <PID>\` — Graceful termination (\`SIGTERM\`).
+* \`kill -9 <PID>\` — Immediate kernel kill (\`SIGKILL\`).`,
+          suggestedFollowUps: [
+            'What is the difference between a process and a thread?',
+            'How does fork() and exec() work in Linux?',
+            'How do you identify and clean up zombie processes?',
+          ],
+          actionLinks: [],
+        };
+      }
+
+      if (lower.includes('normalization') || lower.includes('dbms')) {
+        return {
+          reply: `### Database Normalization in DBMS
+
+**Normalization** is the design technique used in relational database management systems to organize tables, minimize redundancy, and prevent data anomalies (insertion, deletion, update).
+
+#### Normal Forms Breakdown:
+* **1NF (First Normal Form)**: Column values must be atomic; no repeating groups or arrays. Every table must have a Primary Key.
+* **2NF (Second Normal Form)**: Must satisfy 1NF and have no partial functional dependencies (all non-key attributes must depend on the entire candidate key).
+* **3NF (Third Normal Form)**: Must satisfy 2NF and have no transitive dependencies (non-key attributes cannot depend on other non-key attributes).
+* **BCNF (Boyce-Codd Normal Form)**: A stricter variant of 3NF where for every dependency $A \\rightarrow B$, $A$ must be a super key.`,
+          suggestedFollowUps: [
+            'What is the difference between 3NF and BCNF?',
+            'When should a production database be denormalized?',
+            'Explain ACID properties with real-world examples.',
+          ],
+          actionLinks: [],
+        };
+      }
+
+      if (lower.includes('project') || lower.includes('ideas')) {
+        return {
+          reply: `### Full Stack Development Project Ideas
+
+Here are curated, industry-relevant Full Stack project ideas that demonstrate architectural capability:
+
+1. **Real-Time Collaborative Document Canvas**
+   * **Stack**: React, Node.js, WebSockets, Redis, PostgreSQL.
+   * **Highlights**: Operational Transformation / CRDTs, room-based synchronization, presence indicators.
+
+2. **Distributed Asynchronous Task Engine**
+   * **Stack**: Next.js, Express, BullMQ, Redis, PostgreSQL.
+   * **Highlights**: Job queuing, rate limiting, exponential backoff, worker cluster monitoring dashboard.
+
+3. **Event-Driven E-Commerce API & Storefront**
+   * **Stack**: React, Node.js, RabbitMQ/Kafka, PostgreSQL, Stripe integration.
+   * **Highlights**: Idempotent order processing, webhook state machines, inventory locks.
+
+4. **API Gateway & Reverse Proxy with Rate Limiting**
+   * **Stack**: TypeScript, Express / Go, Redis, React Dashboard.
+   * **Highlights**: Token Bucket rate limiting, latency metrics, JWT authorization layer.`,
+          suggestedFollowUps: [
+            'How do you handle real-time concurrency in collaborative apps?',
+            'What are best practices for securing API webhooks?',
+            'Which project should I build based on my current skills?',
+          ],
+          actionLinks: [],
+        };
+      }
+
+      if (lower.includes('react') && (lower.includes('hook') || lower.includes('hooks'))) {
+        return {
+          reply: `### Core React Hooks Overview
+
+**React Hooks** let functional components manage state, side effects, context, and DOM access without class components.
+
+#### Essential Hooks:
+* **\`useState\`**: Reactive state management with updater function.
+* **\`useEffect\`**: Handles side effects (data fetching, DOM listeners, timers) with cleanup returns.
+* **\`useRef\`**: Persists mutable values across renders without re-rendering; attaches directly to DOM elements.
+* **\`useMemo\` & \`useCallback\`**: Memoizes computationally expensive operations and callback references.
+* **\`useContext\`**: Consumes global values without prop drilling.`,
+          suggestedFollowUps: [
+            'What is the difference between useMemo and useCallback?',
+            'How do you build a custom hook in TypeScript?',
+            'What are the golden rules of React Hooks?',
+          ],
+          actionLinks: [],
+        };
+      }
+
+      if (lower.includes('react')) {
+        return {
+          reply: `### What is React?
+
+**React** is an open-source JavaScript library developed by Meta for building dynamic, declarative, component-driven user interfaces.
+
+#### Core Principles:
+* **Component-Based Architecture**: UI is divided into reusable, isolated components managing their own state.
+* **Virtual DOM & Reconciliation**: React maintains an in-memory diff of the DOM, batching minimal DOM manipulations for peak performance.
+* **Declarative Paradigm**: You define how the UI should look for any given state, and React handles rendering.
+* **One-Way Data Flow**: Data flows predictably down from parent components to children via props.`,
+          suggestedFollowUps: [
+            'What are React Hooks and how do they work?',
+            'What is the difference between Virtual DOM and Real DOM?',
+            'What are React Server Components?',
+          ],
+          actionLinks: [],
+        };
+      }
+
+      // Default General fallback
+      return {
+        reply: `### Technical Overview: ${query}
+
+In software engineering, breaking down technical topics into foundational mechanics, trade-offs, and production considerations provides the deepest clarity:
+
+1. **Core Mechanism**: Identify the primary contract, inputs, transformations, and output.
+2. **Complexity & Trade-offs**: Consider time complexity ($O(n)$), space complexity ($O(1)$), and resource constraints.
+3. **Reliability & Edge Cases**: Evaluate error boundaries, failure modes, concurrent access, and input validation.`,
+        suggestedFollowUps: [
+          'Can you provide a code example for this?',
+          'What are common interview questions on this topic?',
+          'What are the performance trade-offs?',
+        ],
+        actionLinks: [],
+      };
+    }
+
+    // Personalized Questions: Use authorized scoped context only
+    const studentName = context?.studentName || 'Student';
+    const targetRole = context?.targetRole || 'Software Engineer';
+    const targetCompany = context?.targetCompany || 'Top Tech Companies';
+
+    if (intent.requiredCategories.includes('resume_analysis')) {
+      const resume = context?.resumeData;
+      if (!resume || !resume.isAnalyzed) {
+        return {
+          reply: `### Resume Guidance for ${studentName}
+
+You currently have not uploaded or analyzed a resume in CareerPilot.
+
+To get personalized keyword alignment and ATS score for **${targetRole}**:
+1. Open the **Resume Analyzer** module.
+2. Upload your technical PDF resume.
+
+#### General Guidelines for Technical ATS Resumes:
+* Standard single-column format without tables or text boxes.
+* Use the **Google XYZ formula**: *"Accomplished [X], measured by [Y], by doing [Z]"*.
+* Ensure all technical languages and libraries appear in a dedicated Technical Skills section.`,
+          suggestedFollowUps: [
+            'What makes a resume ATS friendly?',
+            'How do I write XYZ formula bullet points?',
+            'Which skills are most important for my target role?',
+          ],
+          actionLinks: [
+            {
+              label: 'Open Resume Analyzer',
+              route: 'resume-analyzer',
+              icon: 'FileText',
+              description: 'Upload and analyze your resume',
+            },
+          ],
+        };
+      }
+
+      return {
+        reply: `### Resume Insights for ${studentName} (${targetRole})
+
+* **ATS Compatibility Score**: **${resume.atsScore ?? 0}/100**
+* **Role Match**: **${resume.roleMatchScore ?? 0}/100**
+
+#### Key Strengths:
+${
+  resume.strengths && resume.strengths.length > 0
+    ? resume.strengths.map((s) => `* ${s}`).join('\n')
+    : '* Foundational education and technical credentials.'
+}
+
+#### High-Priority Missing Skills:
+${
+  resume.missingSkills && resume.missingSkills.length > 0
+    ? resume.missingSkills.map((s) => `* **${s}**: Consider incorporating into projects or coursework.`).join('\n')
+    : '* No critical keyword gaps identified.'
+}`,
+        suggestedFollowUps: [
+          'How can I improve my project bullet points?',
+          'Which project should I build to cover missing skills?',
+        ],
+        actionLinks: [
+          {
+            label: 'Open Resume Analyzer',
+            route: 'resume-analyzer',
+            icon: 'FileText',
+            description: 'View full resume report',
+          },
+        ],
+      };
+    }
+
+    if (intent.requiredCategories.includes('coding_performance')) {
+      const coding = context?.codingData;
+      return {
+        reply: `### DSA & Coding Practice Summary
+
+* **Problems Solved**: **${coding?.totalSolved ?? 0}** (Easy: ${coding?.easySolved ?? 0}, Medium: ${coding?.mediumSolved ?? 0}, Hard: ${coding?.hardSolved ?? 0})
+* **Overall Accuracy**: **${coding?.overallAccuracy ?? 0}%** across ${coding?.totalAttempted ?? 0} attempts
+
+#### Focus Areas:
+${
+  coding?.weakTopics && coding.weakTopics.length > 0
+    ? coding.weakTopics.map((t) => `* **${t}**: Recommended for focused practice.`).join('\n')
+    : '* Two Pointers, Sliding Window, Dynamic Programming, Graphs.'
+}`,
+        suggestedFollowUps: [
+          'Which topic should I practice today?',
+          'Can you give me a practice problem on my weak topic?',
+        ],
+        actionLinks: [
+          {
+            label: 'Practice Coding Arena',
+            route: 'coding',
+            icon: 'Code2',
+            description: 'Solve curated coding problems',
+          },
+        ],
+      };
+    }
+
+    // Profile-based projects
+    if (intent.requiredCategories.includes('profile_skills')) {
+      const skills = context?.declaredSkills || [];
+      const skillsList = skills.length > 0 ? skills.join(', ') : 'JavaScript, TypeScript, React, SQL';
+
+      return {
+        reply: `### Project Recommendations for ${studentName}
+
+Targeting **${targetRole}** with active skills (**${skillsList}**):
+
+1. **Enterprise React & TypeScript Dashboard**
+   * High-volume state management, data visualization, role-based access.
+2. **High-Throughput Microservice API**
+   * Rate limiting, Redis caching, structured logging, containerized deployment.
+3. **Real-Time Asynchronous Processing Pipeline**
+   * Message queues, background workers, event streaming.`,
+        suggestedFollowUps: [
+          'How should I structure this on my resume?',
+          'What database schema would you recommend?',
+        ],
+        actionLinks: [
+          {
+            label: 'View Career Roadmap',
+            route: 'roadmap',
+            icon: 'Map',
+            description: 'Track milestones on your roadmap',
+          },
+        ],
+      };
+    }
+
+    // Overall preparation
+    const readiness = context?.placementReadiness;
+    return {
+      reply: `### Placement Preparation Analysis for ${studentName}
+
+* **Target Goal**: **${targetRole}** at **${targetCompany}**
+* **Placement Readiness**: **${readiness?.overallScore ?? 0}/100** (${readiness?.statusCategory || 'In Progress'})
+* **Primary Recommendation**: ${readiness?.primaryRecommendation || 'Focus on consistent daily problem solving and resume alignment.'}`,
+      suggestedFollowUps: [
+        'What are my specific weak areas?',
+        'Which topic should I practice today?',
+        'How can I improve my resume score?',
+      ],
+      actionLinks: [
+        {
+          label: 'View Readiness Score',
+          route: 'roadmap',
+          icon: 'Map',
+          description: 'See detailed pillar breakdown',
+        },
+      ],
+    };
+  }
+
+  const careerPilotAssistantChatHandler = async (req: express.Request, res: express.Response) => {
+    res.setHeader('Content-Type', 'application/json');
+
+    if (req.method !== 'POST') {
+      return res.status(405).json({
+        success: false,
+        error: `Method ${req.method} not allowed on Assistant endpoint. Please use POST.`,
+      });
+    }
+
+    const { message, messages, scopedContext: clientScopedContext } = req.body || {};
+    const msgs = Array.isArray(messages) ? messages : [];
+    const query = typeof message === 'string' && message.trim() ? message.trim() : (msgs[msgs.length - 1]?.text || '');
+
+    // 1. Authenticate user from Supabase JWT (Never trust client-supplied user ID)
+    const authenticatedUser = await getAuthenticatedUser(req);
+    const authenticatedUserId = authenticatedUser?.id || null;
+
+    // 2. Perform Intent & Context Relevance Analysis
+    const intentResult: QueryIntentResult = analyzeAssistantQueryIntent(query, msgs);
+
+    // 3. Determine and scope context strictly based on intent
+    let finalContext: ScopedStudentContext | null = null;
+
+    if (intentResult.requiresPersonalContext) {
+      if (clientScopedContext && typeof clientScopedContext === 'object') {
+        finalContext = clientScopedContext;
+      } else if (authenticatedUserId && serverSupabase) {
+        try {
+          const { data: profileRow } = await serverSupabase
+            .from('profiles')
+            .select('*')
+            .eq('id', authenticatedUserId)
+            .maybeSingle();
+
+          if (profileRow) {
+            finalContext = {
+              studentName: profileRow.full_name || 'Student',
+              targetRole: profileRow.target_role || 'Software Engineer',
+              targetCompany: profileRow.target_company || 'Top Tech Companies',
+              declaredSkills: Array.isArray(profileRow.skills) ? profileRow.skills : [],
+            };
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 4. Build System Instruction based on Intent
+    const { client: ai } = getGemini();
+
+    let systemInstruction = '';
+    if (intentResult.intentType === 'GENERAL') {
+      systemInstruction = `You are CareerPilot AI Assistant, an authoritative AI software engineering mentor and placement guide.
+The user is asking a general technical, conceptual, or industry inquiry.
+
+==================================================
+CRITICAL CORE DIRECTIVES:
+==================================================
+1. ANSWER THE QUESTION DIRECTLY: Provide a clear, accurate, practical, and well-structured response using Markdown.
+2. ABSOLUTELY NO UNRELATED PERSONAL DATA DUMPING:
+   - Do NOT mention, assume, invent, or recite student preparation scores, placement readiness numbers, DSA accuracy, ATS scores, roadmap status, or consistency streaks.
+   - The user is asking a general question (e.g. Linux, React, DBMS, project ideas, REST APIs, general career advice). Answer it directly using general technical knowledge.
+3. STRUCTURE & CLARITY: Use Markdown headings (###, ####), bold terms, bullet points, and code snippets where appropriate.
+4. RELEVANT FOLLOW-UPS: Include 2-3 logical follow-up questions extending the technical topic discussed.
+5. NO UNSOLICITED ACTION LINKS: Set actionLinks to [] unless the user specifically asks for practice tests or problem solving.
+6. OUTPUT FORMAT: Return strictly a valid JSON object matching the schema.`;
+    } else {
+      // PERSONALIZED
+      const ctxText = finalContext ? JSON.stringify(finalContext, null, 2) : 'No specific user profile recorded yet.';
+      systemInstruction = `You are CareerPilot AI Assistant, an expert AI software engineering and placement mentor.
+The user has asked a question regarding their preparation, resume, performance, or requested personalized recommendations.
+
+==================================================
+AUTHENTIC USER CONTEXT (STRICTLY SCOPED TO RELEVANT MODULES):
+==================================================
+${ctxText}
+
+==================================================
+CRITICAL CORE DIRECTIVES:
+==================================================
+1. ALWAYS ANSWER THE USER'S QUESTION FIRST AND DIRECTLY:
+   - For example, if asked "Based on my profile, suggest Full Stack projects", immediately deliver high-quality, tailored project recommendations matching their declared skills.
+   - Do NOT lead with a recital of unrelated metrics, scores, or roadmap status.
+2. PERSONALIZATION MUST BE RELEVANT:
+   - Use the provided student context ONLY to make the answer directly helpful and tailored to their question.
+   - Do NOT dump unrelated metrics (e.g. do NOT mention aptitude or coding accuracy if the user asked about their resume or profile-based projects).
+3. NO FAKE DATA:
+   - Never invent or fabricate scores, metrics, or history. If data for a module is not available, state clearly that it is not yet analyzed/recorded.
+4. ACTIONABLE GUIDANCE:
+   - Provide concrete next steps, recruiter-level insights, and code/project suggestions.
+5. OUTPUT FORMAT: Return strictly a valid JSON object matching the schema.`;
+    }
+
+    const conversationPrompt = `CONVERSATION HISTORY:
+${msgs
+  .map(
+    (m: any) =>
+      `${m.sender === 'user' ? 'USER' : 'ASSISTANT'}: ${m.text}`
+  )
+  .join('\n\n')}
+
+LATEST USER QUERY: "${query}"
+
+Provide your expert response strictly in JSON format.`;
+
+    const assistantSchema = {
+      type: Type.OBJECT,
+      properties: {
+        reply: {
+          type: Type.STRING,
+          description: 'Rich Markdown-formatted response directly answering the user query. Clear structure, code blocks where helpful.',
+        },
+        suggestedFollowUps: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: '2 to 3 concise, relevant follow-up questions the user might ask next.',
+        },
+        actionLinks: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              label: { type: Type.STRING, description: 'Action button label (e.g. "Open Resume Analyzer")' },
+              route: { type: Type.STRING, description: 'Route id: coding | resume-analyzer | interview | placement | company-prep | roadmap' },
+              icon: { type: Type.STRING, description: 'Icon name: Code2 | FileText | Cpu | Brain | Building2 | Map' },
+              description: { type: Type.STRING, description: 'Brief description of what this module does' },
+            },
+            required: ['label', 'route'],
+          },
+          description: '0 to 3 direct links to CareerPilot modules ONLY if directly relevant to the user request.',
+        },
+      },
+      required: ['reply', 'suggestedFollowUps', 'actionLinks'],
+    };
+
+    if (ai) {
+      try {
+        const result = await generateContentWithResilience(ai, conversationPrompt, {
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema: assistantSchema,
+          },
+          label: 'CareerPilot AI Assistant',
+        });
+
+        const parsed = extractJsonFromAiResponse(result.response);
+        if (parsed && typeof parsed.reply === 'string' && parsed.reply.trim()) {
+          return res.json({
+            success: true,
+            data: {
+              reply: parsed.reply.trim(),
+              suggestedFollowUps: Array.isArray(parsed.suggestedFollowUps)
+                ? parsed.suggestedFollowUps.slice(0, 3)
+                : [],
+              actionLinks: Array.isArray(parsed.actionLinks)
+                ? parsed.actionLinks.slice(0, 3)
+                : [],
+            },
+            intent: intentResult,
+            model: result.usedModel,
+          });
+        }
+      } catch (err: any) {
+        console.warn('[CareerPilot AI Assistant] Gemini generation warning, using fallback:', err?.message || err);
+      }
+    }
+
+    // Fallback if AI service is not available or timed out
+    const fallbackResponse = generateIntentAwareFallbackServer(query, intentResult, finalContext);
+    return res.json({
+      success: true,
+      data: fallbackResponse,
+      intent: intentResult,
+      model: 'assistant-fallback-engine',
+    });
+  };
+
+  app.all('/api/assistant/chat', careerPilotAssistantChatHandler);
+  app.all('/api/assistant/chat/', careerPilotAssistantChatHandler);
+
+  // ==========================================
+  // CAREERPILOT AI ASSISTANT EDIT MESSAGE ENDPOINT
+  // Strictly authenticated via Supabase JWT
+  // Allows user to UPDATE only their own user messages and prune downstream
+  // ==========================================
+  const careerPilotAssistantEditHandler = async (req: express.Request, res: express.Response) => {
+    res.setHeader('Content-Type', 'application/json');
+
+    if (req.method === 'OPTIONS') {
+      return res.status(200).send('ok');
+    }
+
+    if (req.method !== 'POST') {
+      return res.status(405).json({
+        success: false,
+        error: `Method ${req.method} not allowed. Please use POST.`,
+      });
+    }
+
+    // 1. Authenticate user strictly from Supabase JWT (Never trust client-supplied user ID)
+    const authenticatedUser = await getAuthenticatedUser(req);
+    if (!authenticatedUser) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: Valid Supabase authentication token required to edit messages.',
+      });
+    }
+
+    const { messageId, newText, downstreamMessageIds } = req.body || {};
+    if (!messageId || typeof newText !== 'string' || !newText.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request: messageId and non-empty newText are required.',
+      });
+    }
+
+    const trimmed = newText.trim();
+    const token = req.headers.authorization!.substring(7).trim();
+
+    try {
+      const userClient = createClient(serverSupabaseUrl, serverSupabaseAnonKey, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+
+      // 1. Update the message ONLY if role === 'user' AND user_id matches authenticated user
+      const { data: updated, error: updateErr } = await userClient
+        .from('mentor_messages')
+        .update({ content: trimmed })
+        .eq('id', messageId)
+        .eq('user_id', authenticatedUser.id)
+        .eq('role', 'user')
+        .select();
+
+      if (updateErr) {
+        console.warn('[careerPilotAssistantEditHandler] Supabase update warning:', updateErr.message);
+      }
+
+      // 2. Delete downstream messages if specified
+      if (Array.isArray(downstreamMessageIds) && downstreamMessageIds.length > 0) {
+        const { error: delErr } = await userClient
+          .from('mentor_messages')
+          .delete()
+          .in('id', downstreamMessageIds)
+          .eq('user_id', authenticatedUser.id);
+
+        if (delErr) {
+          console.warn('[careerPilotAssistantEditHandler] Supabase delete downstream warning:', delErr.message);
+        }
+      }
+
+      return res.json({
+        success: true,
+        data: { messageId, updatedText: trimmed },
+      });
+    } catch (err: any) {
+      console.error('[careerPilotAssistantEditHandler] Error editing message:', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to edit message',
+      });
+    }
+  };
+
+  app.all('/api/assistant/edit-message', careerPilotAssistantEditHandler);
+  app.all('/api/assistant/edit-message/', careerPilotAssistantEditHandler);
+
   // ==========================================
   // AI STUDY PLANNER GENERATION ENDPOINT
   // Strictly grounded in student's actual performance & profile
@@ -6597,6 +7200,10 @@ async function startServer() {
     process.env.NODE_ENV === 'prod' ||
     (typeof __dirname !== 'undefined' && __dirname.includes('dist')) ||
     (typeof __filename !== 'undefined' && __filename.endsWith('.cjs'));
+
+  if (isProduction && !process.env.NODE_ENV) {
+    process.env.NODE_ENV = 'production';
+  }
 
   if (!isProduction) {
     try {

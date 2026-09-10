@@ -43,7 +43,7 @@ export const PlacementPracticePage: React.FC<PlacementPracticePageProps> = ({
   initialSubject,
   initialCategory,
 }) => {
-  const { user, profile } = useAuth();
+  const { user, profile, showToast } = useAuth();
   const studentId = user?.id || profile?.id || 'guest';
   const studentEmail = user?.email || profile?.email || '';
 
@@ -283,12 +283,12 @@ export const PlacementPracticePage: React.FC<PlacementPracticePageProps> = ({
         setActiveQuestions(generated);
         setViewMode('active');
       } else {
-        alert('Could not generate questions. Please try again.');
+        showToast('Generation Notice', 'Could not generate questions. Please try again.', 'warning');
         setViewMode('setup');
       }
     } catch (err) {
       console.error('[PlacementPracticePage] Generation failed:', err);
-      alert('Generation encountered an issue. Returning to setup.');
+      showToast('Generation Issue', 'Encountered an issue creating questions. Returning to setup.', 'error');
       setViewMode('setup');
     }
   };

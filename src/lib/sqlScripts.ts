@@ -563,6 +563,7 @@ CREATE POLICY "Users can update own mentor messages" ON public.mentor_messages
   FOR UPDATE
   USING (
     auth.uid() = user_id AND
+    role = 'user' AND
     EXISTS (
       SELECT 1 FROM public.mentor_conversations c
       WHERE c.id = mentor_messages.conversation_id AND c.user_id = auth.uid()
@@ -570,6 +571,7 @@ CREATE POLICY "Users can update own mentor messages" ON public.mentor_messages
   )
   WITH CHECK (
     auth.uid() = user_id AND
+    role = 'user' AND
     EXISTS (
       SELECT 1 FROM public.mentor_conversations c
       WHERE c.id = mentor_messages.conversation_id AND c.user_id = auth.uid()

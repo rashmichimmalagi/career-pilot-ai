@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { AppNotification, NotificationPreferences } from '../types/notification';
 import { notificationService } from '../services/notificationService';
 import { useAuth } from '../context/AuthContext';
-import { fetchCareerIntelligence } from '../services/careerIntelligenceService';
 
 export function useNotifications() {
   const { user, loading: authLoading } = useAuth();
@@ -13,8 +12,6 @@ export function useNotifications() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const isMounted = useRef(true);
-
-  const lastEvalTimeRef = useRef<number>(0);
 
   // 1. Fetch notifications & preferences for authenticated user only
   const loadData = useCallback(async () => {
@@ -38,42 +35,6 @@ export function useNotifications() {
         setNotifications(notifs);
         setPreferences(prefs);
         setLoading(false);
-      }
-
-      // Throttled background evaluation (max once per 3 minutes per session)
-      const now = Date.now();
-      if (now - lastEvalTimeRef.current > 180000) {
-        lastEvalTimeRef.current = now;
-        fetchCareerIntelligence(userId)
-          .then(async (intel) => {
-            if (intel && isMounted.current) {
-              const missingSkills: string[] = [];
-              if (intel.adaptive?.weakTopics) {
-                missingSkills.push(...intel.adaptive.weakTopics.map((t) => t.topic));
-              }
-              const weakness = intel.interviewWeakness?.weakAreas?.[0]?.area || null;
-
-              const created = await notificationService.evaluateAndGenerateSmartNotifications(userId, {
-                studentId: userId,
-                readinessScore: intel.readiness?.overallScore ?? null,
-                mockInterviewsCount: intel.interviewWeakness?.totalInterviews ?? 0,
-                interviewWeaknessArea: weakness,
-                hasResume: intel.readiness?.dimensions?.resume?.isAvailable ?? false,
-                resumeMissingSkills: missingSkills,
-                unlockedAchievementsCount: intel.achievements?.unlockedCount ?? 0,
-                recentlyUnlockedBadgeTitle: intel.achievements?.recentlyUnlocked?.[0]?.title ?? null,
-              });
-
-              // Refresh notifications only if new smart notifications were generated
-              if (created && created.length > 0) {
-                const updated = await notificationService.fetchNotifications(userId);
-                if (isMounted.current) {
-                  setNotifications(updated);
-                }
-              }
-            }
-          })
-          .catch(() => {});
       }
     } catch (err: any) {
       if (isMounted.current) {
