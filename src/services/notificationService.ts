@@ -151,6 +151,17 @@ export const notificationService = {
     }
 
     // Authoritative achievement cleaner pass (removes notifications for incomplete achievements & cleans storage)
+    if (!this._achievementCleaner) {
+      try {
+        const achModule = await import('./achievementService');
+        if (achModule?.sanitizeAndCleanAchievementNotifications) {
+          this._achievementCleaner = achModule.sanitizeAndCleanAchievementNotifications;
+        }
+      } catch (importErr) {
+        console.warn('[NotificationService] Dynamic import achievementService notice:', importErr);
+      }
+    }
+
     let formatted = dedupedList;
     if (this._achievementCleaner && formatted.length > 0) {
       try {

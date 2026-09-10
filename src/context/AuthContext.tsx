@@ -363,6 +363,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleSignOut = async () => {
     setError(null);
     try {
+      if (user?.id) {
+        sessionStorage.removeItem(`careerpilot_dismiss_profile_modal_${user.id}`);
+      }
       sessionStorage.removeItem('notified_session_token');
       resumeService.clearInFlightAnalyses();
       await signOutUser();

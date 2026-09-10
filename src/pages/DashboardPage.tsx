@@ -287,29 +287,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Profile Incomplete Notification if profile is missing */}
-        {!profile && !authLoading && (
-          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <UserCheck className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
-              <div>
-                <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                  Complete your profile to personalize CareerPilot
-                </h4>
-                <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                  Add your target role, dream companies, and skills to get role-specific benchmarks and tailored recommendations.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setIsEditProfileOpen(true)}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors cursor-pointer shrink-0"
-            >
-              Complete Profile
-            </button>
-          </div>
-        )}
-
         {/* Loading State */}
         {isLoading && !dashboardData ? (
           <div className="p-16 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-4 shadow-sm">

@@ -34,10 +34,11 @@ function isTableMissingError(error: any): boolean {
 }
 
 /**
- * Helper to get the effective authenticated user ID
+ * Helper to get the effective authenticated user ID.
+ * SECURITY DIRECTIVE: Never trust a frontend-supplied user ID; always bind strictly
+ * to the cryptographically verified Supabase Auth session.
  */
 export async function getEffectiveUserId(providedId?: string): Promise<string | null> {
-  if (providedId && providedId !== 'guest') return providedId;
   if (!isSupabaseConfigured()) return null;
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -59,14 +60,16 @@ function getCachedConversations(userId: string): MentorConversation[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map((c: MentorConversation) => {
-      if (typeof c.messageCount === 'number') return c;
-      const cachedMsgs = getCachedMessages(userId, c.id);
-      return {
-        ...c,
-        messageCount: cachedMsgs.length,
-      };
-    });
+    return parsed
+      .filter((c: any) => !c.id?.startsWith('assistant_'))
+      .map((c: MentorConversation) => {
+        if (typeof c.messageCount === 'number') return c;
+        const cachedMsgs = getCachedMessages(userId, c.id);
+        return {
+          ...c,
+          messageCount: cachedMsgs.length,
+        };
+      });
   } catch {
     return [];
   }
@@ -247,14 +250,16 @@ export const mentorStorageService = {
           }
 
           if (Array.isArray(metaObj.mentor_conversations) && metaObj.mentor_conversations.length > 0) {
-            const enrichedFromProfile: MentorConversation[] = metaObj.mentor_conversations.map((c: any) => {
-              const msgs = metaObj.mentor_messages_by_conv?.[c.id];
-              const count = Array.isArray(msgs) ? msgs.length : (c.messageCount || 0);
-              return {
-                ...c,
-                messageCount: count,
-              };
-            });
+            const enrichedFromProfile: MentorConversation[] = metaObj.mentor_conversations
+              .filter((c: any) => !c.id?.startsWith('assistant_'))
+              .map((c: any) => {
+                const msgs = metaObj.mentor_messages_by_conv?.[c.id];
+                const count = Array.isArray(msgs) ? msgs.length : (c.messageCount || 0);
+                return {
+                  ...c,
+                  messageCount: count,
+                };
+              });
             setCachedConversations(effectiveUserId, enrichedFromProfile);
             return enrichedFromProfile;
           }
@@ -264,9 +269,12 @@ export const mentorStorageService = {
       }
 
       if (Array.isArray(convData)) {
+        // Exclude assistant conversations so AI Career Mentor only sees dedicated mentor threads
+        const mentorConvsOnly = convData.filter((c) => !c.id?.startsWith('assistant_'));
+
         // 2. Fetch message counts grouped by conversation for this user in a single efficient query
         const countMap: Record<string, number> = {};
-        const convIds = convData.map((c) => c.id).filter(Boolean);
+        const convIds = mentorConvsOnly.map((c) => c.id).filter(Boolean);
 
         if (convIds.length > 0) {
           try {
@@ -306,7 +314,7 @@ export const mentorStorageService = {
           }
         }
 
-        const convs: MentorConversation[] = convData.map((row) => {
+        const convs: MentorConversation[] = mentorConvsOnly.map((row) => {
           let count = countMap[row.id];
           if (typeof count !== 'number' || count === 0) {
             const localCached = getCachedMessages(effectiveUserId, row.id);
@@ -692,10 +700,11 @@ export const mentorStorageService = {
         const { error } = await supabase
           .from('mentor_conversations')
           .delete()
-          .eq('user_id', effectiveUserId);
+          .eq('user_id', effectiveUserId)
+          .not('id', 'like', 'assistant_%');
 
         if (error && isTableMissingError(error)) {
-          // Clear in profile_data
+          // Clear in profile_data (preserving assistant)
           try {
             const { data: prof } = await supabase
               .from('profiles')
@@ -705,8 +714,18 @@ export const mentorStorageService = {
 
             if (prof?.profile_data) {
               const metaObj = { ...(prof.profile_data as Record<string, any>) };
-              metaObj.mentor_conversations = [];
-              metaObj.mentor_messages_by_conv = {};
+              if (Array.isArray(metaObj.mentor_conversations)) {
+                metaObj.mentor_conversations = metaObj.mentor_conversations.filter(
+                  (c: any) => c.id?.startsWith('assistant_')
+                );
+              }
+              if (metaObj.mentor_messages_by_conv) {
+                const preserved: Record<string, any> = {};
+                for (const [k, v] of Object.entries(metaObj.mentor_messages_by_conv)) {
+                  if (k.startsWith('assistant_')) preserved[k] = v;
+                }
+                metaObj.mentor_messages_by_conv = preserved;
+              }
               metaObj.mentor_chat_history = [];
               await supabase.from('profiles').update({ profile_data: metaObj }).eq('id', effectiveUserId);
             }
@@ -718,6 +737,92 @@ export const mentorStorageService = {
     }
 
     return { success: true };
+  },
+
+  /**
+   * Fetch messages for CareerPilot AI Assistant (isolated per authenticated user in Supabase).
+   */
+  async fetchAssistantMessages(userId?: string): Promise<MentorMessage[]> {
+    const effectiveUserId = await getEffectiveUserId(userId);
+    const targetUserId = effectiveUserId || userId || 'guest';
+    const conversationId = `assistant_${targetUserId}`;
+
+    if (!effectiveUserId || !isSupabaseConfigured()) {
+      return getCachedMessages(targetUserId, conversationId);
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('mentor_messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', effectiveUserId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        if (!isTableMissingError(error)) {
+          console.warn('[mentorStorageService] Notice fetching assistant messages:', error.message);
+        }
+
+        // Fallback: check profile_data backup
+        try {
+          const { data: profileRow } = await supabase
+            .from('profiles')
+            .select('profile_data, career_goal')
+            .eq('id', effectiveUserId)
+            .maybeSingle();
+
+          let metaObj: any = (profileRow?.profile_data as Record<string, any>) || {};
+          if (profileRow?.career_goal && profileRow.career_goal.startsWith('__CP_DATA__')) {
+            try {
+              metaObj = { ...metaObj, ...JSON.parse(profileRow.career_goal.replace(/^__CP_DATA__/, '')) };
+            } catch (_) {}
+          }
+
+          const msgsByConv = metaObj.mentor_messages_by_conv?.[conversationId];
+          if (Array.isArray(msgsByConv) && msgsByConv.length > 0) {
+            setCachedMessages(effectiveUserId, conversationId, msgsByConv);
+            return msgsByConv;
+          }
+        } catch (_) {}
+
+        return getCachedMessages(targetUserId, conversationId);
+      }
+
+      if (Array.isArray(data)) {
+        const messages: MentorMessage[] = data.map((row) => ({
+          id: row.id,
+          conversationId: row.conversation_id,
+          sender: row.role === 'user' ? 'user' : 'assistant',
+          text: row.content || '',
+          timestamp: row.created_at,
+          suggestedFollowUps: Array.isArray(row.suggested_follow_ups) ? row.suggested_follow_ups : undefined,
+          actionLinks: Array.isArray(row.action_links) ? row.action_links : undefined,
+          syncStatus: 'synced',
+        }));
+
+        setCachedMessages(effectiveUserId, conversationId, messages);
+        return messages;
+      }
+    } catch (err) {
+      console.warn('[mentorStorageService] Notice loading assistant messages:', err);
+    }
+
+    return getCachedMessages(targetUserId, conversationId);
+  },
+
+  /**
+   * Save a CareerPilot AI Assistant message to Supabase.
+   */
+  async saveAssistantMessage(
+    userId: string | undefined,
+    message: MentorMessage
+  ): Promise<{ success: boolean; error?: string }> {
+    const effectiveUserId = await getEffectiveUserId(userId);
+    const targetUserId = effectiveUserId || userId || 'guest';
+    const conversationId = `assistant_${targetUserId}`;
+
+    return this.saveMessage(conversationId, message, effectiveUserId || undefined);
   },
 
   getCachedConversations(userId: string = 'guest'): MentorConversation[] {

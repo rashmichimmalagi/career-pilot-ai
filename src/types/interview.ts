@@ -103,6 +103,8 @@ export interface QuestionEvaluationResult {
   codeSnippet?: string;
   status: 'ANSWERED' | 'SKIPPED';
   answerText: string;
+  input_method?: 'text' | 'voice';
+  inputMethod?: 'text' | 'voice';
   score: number; // 0 to 10 scale (or 0-100)
   scoreOutOf10?: number;
   feedback: string;
@@ -171,6 +173,8 @@ export interface RecordedAnswer {
   language?: string;
   questionType: string;
   answerText: string;
+  input_method?: 'text' | 'voice';
+  inputMethod?: 'text' | 'voice';
   submittedAt: string;
   isSkipped?: boolean;
   isEvaluated?: boolean;

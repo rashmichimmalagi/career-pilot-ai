@@ -117,6 +117,7 @@ CREATE POLICY "Users can delete own notifications" ON public.notifications
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON public.notifications(user_id, is_read);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_dedup ON public.notifications(user_id, dedup_key) WHERE dedup_key IS NOT NULL;
 
 
 -- 4. Table: notification_preferences

@@ -82,7 +82,7 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
 
         if (allErrors.length === 0 && syncResult.success && totalPending === 0) {
           setSyncState('synced');
-          setSyncSummary('All changes synced successfully.');
+          setSyncSummary('Your CareerPilot data is safe.');
           if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
           syncTimeoutRef.current = setTimeout(() => {
             setSyncState('idle');
@@ -106,7 +106,7 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
           }
         } else {
           setSyncState('synced');
-          setSyncSummary('All changes synced successfully.');
+          setSyncSummary('Your CareerPilot data is safe.');
           if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
           syncTimeoutRef.current = setTimeout(() => {
             setSyncState('idle');
@@ -115,7 +115,7 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
       } else {
         // Guest mode / Unauthenticated
         setSyncState('synced');
-        setSyncSummary('Local changes preserved on this device.');
+        setSyncSummary('Your CareerPilot data is safe.');
         if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
         syncTimeoutRef.current = setTimeout(() => {
           setSyncState('idle');
@@ -169,7 +169,7 @@ export function useNetworkInterruption({ user, currentPage, showToast }: UseNetw
       setCurrentQuote((prev) => getRandomOfflineQuote(prev?.id, currentPageRef.current));
       refreshQueueCount();
       if (showToast) {
-        showToast('Offline Mode Active', 'Your CareerPilot data is safe. Changes will be saved on this device.', 'warning');
+        showToast('Offline Mode Active', 'Your CareerPilot data is safe. Changes will sync when your connection returns.', 'warning');
       }
     };
 

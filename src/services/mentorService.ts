@@ -448,6 +448,20 @@ export async function clearAllMentorConversations(studentId?: string): Promise<{
 }
 
 /**
+ * CareerPilot AI Assistant persistent message storage (Supabase backed, isolated per user)
+ */
+export async function fetchAssistantMessages(studentId?: string): Promise<MentorMessage[]> {
+  return mentorStorageService.fetchAssistantMessages(studentId);
+}
+
+export async function saveAssistantMessage(
+  studentId: string | undefined,
+  message: MentorMessage
+): Promise<{ success: boolean; error?: string }> {
+  return mentorStorageService.saveAssistantMessage(studentId, message);
+}
+
+/**
  * Generates intelligent default action links based on user message and context
  */
 export function deriveActionLinks(text: string, context: MentorStudentContext): MentorActionLink[] {

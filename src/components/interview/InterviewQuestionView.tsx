@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Bot,
   Sparkles,
@@ -19,6 +19,12 @@ import {
   Target,
   RefreshCw,
   FastForward,
+  Mic,
+  MicOff,
+  Keyboard,
+  Square,
+  Trash2,
+  Volume2,
 } from 'lucide-react';
 import {
   InterviewQuestion,
@@ -28,6 +34,7 @@ import {
   AnswerEvaluation,
 } from '../../types/interview';
 import { useAuth } from '../../context/AuthContext';
+import { useVoiceAnswer } from '../../hooks/useVoiceAnswer';
 
 interface InterviewQuestionViewProps {
   question: InterviewQuestion;
@@ -39,9 +46,9 @@ interface InterviewQuestionViewProps {
   questionStatuses: Record<number, QuestionStatus>;
   isEvaluating?: boolean;
   evaluationError?: string | null;
-  onSubmitAnswer: (questionNumber: number, answerText: string) => Promise<void>;
+  onSubmitAnswer: (questionNumber: number, answerText: string, inputMethod?: 'text' | 'voice') => Promise<void>;
   onSkipQuestion: () => void;
-  onSaveAnswer: (questionNumber: number, answerText: string) => void;
+  onSaveAnswer: (questionNumber: number, answerText: string, inputMethod?: 'text' | 'voice') => void;
   onNavigateQuestion: (targetQuestionNum: number) => void;
   onPreviousQuestion: () => void;
   onNextQuestion: (currentDraftText: string) => void;
@@ -73,9 +80,32 @@ export const InterviewQuestionView: React.FC<InterviewQuestionViewProps> = ({
   const { showToast } = useAuth();
 
   // Local active textarea state initialized to existing saved answer
-  const [answerText, setAnswerText] = useState(savedAnswer);
+  const [answerText, setAnswerText] = useState(savedAnswer || '');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSavedFeedback, setIsSavedFeedback] = useState(false);
+
+  // Input method mode: 'text' or 'voice'
+  const initialMethod = (recordedAnswers[question.questionNumber]?.input_method ||
+    recordedAnswers[question.questionNumber]?.inputMethod ||
+    'text') as 'text' | 'voice';
+  const [inputMethod, setInputMethod] = useState<'text' | 'voice'>(initialMethod);
+
+  // Memoized voice speech-to-text transcript callback
+  const handleVoiceTranscriptChange = useCallback(
+    (text: string) => {
+      setAnswerText(text);
+      setValidationError((prev) => (prev && text.trim() ? null : prev));
+      onSaveAnswer(question.questionNumber, text, 'voice');
+    },
+    [question.questionNumber, onSaveAnswer]
+  );
+
+  // Voice speech-to-text hook
+  const voice = useVoiceAnswer({
+    language: 'en-US',
+    initialTranscript: savedAnswer || '',
+    onTranscriptChange: handleVoiceTranscriptChange,
+  });
 
   const notifyBlockedPaste = () => {
     showToast(
@@ -89,9 +119,15 @@ export const InterviewQuestionView: React.FC<InterviewQuestionViewProps> = ({
 
   // Sync textarea whenever switching to a different question
   useEffect(() => {
-    setAnswerText(savedAnswer || '');
+    const textVal = savedAnswer || '';
+    setAnswerText(textVal);
     setValidationError(null);
     setIsSavedFeedback(false);
+    const prevMethod = (recordedAnswers[question.questionNumber]?.input_method ||
+      recordedAnswers[question.questionNumber]?.inputMethod ||
+      'text') as 'text' | 'voice';
+    setInputMethod(prevMethod);
+    voice.updateTranscript(textVal);
   }, [question.id, question.questionNumber, savedAnswer]);
 
   const currentQNum = question.questionNumber;
@@ -127,16 +163,19 @@ export const InterviewQuestionView: React.FC<InterviewQuestionViewProps> = ({
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setAnswerText(val);
+    if (inputMethod === 'voice') {
+      voice.updateTranscript(val);
+    }
     if (validationError && val.trim()) {
       setValidationError(null);
     }
     // Auto-save on change so student never loses text when navigating
-    onSaveAnswer(currentQNum, val);
+    onSaveAnswer(currentQNum, val, inputMethod);
   };
 
   const handleManualSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveAnswer(currentQNum, answerText);
+    onSaveAnswer(currentQNum, answerText, inputMethod);
     setIsSavedFeedback(true);
     setTimeout(() => setIsSavedFeedback(false), 2500);
   };
@@ -144,12 +183,19 @@ export const InterviewQuestionView: React.FC<InterviewQuestionViewProps> = ({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
+    if (voice.isListening) {
+      voice.stopListening();
+    }
+
     const trimmed = answerText.trim();
     if (!trimmed) {
-      setValidationError('Please enter your answer before submitting.');
+      const emptyMsg = inputMethod === 'voice'
+        ? 'Please record or speak your answer before submitting.'
+        : 'Please enter your answer before submitting.';
+      setValidationError(emptyMsg);
       showToast(
         '⚠️ Empty Answer',
-        'Please enter your answer before submitting.',
+        emptyMsg,
         'warning',
         undefined,
         3000
@@ -158,15 +204,21 @@ export const InterviewQuestionView: React.FC<InterviewQuestionViewProps> = ({
     }
 
     setValidationError(null);
-    await onSubmitAnswer(currentQNum, answerText);
+    await onSubmitAnswer(currentQNum, answerText, inputMethod);
   };
 
   const handleSkip = () => {
+    if (voice.isListening) {
+      voice.stopListening();
+    }
     setValidationError(null);
     onSkipQuestion();
   };
 
   const handleNextClick = () => {
+    if (voice.isListening) {
+      voice.stopListening();
+    }
     onNextQuestion(answerText);
   };
 
@@ -506,37 +558,205 @@ export const InterviewQuestionView: React.FC<InterviewQuestionViewProps> = ({
           )}
         </div>
 
+        {/* Input Mode Selector: Type Answer vs Answer with Voice */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-1 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+            <button
+              type="button"
+              id="interview-input-mode-type"
+              onClick={() => {
+                if (voice.isListening) voice.stopListening();
+                setInputMethod('text');
+              }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                inputMethod === 'text'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs border border-slate-200/80 dark:border-slate-700'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <Keyboard className="w-4 h-4" />
+              <span>⌨️ Type Answer</span>
+            </button>
+            <button
+              type="button"
+              id="interview-input-mode-voice"
+              onClick={() => {
+                setInputMethod('voice');
+                if (answerText) {
+                  voice.updateTranscript(answerText);
+                }
+              }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                inputMethod === 'voice'
+                  ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs border border-slate-200/80 dark:border-slate-700'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <Mic className="w-4 h-4 text-purple-500" />
+              <span>🎤 Answer with Voice</span>
+            </button>
+          </div>
+
+          <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+            <span className="font-semibold">Selected Method:</span>
+            <span className="px-2.5 py-1 rounded-lg font-bold text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+              {inputMethod === 'voice' ? '🎤 Voice' : '⌨️ Text'}
+            </span>
+          </div>
+        </div>
+
         <div className="space-y-4">
-          <textarea
-            id={`interview-answer-input-q${currentQNum}`}
-            rows={8}
-            value={answerText}
-            disabled={isEvaluating}
-            onChange={handleTextChange}
-            onPaste={(e) => {
-              e.preventDefault();
-              notifyBlockedPaste();
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              notifyBlockedPaste();
-            }}
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'v' || e.code === 'KeyV')) {
+          {/* VOICE INPUT PANEL */}
+          {inputMethod === 'voice' && (
+            <div className="p-5 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/60 space-y-4 animate-in fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    id="interview-voice-record-btn"
+                    disabled={isEvaluating}
+                    onClick={() => {
+                      if (voice.isListening) {
+                        voice.stopListening();
+                      } else {
+                        voice.startListening();
+                      }
+                    }}
+                    className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+                      voice.isListening
+                        ? 'bg-rose-600 hover:bg-rose-700 text-white ring-4 ring-rose-500/20 animate-pulse'
+                        : 'bg-purple-600 hover:bg-purple-700 text-white'
+                    }`}
+                  >
+                    {voice.isListening ? (
+                      <>
+                        <Square className="w-4 h-4 fill-white" />
+                        <span>Stop Speaking</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-4 h-4" />
+                        <span>{answerText.trim() ? 'Add More by Voice' : 'Start Speaking Answer'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {answerText.trim().length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => voice.resetTranscript()}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors flex items-center gap-1.5 cursor-pointer border border-purple-200 dark:border-purple-800/40"
+                      title="Clear transcript to record again"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Clear / Re-record</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Status feedback message */}
+                <div className="flex items-center gap-2 text-xs font-semibold">
+                  {voice.isListening ? (
+                    <span className="flex items-center gap-2 text-purple-700 dark:text-purple-300 animate-pulse">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block animate-ping" />
+                      <span>Listening... Speak your answer clearly</span>
+                    </span>
+                  ) : answerText.trim() ? (
+                    <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      <span>Transcript ready for review</span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Click &apos;Start Speaking&apos; to begin recording your spoken response
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Error Message if mic denied or unsupported */}
+              {voice.errorMessage && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 flex items-center gap-2 text-xs font-bold text-rose-700 dark:text-rose-300">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                  <span>{voice.errorMessage}</span>
+                </div>
+              )}
+
+              {/* Interim speech recognition preview */}
+              {voice.isListening && voice.interimText && (
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-800/60 text-xs italic text-purple-700 dark:text-purple-300 animate-in fade-in flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 shrink-0 text-purple-500 animate-bounce" />
+                  <span>Hearing: &quot;{voice.interimText}&quot;</span>
+                </div>
+              )}
+
+              {/* Transcript Review and Edit Textarea */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor={`interview-voice-transcript-q${currentQNum}`}
+                    className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5"
+                  >
+                    <span>Review &amp; Edit Spoken Transcript</span>
+                    <span className="text-[10px] font-medium text-slate-500 lowercase">
+                      (you can edit or fix technical terms before submitting)
+                    </span>
+                  </label>
+                </div>
+
+                <textarea
+                  id={`interview-voice-transcript-q${currentQNum}`}
+                  rows={8}
+                  value={answerText}
+                  disabled={isEvaluating}
+                  onChange={handleTextChange}
+                  placeholder="Your spoken words will appear here in real-time. Once finished speaking, review and edit the transcript here before clicking Submit Answer."
+                  className={`w-full p-4 rounded-2xl bg-white dark:bg-slate-950 border text-sm font-sans text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all resize-y leading-relaxed ${
+                    validationError
+                      ? 'border-rose-500 ring-1 ring-rose-500/30'
+                      : 'border-purple-200 dark:border-purple-800/60'
+                  }`}
+                />
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  💡 Tip: Spoken answers are converted to text and stored permanently. Only submitted transcripts are sent to Gemini for evaluation.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* TYPED INPUT PANEL */}
+          {inputMethod === 'text' && (
+            <textarea
+              id={`interview-answer-input-q${currentQNum}`}
+              rows={8}
+              value={answerText}
+              disabled={isEvaluating}
+              onChange={handleTextChange}
+              onPaste={(e) => {
                 e.preventDefault();
                 notifyBlockedPaste();
-              } else if (e.shiftKey && (e.key === 'Insert' || e.code === 'Insert')) {
+              }}
+              onDrop={(e) => {
                 e.preventDefault();
                 notifyBlockedPaste();
-              }
-            }}
-            placeholder="Type your answer here... (Explain definitions, memory layout, steps, and time/space complexity)"
-            className={`w-full p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border text-sm font-sans text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all resize-y leading-relaxed ${
-              validationError
-                ? 'border-rose-500 ring-1 ring-rose-500/30'
-                : 'border-slate-200 dark:border-slate-800'
-            }`}
-          />
+              }}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'v' || e.code === 'KeyV')) {
+                  e.preventDefault();
+                  notifyBlockedPaste();
+                } else if (e.shiftKey && (e.key === 'Insert' || e.code === 'Insert')) {
+                  e.preventDefault();
+                  notifyBlockedPaste();
+                }
+              }}
+              placeholder="Type your answer here... (Explain definitions, memory layout, steps, and time/space complexity)"
+              className={`w-full p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border text-sm font-sans text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all resize-y leading-relaxed ${
+                validationError
+                  ? 'border-rose-500 ring-1 ring-rose-500/30'
+                  : 'border-slate-200 dark:border-slate-800'
+              }`}
+            />
+          )}
 
           {/* Validation Error Message */}
           {validationError && (

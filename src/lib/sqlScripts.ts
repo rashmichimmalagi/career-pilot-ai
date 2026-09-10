@@ -231,6 +231,41 @@ CREATE POLICY "Users can delete own mock interviews" ON public.mock_interviews
 
 CREATE INDEX IF NOT EXISTS idx_mock_interviews_user_id ON public.mock_interviews(user_id);
 
+-- 3B. MOCK INTERVIEW ANSWERS & TRANSCRIPTS TABLE
+CREATE TABLE IF NOT EXISTS public.mock_interview_answers (
+  id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  question_id TEXT NOT NULL,
+  question_number INTEGER NOT NULL,
+  question_text TEXT NOT NULL,
+  answer_text TEXT NOT NULL,
+  input_method TEXT NOT NULL DEFAULT 'text', -- 'text' or 'voice'
+  evaluation JSONB,
+  score INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.mock_interview_answers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own mock interview answers" ON public.mock_interview_answers;
+CREATE POLICY "Users can view own mock interview answers" ON public.mock_interview_answers
+  FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own mock interview answers" ON public.mock_interview_answers;
+CREATE POLICY "Users can insert own mock interview answers" ON public.mock_interview_answers
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own mock interview answers" ON public.mock_interview_answers;
+CREATE POLICY "Users can update own mock interview answers" ON public.mock_interview_answers
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can delete own mock interview answers" ON public.mock_interview_answers;
+CREATE POLICY "Users can delete own mock interview answers" ON public.mock_interview_answers
+  FOR DELETE USING (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS idx_mock_interview_answers_user ON public.mock_interview_answers(user_id, session_id);
+
 -- 4. CODING SUBMISSIONS TABLE
 CREATE TABLE IF NOT EXISTS public.coding_submissions (
   id TEXT PRIMARY KEY,

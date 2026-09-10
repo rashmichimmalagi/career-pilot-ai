@@ -1079,10 +1079,11 @@ export const CodingPracticePage: React.FC<CodingPracticePageProps> = ({ onNaviga
         }
       }
 
-      // Check for newly unlocked achievements
+      // Check for newly unlocked achievements on genuine transition
       try {
         const allSubs = await codingService.getSubmissions(effectiveUserId);
-        const newlyUnlocked = checkNewlyUnlockedAchievements(allSubs, effectiveUserId);
+        const previousSubs = allSubs.filter((s) => s.id !== savedSubmission.id);
+        const newlyUnlocked = await checkNewlyUnlockedAchievements(allSubs, effectiveUserId, undefined, previousSubs);
         if (newlyUnlocked.length > 0) {
           setNewlyUnlockedAchievement(newlyUnlocked[0]);
         }

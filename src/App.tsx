@@ -29,6 +29,9 @@ import { ProgressAnalyticsPage } from './pages/ProgressAnalyticsPage';
 import { ResumePrintPage } from './pages/ResumePrintPage';
 import { ResumeEditorPage } from './pages/ResumeEditorPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { ProfileCompletionModal } from './components/profile/ProfileCompletionModal';
+import { FloatingAskAI } from './components/ai/FloatingAskAI';
+import { calculateProfileCompletion, isProfileComplete } from './services/profileService';
 import { Loader2 } from 'lucide-react';
 
 export function extractResumeIdFromPath(raw: string): string | null {
@@ -163,6 +166,79 @@ function AppContent() {
   // Custom router state synchronized with path
   const [currentPage, setCurrentPage] = useState<string>(getPathFromLocation);
   const [setupGuideOpen, setSetupGuideOpen] = useState(false);
+
+  // Authoritative profile completion status check for currently authenticated student
+  // Shares the exact calculation used by DashboardPage and ProfilePage
+  const isAuthenticated = !!user && user.id !== 'guest';
+  const profileCompletionStatus = calculateProfileCompletion(profile);
+  const profileCompletion = profileCompletionStatus.percentage;
+  const isProfileCompleteState = isProfileComplete(profile);
+
+  // Track session dismissal for current authenticated student
+  const [isProfileModalDismissed, setIsProfileModalDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined' || !user?.id) return false;
+    try {
+      return sessionStorage.getItem(`careerpilot_dismiss_profile_modal_${user.id}`) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Keep dismissal state synced with current authenticated user
+  useEffect(() => {
+    if (!user?.id) {
+      setIsProfileModalDismissed(false);
+      return;
+    }
+    try {
+      const dismissed = sessionStorage.getItem(`careerpilot_dismiss_profile_modal_${user.id}`) === 'true';
+      setIsProfileModalDismissed(dismissed);
+    } catch {
+      setIsProfileModalDismissed(false);
+    }
+  }, [user?.id]);
+
+  const handleDismissProfileModal = () => {
+    if (user?.id) {
+      try {
+        sessionStorage.setItem(`careerpilot_dismiss_profile_modal_${user.id}`, 'true');
+      } catch {
+        // Safe fallback in restricted environments
+      }
+    }
+    setIsProfileModalDismissed(true);
+  };
+
+  const handleCompleteProfileNavigation = () => {
+    handleDismissProfileModal();
+    navigateTo('profile');
+  };
+
+  // Exempt routes where the modal prompt is suppressed (e.g. user is already on profile or completing onboarding/auth)
+  const isExemptPage = [
+    'profile',
+    'onboarding',
+    'verify-email',
+    'reset-password',
+    'resume-print',
+    'auth',
+  ].includes(currentPage);
+
+  // Canonical rule:
+  // profileCompletion < 100
+  // AND authenticated user exists
+  // AND profile data has finished loading (not loading, not profileLoading, profile !== null)
+  // AND popup has not been dismissed in the current session
+  // -> SHOW POPUP
+  // profileCompletion === 100 -> DO NOT SHOW POPUP
+  const shouldShowProfileModal =
+    isAuthenticated &&
+    !loading &&
+    !profileLoading &&
+    profile !== null &&
+    profileCompletion < 100 &&
+    !isProfileModalDismissed &&
+    !isExemptPage;
 
   // Sync route with window pathname and query params
   const navigateTo = (target: string) => {
@@ -534,6 +610,20 @@ function AppContent() {
         syncSummary={syncSummary}
         onRetrySync={triggerSync}
         onNextQuote={nextQuote}
+      />
+
+      {/* Profile Completion Modal for Authenticated Students */}
+      <ProfileCompletionModal
+        isOpen={shouldShowProfileModal}
+        completionPercentage={profileCompletion}
+        onComplete={handleCompleteProfileNavigation}
+        onDismiss={handleDismissProfileModal}
+      />
+
+      {/* Floating Ask CareerPilot AI Assistant */}
+      <FloatingAskAI
+        onNavigate={navigateTo}
+        currentPage={currentPage}
       />
 
     </div>

@@ -1,83 +1,101 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   WifiOff,
   ShieldCheck,
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
-  ChevronRight,
   Minimize2,
   Maximize2,
-  Database,
   X,
   Code2,
-  FileText,
-  Briefcase,
-  Layers,
-  GraduationCap,
 } from 'lucide-react';
 import { SyncState } from '../../hooks/useNetworkInterruption';
-import { OfflineQuote } from '../../data/offlineQuotes';
+import { OfflineQuote, SOFTWARE_ENGINEERING_TIPS } from '../../data/offlineQuotes';
 
 interface OfflineNetworkBannerProps {
   isOnline: boolean;
   syncState: SyncState;
-  currentQuote: OfflineQuote;
-  pendingQueueCount: number;
-  isSyncing: boolean;
-  syncError: string | null;
+  currentQuote?: OfflineQuote;
+  pendingQueueCount?: number;
+  isSyncing?: boolean;
+  syncError?: string | null;
   syncSummary?: string | null;
-  onRetrySync: () => void;
-  onNextQuote: () => void;
+  onRetrySync?: () => void;
+  onNextQuote?: () => void;
 }
 
 export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
   isOnline,
   syncState,
-  currentQuote,
-  pendingQueueCount,
-  isSyncing,
+  isSyncing = false,
   syncError,
-  syncSummary,
   onRetrySync,
-  onNextQuote,
 }) => {
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
   const [isExplicitlyDismissed, setIsExplicitlyDismissed] = useState<boolean>(false);
+
+  // Rotating Software Engineering Tips state (initializes with a random starting tip)
+  const [currentTipIndex, setCurrentTipIndex] = useState<number>(() => {
+    return Math.floor(Math.random() * SOFTWARE_ENGINEERING_TIPS.length);
+  });
+  const rotationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const wasOnlineRef = useRef<boolean>(isOnline);
+
+  const clearRotationTimer = useCallback(() => {
+    if (rotationTimerRef.current) {
+      clearInterval(rotationTimerRef.current);
+      rotationTimerRef.current = null;
+    }
+  }, []);
+
+  const startRotationTimer = useCallback(() => {
+    clearRotationTimer();
+    // Automatically rotate tips sequentially every 10 seconds (10,000ms)
+    rotationTimerRef.current = setInterval(() => {
+      setCurrentTipIndex((prev) => (prev + 1) % SOFTWARE_ENGINEERING_TIPS.length);
+    }, 10000);
+  }, [clearRotationTimer]);
+
+  // When offline mode starts or resumes, start the 10-second timer.
+  // When connection restores or on unmount, clean up the timer.
+  useEffect(() => {
+    // When transitioning from online to offline, select a random starting tip
+    if (wasOnlineRef.current && !isOnline) {
+      setCurrentTipIndex(Math.floor(Math.random() * SOFTWARE_ENGINEERING_TIPS.length));
+    }
+    wasOnlineRef.current = isOnline;
+
+    if (!isOnline) {
+      startRotationTimer();
+    } else {
+      clearRotationTimer();
+    }
+
+    return () => {
+      clearRotationTimer();
+    };
+  }, [isOnline, startRotationTimer, clearRotationTimer]);
+
+  // Manual "Next Tip" advances sequentially immediately and cleanly restarts the 10-second timer
+  const handleManualNextTip = useCallback(() => {
+    setCurrentTipIndex((prev) => (prev + 1) % SOFTWARE_ENGINEERING_TIPS.length);
+    if (!isOnline) {
+      startRotationTimer();
+    }
+  }, [isOnline, startRotationTimer]);
 
   // If online and idle (no active sync notification), don't render anything
   if (isOnline && syncState === 'idle') {
     return null;
   }
 
-  // If user closed the restored banner, don't show unless state changes
+  // If user explicitly closed the restored banner, don't show unless state changes
   if (isExplicitlyDismissed && isOnline) {
     return null;
   }
 
-  // Category Icon Resolver
-  const renderCategoryIcon = () => {
-    switch (currentQuote.iconType) {
-      case 'coding':
-      case 'debugging':
-      case 'typescript':
-      case 'javascript':
-        return <Code2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />;
-      case 'resume':
-      case 'resumeanalysis':
-      case 'ats':
-        return <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />;
-      case 'techinterview':
-      case 'hrinterview':
-      case 'career':
-        return <Briefcase className="w-3.5 h-3.5 text-amber-400 shrink-0" />;
-      case 'placement':
-      case 'learning':
-        return <GraduationCap className="w-3.5 h-3.5 text-indigo-400 shrink-0" />;
-      default:
-        return <Layers className="w-3.5 h-3.5 text-purple-400 shrink-0" />;
-    }
-  };
+  const activeTip = SOFTWARE_ENGINEERING_TIPS[currentTipIndex] || SOFTWARE_ENGINEERING_TIPS[0];
 
   return (
     <div
@@ -125,16 +143,14 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
             </div>
           </div>
 
-          {/* Status-Aware Safety & Persistence Indicator */}
+          {/* Safety & Protected Indicator */}
           <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs">
             <div className="flex items-center gap-2 text-emerald-400 font-medium">
               <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-400" />
-              <span className="text-[11px]">
-                {pendingQueueCount > 0 ? 'Changes saved on this device' : 'Your CareerPilot data is safe'}
-              </span>
+              <span className="text-[11px]">Your CareerPilot data is safe</span>
             </div>
             <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">
-              {pendingQueueCount > 0 ? 'Offline changes saved' : 'Protected'}
+              Protected
             </span>
           </div>
 
@@ -142,37 +158,30 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
             <>
               {/* Context Explanation */}
               <p className="text-xs text-slate-300 leading-relaxed">
-                Your recent changes are safely queued and will sync when the connection returns. You can continue practicing problems and reviewing materials.
+                Your CareerPilot data is safe. Changes will sync when your connection returns.
               </p>
 
-              {pendingQueueCount > 0 && (
-                <div className="flex items-center gap-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg">
-                  <Database className="w-3.5 h-3.5 shrink-0" />
-                  <span>{pendingQueueCount} change{pendingQueueCount > 1 ? 's' : ''} queued to sync automatically once connected.</span>
-                </div>
-              )}
-
-              {/* Developer Tip Panel (Static display, manual next button, zero auto-rotation) */}
+              {/* Software Engineering Tip Panel with Automatic Rotation */}
               <div className="pt-2 border-t border-slate-800 space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                    {renderCategoryIcon()}
-                    <span className="truncate max-w-[190px]">{currentQuote.categoryLabel}</span>
+                  <span className="text-[11px] font-bold tracking-wider text-indigo-400 flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <span>Software Engineering Tip</span>
                   </span>
                   
                   <button
-                    onClick={onNextQuote}
+                    onClick={handleManualNextTip}
                     className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer bg-slate-800/60 hover:bg-slate-800 px-2.5 py-1 rounded-md border border-slate-700/50"
-                    title="Next developer tip"
-                    aria-label="Next developer tip"
+                    title="Next software engineering tip"
+                    aria-label="Next software engineering tip"
                   >
                     <span>Next Tip →</span>
                   </button>
                 </div>
 
-                {/* Tip Content - Stays indefinitely */}
-                <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-950/40 via-purple-950/20 to-slate-900/60 border border-indigo-500/20 text-xs text-slate-200 leading-relaxed">
-                  "{currentQuote.quote}"
+                {/* Tip Content - Automatically cycles every 10 seconds */}
+                <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-950/40 via-purple-950/20 to-slate-900/60 border border-indigo-500/20 text-xs text-slate-200 leading-relaxed transition-opacity duration-300">
+                  "{activeTip.quote}"
                 </div>
               </div>
             </>
@@ -195,7 +204,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
                   <span>🟡 SYNCING DATA</span>
                 </span>
                 <p className="text-[11px] text-slate-300">
-                  {syncState === 'reconnecting' ? 'Reconnecting to CareerPilot...' : 'Connection restored. Syncing your pending changes...'}
+                  {syncState === 'reconnecting' ? 'Reconnecting to CareerPilot...' : 'Connection restored. Resuming cloud synchronization...'}
                 </p>
               </div>
             </div>
@@ -225,8 +234,8 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
                 <span className="text-xs font-black tracking-wider uppercase text-emerald-400">
                   🟢 CONNECTION RESTORED
                 </span>
-                <p className="text-[11px] text-slate-200 font-semibold">
-                  {syncSummary || 'All changes synced successfully.'}
+                <p className="text-[11px] text-slate-200 font-medium">
+                  Your CareerPilot data is safe.
                 </p>
               </div>
             </div>
@@ -245,9 +254,6 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
               </button>
             </div>
           </div>
-          <p className="text-[11px] text-slate-400 pl-10.5">
-            Your submissions, notes, and practice progress are securely updated.
-          </p>
         </div>
       )}
 
@@ -266,7 +272,7 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
                   🟠 SYNC ATTENTION NEEDED
                 </span>
                 <p className="text-[11px] text-slate-300">
-                  {syncSummary || 'Connection restored, but some changes are still waiting to sync.'}
+                  Connection restored, but synchronization encountered an issue.
                 </p>
               </div>
             </div>
@@ -289,19 +295,22 @@ export const OfflineNetworkBanner: React.FC<OfflineNetworkBannerProps> = ({
 
           <div className="flex items-center justify-between gap-2 pt-1">
             <span className="text-[10px] text-slate-400">
-              {pendingQueueCount > 0 ? `${pendingQueueCount} change${pendingQueueCount > 1 ? 's' : ''} queued` : 'Data preserved locally'}
+              Your CareerPilot data is safe.
             </span>
-            <button
-              onClick={onRetrySync}
-              disabled={isSyncing}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Syncing...' : 'Retry Sync'}</span>
-            </button>
+            {onRetrySync && (
+              <button
+                onClick={onRetrySync}
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Retry Sync'}</span>
+              </button>
+            )}
           </div>
         </div>
       )}
     </div>
   );
 };
+

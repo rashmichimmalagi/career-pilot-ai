@@ -98,6 +98,9 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
   >('setup');
 
   // Active Interview Session Data
+  const [activeSessionId, setActiveSessionId] = useState<string>(
+    () => `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+  );
   const [questionsList, setQuestionsList] = useState<InterviewQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(1);
   const [recordedAnswers, setRecordedAnswers] = useState<Record<number, RecordedAnswer>>({});
@@ -369,6 +372,8 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
       questionCount: effectiveCount,
     }));
 
+    const newSessionId = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    setActiveSessionId(newSessionId);
     setInterviewState('generating');
     setGenerationError(null);
     setQuestionsList([]);
@@ -410,7 +415,11 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
   };
 
   // Save current answer draft to state
-  const handleSaveAnswer = (qNum: number, answerText: string) => {
+  const handleSaveAnswer = (
+    qNum: number,
+    answerText: string,
+    inputMethod: 'text' | 'voice' = 'text'
+  ) => {
     const trimmed = answerText.trim();
     const qObj = questionsList[qNum - 1];
 
@@ -428,6 +437,8 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
       language: qObj.language || config.language || 'C++',
       questionType: qObj.questionType || 'Conceptual',
       answerText: answerText,
+      input_method: inputMethod,
+      inputMethod: inputMethod,
       submittedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSkipped: trimmed.length === 0,
       isEvaluated: existing?.isEvaluated || false,
@@ -450,12 +461,18 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
   };
 
   // Submit single answer for AI evaluation (Phase 3)
-  const handleSubmitAnswer = async (qNum: number, answerText: string) => {
+  const handleSubmitAnswer = async (
+    qNum: number,
+    answerText: string,
+    inputMethod: 'text' | 'voice' = 'text'
+  ) => {
     const trimmed = answerText.trim();
     if (!trimmed) {
       showToast(
         '⚠️ Empty Answer',
-        'Please enter your answer before submitting.',
+        inputMethod === 'voice'
+          ? 'Please record or speak your answer before submitting.'
+          : 'Please enter your answer before submitting.',
         'warning',
         undefined,
         3000
@@ -474,6 +491,22 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
     const effectiveDifficulty = qObj.difficulty || config.difficulty;
     const effectiveLanguage = qObj.language || config.language || 'C++';
 
+    // 1. SAVE TRANSCRIPT TO SUPABASE BEFORE AI EVALUATION
+    // Ensures student's answer is preserved even if the AI evaluation call times out or fails
+    try {
+      await interviewStorage.saveAnswerTranscript({
+        userId: studentId,
+        sessionId: activeSessionId,
+        questionId: qObj.id,
+        questionNumber: qNum,
+        questionText: qObj.question,
+        answerText: trimmed,
+        inputMethod,
+      });
+    } catch (saveErr) {
+      console.warn('[TechnicalInterviewPage] Pre-eval transcript save warning:', saveErr);
+    }
+
     try {
       const evaluationResult = await interviewService.evaluateAnswer({
         question: qObj.question,
@@ -486,6 +519,23 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
         questionNumber: qNum,
       });
 
+      // 2. UPDATE TRANSCRIPT IN SUPABASE WITH EVALUATION & SCORE
+      try {
+        await interviewStorage.saveAnswerTranscript({
+          userId: studentId,
+          sessionId: activeSessionId,
+          questionId: qObj.id,
+          questionNumber: qNum,
+          questionText: qObj.question,
+          answerText: trimmed,
+          inputMethod,
+          evaluation: evaluationResult,
+          score: evaluationResult.score,
+        });
+      } catch (updateErr) {
+        console.warn('[TechnicalInterviewPage] Post-eval transcript update warning:', updateErr);
+      }
+
       const recorded: RecordedAnswer = {
         questionNumber: qNum,
         questionId: qObj.id,
@@ -497,6 +547,8 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
         language: effectiveLanguage,
         questionType: qObj.questionType || 'Conceptual',
         answerText: answerText,
+        input_method: inputMethod,
+        inputMethod: inputMethod,
         submittedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isSkipped: false,
         isEvaluated: true,
@@ -674,6 +726,8 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
             codeSnippet: qObj.codeSnippet,
             status: 'SKIPPED' as const,
             answerText: '',
+            input_method: 'text' as const,
+            inputMethod: 'text' as const,
             score: 0,
             scoreOutOf10: 0,
             feedback: 'This question was skipped. Skipped questions are tracked separately and not factored into the answered average.',
@@ -685,6 +739,7 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
         } else {
           // Check if already evaluated during the interview
           let evalData = rec?.evaluation;
+          const inputMethod = rec?.input_method || rec?.inputMethod || 'text';
 
           // If answer exists but was not yet evaluated individually, evaluate it now
           if (!evalData) {
@@ -748,6 +803,8 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
             codeSnippet: qObj.codeSnippet,
             status: 'ANSWERED' as const,
             answerText: rawAnswer,
+            input_method: inputMethod,
+            inputMethod: inputMethod,
             score: score10 * 10,
             scoreOutOf10: score10,
             feedback: evalData.improvement || 'Good technical explanation.',
@@ -825,7 +882,7 @@ export const TechnicalInterviewPage: React.FC<TechnicalInterviewPageProps> = ({
           ? 'Pass with Recommendations'
           : 'Needs Practice';
 
-      const interviewId = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const interviewId = activeSessionId || `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const completedIso = new Date().toISOString();
       const formattedDate = new Date().toLocaleDateString('en-US', {
         month: 'short',

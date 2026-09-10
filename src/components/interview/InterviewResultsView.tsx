@@ -25,6 +25,8 @@ import {
   MinusCircle,
   HelpCircle,
   MessageSquare,
+  Mic,
+  Keyboard,
 } from 'lucide-react';
 import {
   MockInterviewReport,
@@ -390,10 +392,25 @@ export const InterviewResultsView: React.FC<InterviewResultsViewProps> = ({
                             <span>— Skipped</span>
                           </span>
                         ) : (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                            <span>✓ Answered &bull; Score: {scoreOutOf10}/10</span>
-                          </span>
+                          <>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                              <span>✓ Answered &bull; Score: {scoreOutOf10}/10</span>
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 dark:bg-slate-850 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center gap-1">
+                              {qe.input_method === 'voice' || qe.inputMethod === 'voice' ? (
+                                <>
+                                  <Mic className="w-3 h-3 text-purple-500" />
+                                  <span>Voice</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Keyboard className="w-3 h-3 text-slate-500" />
+                                  <span>Typed</span>
+                                </>
+                              )}
+                            </span>
+                          </>
                         )}
                       </div>
                       <p className="font-bold text-xs sm:text-sm text-slate-900 dark:text-slate-100 line-clamp-2">

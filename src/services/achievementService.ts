@@ -1323,19 +1323,28 @@ export function calculateAchievements(
  * Strictly verifies state transition: previous state != UNLOCKED AND current state == UNLOCKED.
  * Persists permanent unlocked badge state and creates deduplicated notification.
  */
-export function checkNewlyUnlockedAchievements(
+export async function checkNewlyUnlockedAchievements(
   submissions: CodingSubmission[],
   userId: string = 'guest',
-  context?: MultiPillarAchievementContext
-): Achievement[] {
+  context?: MultiPillarAchievementContext,
+  previousSubmissions?: CodingSubmission[]
+): Promise<Achievement[]> {
+  if (!userId || userId === 'guest') return [];
+
   const permanentBadges = getPermanentUnlockedBadges(userId);
-  const summary = calculateAchievements(submissions, userId, context);
+  const currentSummary = calculateAchievements(submissions, userId, context);
   const nowIso = new Date().toISOString();
 
-  const newlyUnlocked: Achievement[] = [];
-  for (const ach of summary.achievements) {
-    const wasPermanentlyUnlocked = Boolean(permanentBadges[ach.id]);
+  // If previousSubmissions provided, evaluate previous state to detect genuine transitions
+  let wasUnlockedInPrev: ((id: string) => boolean) | null = null;
+  if (previousSubmissions && Array.isArray(previousSubmissions)) {
+    const prevSummary = calculateAchievements(previousSubmissions, userId, context);
+    const prevUnlockedSet = new Set(prevSummary.achievements.filter((a) => a.unlocked).map((a) => a.id));
+    wasUnlockedInPrev = (id: string) => prevUnlockedSet.has(id);
+  }
 
+  const newlyUnlocked: Achievement[] = [];
+  for (const ach of currentSummary.achievements) {
     // 1. Authoritative Unlock Check (UNIVERSAL FOR ALL ACHIEVEMENTS):
     // - Must be marked unlocked by calculateAchievements (ach.unlocked === true)
     // - Status must be 'UNLOCKED'
@@ -1351,47 +1360,66 @@ export function checkNewlyUnlockedAchievements(
       continue;
     }
 
-    // 2. Transition Check: Only newly unlocked if it was NOT unlocked before and is NOW strictly UNLOCKED
-    if (isStrictlyUnlocked && !wasPermanentlyUnlocked) {
-      // 3. Deterministic Idempotency Key: userId + achievementId + achievement unlock event
-      const dedupKey = `achievement_unlock_${userId}_${ach.id}`;
-      const dedupStorageKey = `careerpilot_notif_dedup_${userId}_${dedupKey}`;
+    // 2. Previous Completion Check:
+    // If it was already unlocked in previous state or stored as permanently unlocked, it is NOT a new transition
+    const wasAlreadyCompleted = wasUnlockedInPrev !== null
+      ? wasUnlockedInPrev(ach.id)
+      : Boolean(permanentBadges[ach.id]);
 
-      // Check if this deterministic event was already recorded
-      if (localStorage.getItem(dedupStorageKey)) {
-        savePermanentUnlockedBadge(userId, ach.id, nowIso);
-        continue;
-      }
+    if (wasAlreadyCompleted) {
+      continue;
+    }
 
-      savePermanentUnlockedBadge(userId, ach.id, nowIso);
+    // 3. Database Idempotency Check in Supabase
+    const dedupKey = `achievement_unlock_${userId}_${ach.id}`;
+    const safeUid = userId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
+    const deterministicId = `notif_ach_${safeUid}_${ach.id}`;
+
+    if (isSupabaseConfigured()) {
       try {
-        localStorage.setItem(dedupStorageKey, nowIso);
-      } catch (_) {}
+        const { data: existingNotifs, error: checkErr } = await supabase
+          .from('notifications')
+          .select('id')
+          .eq('user_id', userId)
+          .or(`dedup_key.eq.${dedupKey},id.eq.${deterministicId}`)
+          .limit(1);
 
-      newlyUnlocked.push({
-        ...ach,
-        unlockedAt: nowIso,
-      });
-
-      if (userId && userId !== 'guest') {
-        notificationService
-          .createNotification(userId, {
-            type: 'achievement',
-            category: 'ACHIEVEMENT',
-            priority: 'high',
-            title: '🏆 Achievement Unlocked!',
-            message: `Congratulations! You unlocked the "${ach.name}" achievement badge.`,
-            action_url: '/coding?tab=achievements',
-            action_label: 'View Achievements',
-            dedup_key: dedupKey,
-            metadata: {
-              achievement_id: ach.id,
-              achievement_name: ach.name,
-              category: ach.category,
-            },
-          })
-          .catch(() => {});
+        if (!checkErr && existingNotifs && existingNotifs.length > 0) {
+          // Already created in database — record in permanent badges and skip creating duplicate
+          savePermanentUnlockedBadge(userId, ach.id, nowIso);
+          continue;
+        }
+      } catch (err) {
+        console.warn('[AchievementService] Idempotency check notice:', err);
       }
+    }
+
+    // 4. Genuine transition (incomplete -> completed):
+    savePermanentUnlockedBadge(userId, ach.id, nowIso);
+
+    newlyUnlocked.push({
+      ...ach,
+      unlockedAt: nowIso,
+    });
+
+    try {
+      await notificationService.createNotification(userId, {
+        type: 'achievement',
+        category: 'ACHIEVEMENT',
+        priority: 'high',
+        title: '🏆 Achievement Unlocked!',
+        message: `Congratulations! You unlocked the "${ach.name}" achievement badge.`,
+        action_url: '/coding?tab=achievements',
+        action_label: 'View Achievements',
+        dedup_key: dedupKey,
+        metadata: {
+          achievement_id: ach.id,
+          achievement_name: ach.name,
+          category: ach.category,
+        },
+      });
+    } catch (createErr) {
+      console.warn('[AchievementService] Error creating unlock notification:', createErr);
     }
   }
 
@@ -1415,16 +1443,21 @@ export async function sanitizeAndCleanAchievementNotifications(
   }
 
   try {
-    // 1. Resolve submissions to evaluate authoritative state
+    // 1. Resolve authoritative submissions to evaluate authoritative state
     let effectiveSubmissions = submissions;
     if (!effectiveSubmissions || effectiveSubmissions.length === 0) {
       try {
-        const localKey = `careerpilot_subs_${userId}`;
-        const raw = localStorage.getItem(localKey);
-        if (raw) {
-          effectiveSubmissions = JSON.parse(raw);
-        }
-      } catch (_) {}
+        const { codingService } = await import('./codingService');
+        effectiveSubmissions = await codingService.getSubmissions(userId);
+      } catch (_) {
+        try {
+          const localKey = `careerpilot_subs_${userId}`;
+          const raw = localStorage.getItem(localKey);
+          if (raw) {
+            effectiveSubmissions = JSON.parse(raw);
+          }
+        } catch (_) {}
+      }
     }
 
     const summary = calculateAchievements(effectiveSubmissions || [], userId);
@@ -1457,6 +1490,7 @@ export async function sanitizeAndCleanAchievementNotifications(
     if (badgesCleaned) {
       try {
         localStorage.setItem(`careerpilot_unlocked_badges_${userId}`, JSON.stringify(permanentBadges));
+        persistenceManager.saveAchievements(userId, permanentBadges).catch(() => {});
       } catch (_) {}
     }
 
@@ -1469,7 +1503,13 @@ export async function sanitizeAndCleanAchievementNotifications(
 
     for (const notif of notifications) {
       // Non-achievement notifications: deduplicate by id and preserve
-      if (notif.category !== 'ACHIEVEMENT' && notif.type !== 'achievement') {
+      const isAchNotif =
+        notif.category === 'ACHIEVEMENT' ||
+        notif.type === 'achievement' ||
+        (notif.title && notif.title.includes('Achievement Unlocked')) ||
+        (notif.dedup_key && notif.dedup_key.startsWith('achievement'));
+
+      if (!isAchNotif) {
         if (!seenIds.has(notif.id)) {
           seenIds.add(notif.id);
           cleanedList.push(notif);
@@ -1480,13 +1520,17 @@ export async function sanitizeAndCleanAchievementNotifications(
       // Achievement notification: resolve target achievement
       let achId = notif.metadata?.achievement_id;
       if (!achId && notif.dedup_key) {
-        const m = notif.dedup_key.match(/achievement(?:_unlock_[^_]+)?_([a-zA-Z0-9_]+)/);
-        if (m) achId = m[1];
-      }
-      if (!achId && notif.message) {
-        const lower = notif.message.toLowerCase();
         for (const a of summary.achievements) {
-          if (lower.includes(a.name.toLowerCase())) {
+          if (notif.dedup_key.endsWith(`_${a.id}`) || notif.dedup_key === `achievement_${a.id}`) {
+            achId = a.id;
+            break;
+          }
+        }
+      }
+      if (!achId && (notif.message || notif.title)) {
+        const text = `${notif.title || ''} ${notif.message || ''}`.toLowerCase();
+        for (const a of summary.achievements) {
+          if (text.includes(a.name.toLowerCase())) {
             achId = a.id;
             break;
           }
@@ -1532,14 +1576,14 @@ export async function sanitizeAndCleanAchievementNotifications(
 
     // 4. Asynchronously purge invalid / duplicate notifications from Supabase
     if (invalidNotificationIds.length > 0 && isSupabaseConfigured()) {
-      (async () => {
-        try {
-          await supabase
-            .from('notifications')
-            .delete()
-            .in('id', invalidNotificationIds);
-        } catch (_) {}
-      })();
+      try {
+        await supabase
+          .from('notifications')
+          .delete()
+          .in('id', invalidNotificationIds);
+      } catch (purgeErr) {
+        console.warn('[AchievementService] Error purging invalid notifications from Supabase:', purgeErr);
+      }
     }
 
     // 5. Update local cache

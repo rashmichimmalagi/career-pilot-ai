@@ -12,6 +12,8 @@ import {
   Terminal,
   Loader2,
   FileText,
+  Mic,
+  Keyboard,
 } from 'lucide-react';
 import {
   InterviewQuestion,
@@ -210,6 +212,22 @@ export const InterviewReviewView: React.FC<InterviewReviewViewProps> = ({
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 flex items-center gap-1">
                         <AlertTriangle className="w-3 h-3 text-amber-500" />
                         <span>Skipped / Not Answered</span>
+                      </span>
+                    )}
+
+                    {hasAnswer && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center gap-1">
+                        {ans?.input_method === 'voice' || ans?.inputMethod === 'voice' ? (
+                          <>
+                            <Mic className="w-3 h-3 text-purple-500" />
+                            <span>Voice Transcript</span>
+                          </>
+                        ) : (
+                          <>
+                            <Keyboard className="w-3 h-3 text-slate-500" />
+                            <span>Typed</span>
+                          </>
+                        )}
                       </span>
                     )}
 

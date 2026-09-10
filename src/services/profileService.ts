@@ -118,7 +118,7 @@ export function calculateProfileCompletion(profile?: Profile | ProfileFormData |
     percentage: totalPercentage,
     completedFieldsCount: completedFields,
     totalFieldsCount: totalFields,
-    isComplete: totalPercentage >= 90,
+    isComplete: totalPercentage === 100,
     missingFields,
     sectionScores: {
       personal: Math.round(personalScore * 5),
@@ -130,7 +130,20 @@ export function calculateProfileCompletion(profile?: Profile | ProfileFormData |
   };
 }
 
+/**
+ * Determine profile completion based on the canonical profile completion calculation.
+ * Strictly uses calculateProfileCompletion so that the dashboard and completion modals
+ * share the exact same authoritative source of truth.
+ * Returns true ONLY when profile completion reaches 100%.
+ */
+export function isProfileComplete(profile?: Profile | ProfileFormData | null): boolean {
+  if (!profile) return false;
+  const completion = calculateProfileCompletion(profile);
+  return completion.percentage === 100;
+}
+
 export const profileService = {
+  isProfileComplete,
   /**
    * Helper to load extended local profile cache
    */

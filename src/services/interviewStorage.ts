@@ -317,5 +317,103 @@ export const interviewStorage = {
       return [];
     }
   },
+
+  /**
+   * Permanently save an individual answer transcript into Supabase (mock_interview_answers table).
+   * Ensures speech-to-text transcripts and typed answers are stored immediately BEFORE/during AI evaluation
+   * so answers are never lost if evaluation fails.
+   */
+  async saveAnswerTranscript(params: {
+    userId?: string;
+    sessionId: string;
+    questionId: string;
+    questionNumber: number;
+    questionText: string;
+    answerText: string;
+    inputMethod: 'text' | 'voice';
+    evaluation?: any;
+    score?: number;
+  }): Promise<{ success: boolean; id?: string }> {
+    const answerId = `ans_${params.sessionId}_q${params.questionNumber}`;
+    const nowIso = new Date().toISOString();
+
+    if (!isSupabaseConfigured()) {
+      return { success: true, id: answerId };
+    }
+
+    try {
+      // 1. Resolve authentic user ID from Supabase session for strict RLS compliance
+      let activeUserId: string | null = null;
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) activeUserId = user.id;
+      } catch (_) {}
+
+      if (!activeUserId) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user?.id) activeUserId = session.user.id;
+        } catch (_) {}
+      }
+
+      const effectiveUserId = activeUserId || (params.userId && params.userId !== 'guest' ? params.userId : null);
+
+      if (!effectiveUserId) {
+        return { success: true, id: answerId };
+      }
+
+      // 2. Persist to mock_interview_answers table with RLS enforcement
+      const payload = {
+        id: answerId,
+        user_id: effectiveUserId,
+        session_id: params.sessionId,
+        question_id: params.questionId || `q_${params.questionNumber}`,
+        question_number: params.questionNumber,
+        question_text: params.questionText,
+        answer_text: params.answerText,
+        input_method: params.inputMethod,
+        evaluation: params.evaluation || null,
+        score: typeof params.score === 'number' ? params.score : null,
+        updated_at: nowIso,
+      };
+
+      const { error } = await supabase
+        .from('mock_interview_answers')
+        .upsert(payload, { onConflict: 'id' });
+
+      if (error) {
+        // Table might not exist yet or network error; gracefully log
+        console.warn('[interviewStorage] mock_interview_answers table notice:', error.message);
+      }
+
+      return { success: !error, id: answerId };
+    } catch (err) {
+      console.warn('[interviewStorage] saveAnswerTranscript exception:', err);
+      return { success: false, id: answerId };
+    }
+  },
+
+  /**
+   * Fetch all answer transcripts for a specific interview session from Supabase
+   */
+  async fetchAnswerTranscripts(sessionId: string): Promise<any[]> {
+    if (!isSupabaseConfigured() || !sessionId) return [];
+
+    try {
+      const { data, error } = await supabase
+        .from('mock_interview_answers')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('question_number', { ascending: true });
+
+      if (!error && Array.isArray(data)) {
+        return data;
+      }
+    } catch (err) {
+      console.warn('[interviewStorage] fetchAnswerTranscripts notice:', err);
+    }
+    return [];
+  },
 };
+
 

@@ -303,7 +303,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({ onNavigate }) => {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="inline-flex items-center px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider">
-                  <span>Developed By</span>
+                  <span>DEVELOPED BY</span>
                 </div>
                 <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
